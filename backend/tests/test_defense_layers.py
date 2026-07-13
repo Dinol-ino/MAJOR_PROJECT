@@ -46,5 +46,35 @@ class TestDefenseLayers(unittest.TestCase):
         self.assertFalse(is_valid)
         self.assertIn("Grounding check failed", reason)
 
+    def test_audit_logger_verification(self):
+        import tempfile
+        import shutil
+        import os
+        import sqlite3
+        from app.defense.audit_log import AuditLogger
+        
+        temp_dir = tempfile.mkdtemp()
+        db_path = os.path.join(temp_dir, "test_audit.db")
+        try:
+            logger = AuditLogger(db_path)
+            
+            # Log some actions
+            logger.log("action_1")
+            logger.log("action_2", layer="layer1")
+            logger.log("action_3")
+            
+            # Verify chain is correct
+            self.assertTrue(logger.verify_chain())
+            
+            # Corrupt the chain by changing a value directly in the DB
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("UPDATE audit_logs SET action = 'tampered_action' WHERE id = 2")
+                conn.commit()
+                
+            # Verify chain detects corruption
+            self.assertFalse(logger.verify_chain())
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 if __name__ == "__main__":
     unittest.main()
