@@ -1,0 +1,8 @@
+CHAPTER I - PRELIMINARY
+Section 1. Short title, extent, commencement and application. - (1) This Act may be called the Information Technology Act, 2000.
+(2) It shall extend to the whole of India.
+
+CHAPTER II - OFFENCES AND PUNISHMENTS
+Section 43. Penalty and compensation for damage to computer, computer system, etc. - If any person without permission of the owner or any other person who is incharge of a computer...
+Section 66. Computer related offences. - If any person, dishonestly or fraudulently, does any act referred to in section 43, he shall be punishable with imprisonment for a term which may extend to three years or with fine which may extend to five lakh rupees, or with both.
+Section 67. Punishment for publishing or transmitting obscene material in electronic form. - Whoever publishes or transmits or causes to be published or transmitted in the electronic form, any material which is lascivious or appeals to the prurient interest...

@@ -1,13 +1,13 @@
 # Phase 2: Integration (H7 - H9, All)
 
 - **Owners**: Person A (Frontend), Sweedan (RAG Core), Dinol (Defense & Security)
-- **Status**: Route Integration Complete (Mock/Stubs Active; Sweedan DB Ingestion Pending)
+- **Status**: Complete
 - **Blocked-by**: Phase 1
 
 ## Task Checklist
-- `[/]` [Sweedan & Dinol] Connect FastAPI routes to the RAG core search interface and model runtime inference. (Dinol: Complete using stub retrievers; Sweedan: Pending real vector implementation).
-- `[ ]` [All] Wire React frontend calls to `/upload`, `/chat`, and `/recommend` FastAPI endpoints.
-- `[ ]` [Sweedan] Ingest 3-5 raw acts into Tier-1 database (`data/acts_raw/` txt files).
+- `[x]` [Sweedan & Dinol] Connect FastAPI routes to the RAG core search interface and model runtime inference.
+- `[x]` [All] Wire React frontend calls to `/upload`, `/chat`, and `/recommend` FastAPI endpoints.
+- `[x]` [Sweedan] Ingest 3-5 raw acts into Tier-1 database (`data/acts_raw/` txt files).
 - `[x]` [Dinol] Connect SQLite logger to save audit entries for every chat query and PDF ingestion.
 
 ## Resumability Notes for Agents

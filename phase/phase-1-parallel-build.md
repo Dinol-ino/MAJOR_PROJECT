@@ -5,12 +5,12 @@
 - **Blocked-by**: Phase 0
 
 ## Sweedan: RAG Core & Ingestion
-- `[ ]` Implement Section-Aware Metadata Extractor & Chunker (`chunker.py` & `pageindex.py`)
-- `[ ]` Implement PDF secure reader with size validation limits (`pdf_extract.py`)
-- `[ ]` Implement Tier-1 Law DB and Tier-2 User collections retrieval (`tier1_law.py` & `tier2_user.py`)
-- `[ ]` Implement Reciprocal Rank Fusion BM25 + dense ranking logic (`hybrid_rank.py`)
-- `[ ]` Implement database seeding logic parsing local acts text files (`seed_tier1.py`)
-- `[ ]` Verify RAG retrieval logic via unit tests (`test_retrieval.py`)
+- `[x]` Implement Section-Aware Metadata Extractor & Chunker (`chunker.py` & `pageindex.py`)
+- `[x]` Implement PDF secure reader with size validation limits (`pdf_extract.py`)
+- `[x]` Implement Tier-1 Law DB and Tier-2 User collections retrieval (`tier1_law.py` & `tier2_user.py`)
+- `[x]` Implement Reciprocal Rank Fusion BM25 + dense ranking logic (`hybrid_rank.py`)
+- `[x]` Implement database seeding logic parsing local acts text files (`seed_tier1.py`)
+- `[x]` Verify RAG retrieval logic via unit tests (`test_retrieval.py`)
 
 ## Dinol: Defense, Model & Logs
 - `[x]` Implement Input Guard with length, jailbreak regex, and SQL probe regex (`layer1_input_guard.py`)

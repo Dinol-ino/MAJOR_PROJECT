@@ -1,5 +1,7 @@
 import os
 import sys
+import chromadb
+from chromadb.utils import embedding_functions
 
 # Ensure backend/app folder can be imported
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
@@ -28,6 +30,21 @@ def seed_database():
         print("No raw act files found to seed. Put Indian Contract Act or IT Act text files in data/acts_raw.")
         return
 
+    # Set up Chroma Client
+    client = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
+    emb_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name="BAAI/bge-small-en"
+    )
+    
+    # Wipe database first for a clean seed
+    try:
+        client.delete_collection("tier1_law")
+        print("Cleared existing tier1_law collection.")
+    except Exception:
+        pass
+        
+    collection = client.get_or_create_collection("tier1_law", embedding_function=emb_fn)
+
     chunker = SectionAwareChunker()
     for file_name in files:
         act_name = os.path.splitext(file_name)[0]
@@ -39,12 +56,16 @@ def seed_database():
         chunks = chunker.chunk_document(content, act_name=act_name)
         print(f"Parsed {len(chunks)} chunks for {act_name}.")
         
-        # Here we would initialize ChromaDB client and load chunks:
-        # client = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
-        # collection = client.get_or_create_collection("tier1_law")
-        # collection.add(documents=..., metadatas=..., ids=...)
-        
+        if chunks:
+            documents = [c["text"] for c in chunks]
+            metadatas = [{"act": c["act"], "section": str(c["section"])} for c in chunks]
+            ids = [f"{act_name}_{c['section']}_{i}" for i, c in enumerate(chunks)]
+            
+            collection.add(documents=documents, metadatas=metadatas, ids=ids)
+            print(f"Successfully loaded {len(chunks)} chunks into ChromaDB for {act_name}.")
+            
     print("Tier-1 Database seeding completed successfully.")
 
 if __name__ == "__main__":
     seed_database()
+
