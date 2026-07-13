@@ -1,0 +1,45 @@
+# Python Junk
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+.venv/
+env/
+*.egg-info/
+.mypy_cache/
+
+# Node/React/Vite Junk
+node_modules/
+dist/
+dist-ssr/
+*.local
+.eslintcache
+.vite/
+
+# Databases and Vector Stores (Local Persistence)
+chroma_db/
+*.db
+*.db-journal
+
+# Secrets & Environment Files
+.env
+.env*.local
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# OS Junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# User/Local test acts
+project/data/acts_raw/*.txt
+!project/data/acts_raw/.gitkeep
