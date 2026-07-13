@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma-data:/workspace/chroma_db
+      - sqlite-data:/workspace/db
+    environment:
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - DEFAULT_MODEL=qwen2.5:3b
+      - CHROMA_PERSIST_DIR=/workspace/chroma_db
+      - SQLITE_DB_PATH=/workspace/db/audit_log.db
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  chroma-data:
+  sqlite-data:
