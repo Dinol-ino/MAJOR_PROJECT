@@ -1,0 +1,79 @@
+.shield-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  margin-bottom: 20px;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.shield-active {
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
+}
+
+.shield-inactive {
+  border-color: rgba(239, 68, 68, 0.4);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+}
+
+.shield-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.shield-label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.shield-status {
+  font-family: var(--font-title);
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.status-on {
+  color: var(--safe-color);
+  text-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+
+.status-off {
+  color: var(--danger-color);
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+  animation: pulse-warn 1.5s infinite alternate;
+}
+
+.shield-button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border);
+  padding: 10px 16px;
+  border-radius: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-active {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: var(--safe-color);
+}
+
+.btn-inactive {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: var(--danger-color);
+}
+
+@keyframes pulse-warn {
+  0% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 1;
+  }
+}
