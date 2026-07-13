@@ -1,10 +1,13 @@
-# Phase 0: Setup (H0 - H1, All Three)
+# Phase 0: Setup (H0 - H1)
 
-- **Owners**: Person A (Frontend), Person B (RAG Core), Person C (Defense/Security)
-- **Deliverables**:
-  - Repo initialized with proper skeleton.
-  - API schemas frozen in `backend/app/schemas.py` and `skills/api-contract.md`.
-  - Docker Compose configured with basic service definitions.
-- **Acceptance Criteria**:
-  - All three can run `docker compose up` and get a 200 response on `/chat` with a stub response.
-- **Blocked-by**: None (Initial state).
+- **Owners**: Person A (Frontend), Sweedan (RAG Core), Dinol (Defense & Security)
+- **Status**: Completed (Skeleton initialized and verified)
+- **Blocked-by**: None
+
+## Task Checklist
+- `[x]` [All] Repo initialized inside git repository `c:\defensive_rag\project\`.
+- `[x]` [All] API contract schemas frozen in `backend/app/schemas.py` and `skills/api-contract.md`.
+- `[x]` [All] Basic project configuration structure generated (FastAPI routing stub, Dockerfiles, and Docker Compose).
+
+## Resumability Notes
+- Fully completed by AI agent startup. Backend API successfully tested with 200 responses.
