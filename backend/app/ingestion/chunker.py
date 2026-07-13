@@ -1,5 +1,5 @@
-import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from app.retrieval.pageindex import PageIndexBuilder
 
 class SectionAwareChunker:
     """
@@ -8,36 +8,43 @@ class SectionAwareChunker:
     """
     def __init__(self, default_act_name: str = "Document"):
         self.default_act_name = default_act_name
+        self.builder = PageIndexBuilder()
 
     def chunk_document(self, text: str, act_name: Optional[str] = None) -> List[Dict[str, Any]]:
         act = act_name or self.default_act_name
-        chunks = []
+        sections = self.builder.extract_section_headers(text)
         
-        # Simple section header split (e.g., 'Section 66' or 'Sec. 66' or 'CHAPTER IV')
-        pattern = r"(?i)(?:Section|Sec\.)\s*(\d+[A-Z]*)"
-        
-        # Find all occurrences of Section headings
-        splits = list(re.finditer(pattern, text))
-        
-        if not splits:
-            # Fallback to single chunk
-            return [{
+        if not sections:
+            # Fallback to character-based chunking with overlap
+            chunk_size = 1000
+            overlap = 200
+            chunks = []
+            text_len = len(text)
+            start = 0
+            chunk_idx = 1
+            while start < text_len:
+                end = min(start + chunk_size, text_len)
+                chunk_text = text[start:end].strip()
+                if chunk_text:
+                    chunks.append({
+                        "act": act,
+                        "section": f"Chunk {chunk_idx}",
+                        "text": chunk_text
+                    })
+                    chunk_idx += 1
+                start += chunk_size - overlap
+            return chunks if chunks else [{
                 "act": act,
                 "section": "General",
                 "text": text.strip()
             }]
             
-        for i, match in enumerate(splits):
-            section_num = match.group(1)
-            start_idx = match.start()
-            end_idx = splits[i+1].start() if i + 1 < len(splits) else len(text)
-            
-            chunk_content = text[start_idx:end_idx].strip()
+        chunks = []
+        for sec in sections:
             chunks.append({
                 "act": act,
-                "section": section_num,
-                "text": chunk_content
+                "section": sec["section"],
+                "text": sec["text"]
             })
-            
         return chunks
-from typing import Optional
+

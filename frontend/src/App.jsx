@@ -11,10 +11,16 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
 
-  // Generate a random session ID on load
-  useEffect(() => {
+  const startNewSession = () => {
     const randomId = Math.random().toString(36).substring(2, 8).toUpperCase();
     setSessionId(randomId);
+    setMessages([]);
+    setAuditLogs([]);
+  };
+
+  // Generate a random session ID on load
+  useEffect(() => {
+    startNewSession();
   }, []);
 
   const handleSendMessage = async (text) => {
@@ -76,6 +82,28 @@ export default function App() {
       <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '24px' }}>
         {/* Sidebar Controls */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <button
+            type="button"
+            onClick={startNewSession}
+            style={{
+              background: 'var(--accent-color)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              fontWeight: '600',
+              fontFamily: 'var(--font-title)',
+              fontSize: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              boxShadow: 'var(--shadow-glow)',
+            }}
+          >
+            <span>🆕</span> Start New Session
+          </button>
+          
           <ShieldToggle shieldOn={shieldOn} onToggle={setShieldOn} />
           
           <HardwareForm onModelRecommended={setSelectedModel} />

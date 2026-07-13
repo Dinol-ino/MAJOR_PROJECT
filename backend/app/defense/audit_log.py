@@ -67,3 +67,27 @@ class AuditLogger:
             cursor.execute("SELECT ts, action, layer, hash, prev_hash FROM audit_logs ORDER BY id ASC")
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
+
+    def verify_chain(self) -> bool:
+        """
+        Verifies the cryptographic integrity of the entire audit log chain.
+        Returns:
+            bool: True if the chain is unbroken and valid, False otherwise.
+        """
+        rows = self.fetch_all()
+        expected_prev_hash = "0000000000000000000000000000000000000000000000000000000000000000"
+        
+        for row in rows:
+            if row["prev_hash"] != expected_prev_hash:
+                return False
+                
+            layer_str = str(row["layer"]) if row["layer"] else "null"
+            hash_input = f"{row['ts']}|{row['action']}|{layer_str}|{row['prev_hash']}"
+            computed_hash = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
+            
+            if row["hash"] != computed_hash:
+                return False
+                
+            expected_prev_hash = row["hash"]
+            
+        return True
