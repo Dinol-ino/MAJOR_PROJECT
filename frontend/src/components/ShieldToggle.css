@@ -2,78 +2,99 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 24px;
-  margin-bottom: 20px;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: var(--space-2);
+  transition: border-color var(--transition-fast);
 }
 
 .shield-active {
-  border-color: rgba(16, 185, 129, 0.4);
-  box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.25);
 }
 
 .shield-inactive {
-  border-color: rgba(239, 68, 68, 0.4);
-  box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.25);
 }
 
 .shield-info {
   display: flex;
   flex-direction: column;
+  gap: 4px;
 }
 
 .shield-label {
-  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.8125rem;
+  font-weight: 500;
   color: var(--text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
+}
+
+.shield-label svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
 }
 
 .shield-status {
-  font-family: var(--font-title);
-  font-size: 1.25rem;
-  font-weight: 700;
-  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-top: 2px;
 }
 
 .status-on {
-  color: var(--safe-color);
-  text-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  color: var(--color-success);
 }
 
 .status-off {
-  color: var(--danger-color);
-  text-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
-  animation: pulse-warn 1.5s infinite alternate;
+  color: var(--color-danger);
 }
 
-.shield-button {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--panel-border);
-  padding: 10px 16px;
-  border-radius: 30px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Toggle Switch */
+.shield-toggle {
   position: relative;
-  overflow: hidden;
+  width: 44px;
+  height: 24px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  flex-shrink: 0;
+  padding: 0;
 }
 
-.btn-active {
+.shield-toggle::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform var(--transition-fast), background-color var(--transition-fast);
+}
+
+.shield-toggle.toggle-active {
   background: rgba(16, 185, 129, 0.15);
-  border-color: var(--safe-color);
+  border-color: rgba(16, 185, 129, 0.3);
 }
 
-.btn-inactive {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: var(--danger-color);
+.shield-toggle.toggle-active::after {
+  transform: translateX(20px);
+  background: var(--color-success);
 }
 
-@keyframes pulse-warn {
-  0% {
-    opacity: 0.7;
-  }
-  100% {
-    opacity: 1;
-  }
+.shield-toggle.toggle-inactive {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.shield-toggle.toggle-inactive::after {
+  background: var(--color-danger);
 }

@@ -35,7 +35,7 @@ export default function UploadButton({ sessionId, onUploadSuccess }) {
   };
 
   return (
-    <div className="upload-container">
+    <div>
       <input
         type="file"
         ref={fileInputRef}
@@ -47,20 +47,17 @@ export default function UploadButton({ sessionId, onUploadSuccess }) {
         type="button"
         disabled={isUploading}
         onClick={() => fileInputRef.current?.click()}
-        className="upload-button"
+        className="btn-icon"
+        title={isUploading ? 'Uploading...' : 'Upload PDF document'}
         style={{
-          background: 'rgba(255, 255, 255, 0.05)',
-          border: '1px solid var(--panel-border)',
-          borderRadius: '8px',
-          padding: '10px 16px',
-          color: 'var(--text-primary)',
-          display: 'flex',
-          align_items: 'center',
-          gap: '8px',
+          opacity: isUploading ? 0.5 : 1,
         }}
       >
-        <span>📁</span>
-        <span>{isUploading ? 'Ingesting PDF...' : 'Upload PDF'}</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" x2="12" y1="3" y2="15"/>
+        </svg>
       </button>
     </div>
   );

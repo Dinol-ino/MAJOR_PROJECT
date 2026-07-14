@@ -25,77 +25,81 @@ export default function HardwareForm({ onModelRecommended }) {
   };
 
   return (
-    <div className="hardware-form-container glass-panel" style={{ padding: '20px', marginBottom: '20px' }}>
-      <h3 style={{ fontFamily: 'var(--font-title)', marginBottom: '12px' }}>💻 Hardware Model Recommender</h3>
-      <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '16px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>System RAM (GB)</label>
-          <select 
-            value={ram} 
-            onChange={(e) => setRam(parseInt(e.target.value))}
-            style={{
-              background: '#1e293b',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--panel-border)',
-              borderRadius: '8px',
-              padding: '8px 12px',
-            }}
-          >
-            <option value={4}>4 GB</option>
-            <option value={8}>8 GB</option>
-            <option value={16}>16 GB</option>
-            <option value={32}>32 GB</option>
-            <option value={64}>64 GB</option>
-          </select>
+    <div className="card" style={{ padding: 'var(--space-2)' }}>
+      <div className="section-header">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg>
+        <span className="section-title">Hardware Recommendation</span>
+      </div>
+
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-1)' }}>
+          <div>
+            <label className="label">System RAM</label>
+            <select
+              className="select"
+              value={ram}
+              onChange={(e) => setRam(parseInt(e.target.value))}
+              style={{ width: '100%' }}
+            >
+              <option value={4}>4 GB</option>
+              <option value={8}>8 GB</option>
+              <option value={16}>16 GB</option>
+              <option value={32}>32 GB</option>
+              <option value={64}>64 GB</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">VRAM / GPU</label>
+            <select
+              className="select"
+              value={vram}
+              onChange={(e) => setVram(parseInt(e.target.value))}
+              style={{ width: '100%' }}
+            >
+              <option value={0}>No GPU</option>
+              <option value={2}>2 GB</option>
+              <option value={4}>4 GB</option>
+              <option value={8}>8 GB</option>
+              <option value={12}>12 GB</option>
+              <option value={16}>16 GB+</option>
+            </select>
+          </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>VRAM / GPU (GB)</label>
-          <select 
-            value={vram} 
-            onChange={(e) => setVram(parseInt(e.target.value))}
-            style={{
-              background: '#1e293b',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--panel-border)',
-              borderRadius: '8px',
-              padding: '8px 12px',
-            }}
-          >
-            <option value={0}>No GPU (CPU-only)</option>
-            <option value={2}>2 GB</option>
-            <option value={4}>4 GB</option>
-            <option value={8}>8 GB</option>
-            <option value={12}>12 GB</option>
-            <option value={16}>16 GB+</option>
-          </select>
-        </div>
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            background: 'var(--accent-color)',
-            border: 'none',
-            borderRadius: '8px',
-            padding: '10px 20px',
-            color: 'white',
-            fontWeight: '600',
-          }}
-        >
-          {loading ? 'Recommending...' : 'Get Recommendation'}
+
+        <button type="submit" className="btn-primary" disabled={loading} style={{ width: '100%' }}>
+          {loading ? 'Analyzing...' : 'Get Recommendation'}
         </button>
       </form>
 
       {recommendations.length > 0 && (
-        <div style={{ marginTop: '16px', background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px' }}>
-          <h4 style={{ fontSize: '0.9rem', marginBottom: '8px', color: 'var(--text-secondary)' }}>Recommended Models:</h4>
-          <ul style={{ listStyle: 'none' }}>
+        <div style={{ marginTop: 'var(--space-2)', borderTop: '1px solid var(--border-default)', paddingTop: 'var(--space-2)' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-1)' }}>
+            Recommended Models
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {recommendations.map((rec) => (
-              <li key={rec.model} style={{ fontSize: '0.95rem', marginBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>🤖 <strong>{rec.model}</strong></span>
-                <code style={{ background: '#0f172a', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>{rec.pull}</code>
-              </li>
+              <div
+                key={rec.model}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '6px var(--space-1)',
+                  background: 'var(--bg-secondary)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--text-primary)' }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>
+                  {rec.model}
+                </span>
+                <code className="mono" style={{ background: 'var(--bg-primary)', padding: '2px 8px', borderRadius: '4px', color: 'var(--text-muted)' }}>
+                  {rec.pull}
+                </code>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       )}
     </div>

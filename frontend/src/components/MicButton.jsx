@@ -53,22 +53,19 @@ export default function MicButton({ onSpeechEnd }) {
     <button
       type="button"
       onClick={toggleListen}
-      className={`mic-button ${isListening ? 'listening' : ''}`}
+      className="btn-icon"
       style={{
-        background: isListening ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-        border: `1px solid ${isListening ? 'var(--danger-color)' : 'var(--panel-border)'}`,
-        borderRadius: '50%',
-        width: '44px',
-        height: '44px',
-        display: 'flex',
-        align-items: 'center',
-        justifyContent: 'center',
-        fontSize: '1.2rem',
-        boxShadow: isListening ? '0 0 12px var(--danger-color)' : 'none',
+        background: isListening ? 'rgba(239, 68, 68, 0.1)' : 'transparent',
+        borderColor: isListening ? 'rgba(239, 68, 68, 0.3)' : 'var(--border-default)',
+        color: isListening ? 'var(--color-danger)' : 'var(--text-muted)',
       }}
       title={isListening ? 'Listening... Click to stop' : 'Use voice input'}
     >
-      {isListening ? '🎙️' : '🎤'}
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+        <line x1="12" x2="12" y1="19" y2="22"/>
+      </svg>
     </button>
   );
 }

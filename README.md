@@ -6,7 +6,7 @@ DFrag sits as a defensive wrapper system between a user and locally running lang
 
 ---
 
-## Key Features
+## Key Features   
 
 1. **Two-Tier Persistent Retrieval Memory**:
    - **Tier 1**: Pre-loaded Indian Law DB (indexed by Act & Section).
@@ -50,7 +50,7 @@ docker compose up --build
 
 ### Option 2: Local Manual Setup
 
-#### Backend Setup
+#### Backend Setup+
 ```bash
 cd backend
 python -m venv venv
