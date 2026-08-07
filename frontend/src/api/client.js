@@ -4,7 +4,7 @@ export const apiClient = {
   /**
    * POST /chat
    */
-  async chat(message, sessionId, shieldOn) {
+  async chat(message, sessionId, shieldOn, model) {
     const response = await fetch(`${BASE_URL}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -12,6 +12,7 @@ export const apiClient = {
         message,
         session_id: sessionId,
         shield_on: shieldOn,
+        model: model || undefined,
       }),
     });
     if (!response.ok) {
@@ -41,17 +42,59 @@ export const apiClient = {
   /**
    * POST /recommend
    */
-  async recommend(ramGb, vramGb) {
+  async recommend(ramGb = null, vramGb = null) {
+    const bodyPayload = {};
+    if (ramGb !== null && ramGb !== undefined) bodyPayload.ram_gb = parseInt(ramGb);
+    if (vramGb !== null && vramGb !== undefined) bodyPayload.vram_gb = parseInt(vramGb);
+
     const response = await fetch(`${BASE_URL}/recommend`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ram_gb: parseInt(ramGb) || 0,
-        vram_gb: parseInt(vramGb) || 0,
-      }),
+      body: JSON.stringify(bodyPayload),
     });
     if (!response.ok) {
       throw new Error(`Recommendation request failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * GET /health
+   */
+  async getHealth() {
+    const response = await fetch(`${BASE_URL}/health`, {
+      method: 'GET',
+    });
+    if (!response.ok) {
+      throw new Error(`Health request failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * POST /models/pull
+   */
+  async pullModel(modelId) {
+    const response = await fetch(`${BASE_URL}/models/pull`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_id: modelId }),
+    });
+    if (!response.ok) {
+      throw new Error(`Model pull request failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * GET /models/pull/progress/{task_id}
+   */
+  async getPullProgress(taskId) {
+    const response = await fetch(`${BASE_URL}/models/pull/progress/${taskId}`, {
+      method: 'GET',
+    });
+    if (!response.ok) {
+      throw new Error(`Progress request failed with status: ${response.status}`);
     }
     return response.json();
   },

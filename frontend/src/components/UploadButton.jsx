@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { apiClient } from '../api/client';
+import { UploadIcon } from './Icons';
 
 export default function UploadButton({ sessionId, onUploadSuccess }) {
   const fileInputRef = useRef(null);
@@ -55,11 +56,12 @@ export default function UploadButton({ sessionId, onUploadSuccess }) {
           padding: '10px 16px',
           color: 'var(--text-primary)',
           display: 'flex',
-          align_items: 'center',
+          alignItems: 'center',
           gap: '8px',
+          cursor: 'pointer',
         }}
       >
-        <span>📁</span>
+        <UploadIcon size={16} color="var(--accent-color)" />
         <span>{isUploading ? 'Ingesting PDF...' : 'Upload PDF'}</span>
       </button>
     </div>

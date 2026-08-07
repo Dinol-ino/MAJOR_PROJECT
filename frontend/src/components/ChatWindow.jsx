@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import MicButton from './MicButton';
 import UploadButton from './UploadButton';
 import SourcesPanel from './SourcesPanel';
+import { ScaleIcon, ShieldAlertIcon, SendIcon, UserIcon, BotIcon } from './Icons';
 
 export default function ChatWindow({ messages, onSendMessage, sessionId, onUploadSuccess }) {
   const [input, setInput] = useState('');
@@ -18,19 +19,27 @@ export default function ChatWindow({ messages, onSendMessage, sessionId, onUploa
   };
 
   return (
-    <div className="chat-window-container glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '600px', overflow: 'hidden' }}>
+    <div className="chat-window-container glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '640px', overflow: 'hidden', borderRadius: '12px' }}>
       {/* Header */}
       <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--panel-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ fontFamily: 'var(--font-title)', fontSize: '1.25rem' }}>🧑‍⚖️ Legal Assistant Workspace</h2>
+        <h2 style={{ fontFamily: 'var(--font-title)', fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <ScaleIcon size={20} color="var(--accent-color)" />
+          Legal Assistant Workspace
+        </h2>
         <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Session: {sessionId}</span>
       </div>
 
       {/* Messages list */}
       <div style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {messages.length === 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
-            <span style={{ fontSize: '2.5rem', marginBottom: '12px' }}>⚖️</span>
-            <p>Welcome to DFrag. Ask a legal question or upload acts / company documents to get started.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)', textAlign: 'center' }}>
+            <div style={{ background: 'rgba(99, 102, 241, 0.1)', padding: '16px', borderRadius: '50%', marginBottom: '16px', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+              <ScaleIcon size={36} color="var(--accent-color)" />
+            </div>
+            <h3 style={{ color: 'var(--text-primary)', fontSize: '1.1rem', marginBottom: '6px' }}>Welcome to DFrag Legal AI Workspace</h3>
+            <p style={{ maxWidth: '400px', fontSize: '0.88rem', lineHeight: '1.5' }}>
+              Ask legal questions or upload Indian court acts and company contracts to perform security-hardened, offline RAG retrieval.
+            </p>
           </div>
         ) : (
           messages.map((msg, idx) => (
@@ -38,22 +47,31 @@ export default function ChatWindow({ messages, onSendMessage, sessionId, onUploa
               key={idx} 
               style={{
                 alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                maxWidth: '80%',
+                maxWidth: '82%',
                 background: msg.role === 'user' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.04)',
                 border: `1px solid ${msg.role === 'user' ? 'rgba(99, 102, 241, 0.3)' : 'var(--panel-border)'}`,
                 borderRadius: '12px',
-                padding: '12px 16px',
+                padding: '14px 16px',
               }}
             >
-              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                {msg.role === 'user' ? 'You' : 'DFrag AI'}
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {msg.role === 'user' ? (
+                  <>
+                    <UserIcon size={14} color="var(--accent-color)" /> You
+                  </>
+                ) : (
+                  <>
+                    <BotIcon size={14} color="var(--safe-color)" /> DFrag AI
+                  </>
+                )}
               </div>
               <p style={{ fontSize: '0.95rem', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>{msg.content}</p>
               
-              {/* If answer was blocked */}
+              {/* If answer was blocked by defense shield */}
               {msg.blocked_by && (
-                <div style={{ marginTop: '8px', padding: '8px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--danger-color)', borderRadius: '6px', color: 'var(--danger-color)', fontSize: '0.85rem' }}>
-                  ⚠️ Blocked by {msg.blocked_by.toUpperCase()} - Reason: {msg.block_reason}
+                <div style={{ marginTop: '8px', padding: '10px 12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--danger-color)', borderRadius: '6px', color: 'var(--danger-color)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ShieldAlertIcon size={16} />
+                  <span>Blocked by {msg.blocked_by.toUpperCase()} Guard - Reason: {msg.block_reason}</span>
                 </div>
               )}
 
@@ -84,6 +102,7 @@ export default function ChatWindow({ messages, onSendMessage, sessionId, onUploa
               padding: '12px 16px',
               color: 'var(--text-primary)',
               outline: 'none',
+              fontSize: '0.9rem',
             }}
           />
           
@@ -98,9 +117,14 @@ export default function ChatWindow({ messages, onSendMessage, sessionId, onUploa
               padding: '12px 20px',
               color: 'white',
               fontWeight: '600',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer',
             }}
           >
-            Send
+            <SendIcon size={16} />
+            <span>Send</span>
           </button>
         </form>
       </div>

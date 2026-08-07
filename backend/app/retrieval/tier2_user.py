@@ -1,10 +1,14 @@
 import os
+import logging
 from typing import List, Dict, Any
 import chromadb
 from chromadb.utils import embedding_functions
 from rank_bm25 import BM25Okapi
 from app.retrieval.hybrid_rank import fuse_bm25_dense
 from app.ingestion.chunker import SectionAwareChunker
+
+logger = logging.getLogger(__name__)
+
 
 class Tier2UserRetrieval:
     def __init__(self, persist_dir: str):
@@ -37,38 +41,72 @@ class Tier2UserRetrieval:
         # Generate unique ids for each chunk
         ids = [f"{session_id}_{filename}_{i}" for i in range(len(chunks))]
         
-        self.collection.add(documents=documents, metadatas=metadatas, ids=ids)
+        try:
+            self.collection.add(documents=documents, metadatas=metadatas, ids=ids)
+        except Exception as exc:
+            if "InvalidDimensionException" in type(exc).__name__ or "dimensionality" in str(exc):
+                logger.warning(f"Dimension mismatch in tier2_user during add, recreating collection: {exc}")
+                try:
+                    self.client.delete_collection("tier2_user")
+                except Exception:
+                    pass
+                self.collection = self.client.get_or_create_collection(
+                    name="tier2_user",
+                    embedding_function=self.emb_fn
+                )
+                self.collection.add(documents=documents, metadatas=metadatas, ids=ids)
+            else:
+                raise
         return len(chunks)
 
     def query(self, session_id: str, text: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        # Count documents to check if collection has any documents
-        count = self.collection.count()
+        try:
+            count = self.collection.count()
+        except Exception:
+            return []
+
         if count == 0:
             return []
 
         # 1. Dense query filtering by session_id
-        dense_results = self.collection.query(
-            query_texts=[text],
-            where={"session_id": session_id},
-            n_results=min(top_k * 2, count)
-        )
-        
         dense_docs = []
-        if dense_results and dense_results["documents"] and dense_results["documents"][0]:
-            docs = dense_results["documents"][0]
-            metas = dense_results["metadatas"][0]
-            distances = dense_results["distances"][0] if "distances" in dense_results and dense_results["distances"] else [0.0] * len(docs)
-            for i in range(len(docs)):
-                dense_docs.append({
-                    "act": metas[i]["act"],
-                    "section": metas[i]["section"],
-                    "text": docs[i],
-                    "score": 1.0 - distances[i]
-                })
+        try:
+            dense_results = self.collection.query(
+                query_texts=[text],
+                where={"session_id": session_id},
+                n_results=min(top_k * 2, count)
+            )
+            
+            if dense_results and dense_results.get("documents") and dense_results["documents"][0]:
+                docs = dense_results["documents"][0]
+                metas = dense_results["metadatas"][0]
+                distances = dense_results["distances"][0] if "distances" in dense_results and dense_results["distances"] else [0.0] * len(docs)
+                for i in range(len(docs)):
+                    dense_docs.append({
+                        "act": metas[i]["act"],
+                        "section": metas[i]["section"],
+                        "text": docs[i],
+                        "score": 1.0 - distances[i]
+                    })
+        except Exception as exc:
+            logger.warning(f"ChromaDB tier2 query warning: {exc}")
+            if "InvalidDimensionException" in type(exc).__name__ or "dimensionality" in str(exc):
+                try:
+                    self.client.delete_collection("tier2_user")
+                    self.collection = self.client.get_or_create_collection(
+                        name="tier2_user",
+                        embedding_function=self.emb_fn
+                    )
+                except Exception:
+                    pass
 
         # 2. Sparse (BM25) query filtering by session_id
-        all_data = self.collection.get(where={"session_id": session_id})
-        if not all_data or not all_data["documents"]:
+        try:
+            all_data = self.collection.get(where={"session_id": session_id})
+        except Exception:
+            all_data = None
+
+        if not all_data or not all_data.get("documents"):
             return dense_docs[:top_k]
 
         documents = all_data["documents"]
@@ -92,4 +130,3 @@ class Tier2UserRetrieval:
 
         # 3. Fuse rankings
         return fuse_bm25_dense(bm25_docs, dense_docs, top_k=top_k)
-
