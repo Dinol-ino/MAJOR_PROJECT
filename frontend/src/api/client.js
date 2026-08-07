@@ -40,6 +40,26 @@ export const apiClient = {
   },
 
   /**
+   * POST /upload/batch
+   */
+  async uploadBatch(files, sessionId) {
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
+    formData.append('session_id', sessionId);
+
+    const response = await fetch(`${BASE_URL}/upload/batch`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      throw new Error(`Batch upload request failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
    * POST /recommend
    */
   async recommend(ramGb = null, vramGb = null) {

@@ -7,26 +7,37 @@ export default function UploadButton({ sessionId, onUploadSuccess }) {
   const [isUploading, setIsUploading] = useState(false);
 
   const handleFileChange = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
 
-    if (file.type !== 'application/pdf') {
-      alert('Only PDF files are supported.');
+    const nonPdf = files.find((f) => !f.name.toLowerCase().endsWith('.pdf') && f.type !== 'application/pdf');
+    if (nonPdf) {
+      alert(`File '${nonPdf.name}' is not a PDF. Only PDF files are supported.`);
       return;
     }
 
     setIsUploading(true);
     try {
-      const response = await apiClient.upload(file, sessionId);
-      if (response.status === 'ok') {
-        alert(`Successfully ingested PDF: ${file.name}. Chunks added: ${response.chunks_added}`);
-        if (onUploadSuccess) onUploadSuccess(response);
+      if (files.length === 1) {
+        const response = await apiClient.upload(files[0], sessionId);
+        if (response.status === 'ok') {
+          alert(`Successfully ingested PDF: ${files[0].name}. Chunks added: ${response.chunks_added}`);
+          if (onUploadSuccess) onUploadSuccess(response);
+        } else {
+          alert(`Failed to ingest file: ${response.reason}`);
+        }
       } else {
-        alert(`Failed to ingest file: ${response.reason}`);
+        const response = await apiClient.uploadBatch(files, sessionId);
+        if (response.status === 'ok') {
+          alert(`Successfully ingested ${response.total_files} PDF files! Total chunks added: ${response.total_chunks}`);
+          if (onUploadSuccess) onUploadSuccess(response);
+        } else {
+          alert(`Batch upload status: ${response.status}`);
+        }
       }
     } catch (err) {
-      console.error(err);
-      alert('Error uploading document.');
+      console.error("Upload error:", err);
+      alert('Error uploading document(s).');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
@@ -42,6 +53,7 @@ export default function UploadButton({ sessionId, onUploadSuccess }) {
         ref={fileInputRef}
         onChange={handleFileChange}
         accept=".pdf"
+        multiple
         style={{ display: 'none' }}
       />
       <button
@@ -62,7 +74,7 @@ export default function UploadButton({ sessionId, onUploadSuccess }) {
         }}
       >
         <UploadIcon size={16} color="var(--accent-color)" />
-        <span>{isUploading ? 'Ingesting PDF...' : 'Upload PDF'}</span>
+        <span>{isUploading ? 'Ingesting PDFs...' : 'Upload PDF(s)'}</span>
       </button>
     </div>
   );
