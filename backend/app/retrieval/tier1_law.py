@@ -1,9 +1,13 @@
 import os
+import logging
 from typing import List, Dict, Any
 import chromadb
 from chromadb.utils import embedding_functions
 from rank_bm25 import BM25Okapi
 from app.retrieval.hybrid_rank import fuse_bm25_dense
+
+logger = logging.getLogger(__name__)
+
 
 class Tier1LawRetrieval:
     def __init__(self, persist_dir: str):
@@ -18,33 +22,52 @@ class Tier1LawRetrieval:
         )
 
     def query(self, text: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        # Count documents to check if DB is seeded
-        count = self.collection.count()
+        try:
+            count = self.collection.count()
+        except Exception:
+            return []
+
         if count == 0:
             return []
 
         # 1. Dense query
-        dense_results = self.collection.query(
-            query_texts=[text],
-            n_results=min(top_k * 2, count)
-        )
-        
         dense_docs = []
-        if dense_results and dense_results["documents"] and dense_results["documents"][0]:
-            docs = dense_results["documents"][0]
-            metas = dense_results["metadatas"][0]
-            distances = dense_results["distances"][0] if "distances" in dense_results and dense_results["distances"] else [0.0] * len(docs)
-            for i in range(len(docs)):
-                dense_docs.append({
-                    "act": metas[i]["act"],
-                    "section": metas[i]["section"],
-                    "text": docs[i],
-                    "score": 1.0 - distances[i]
-                })
+        try:
+            dense_results = self.collection.query(
+                query_texts=[text],
+                n_results=min(top_k * 2, count)
+            )
+            
+            if dense_results and dense_results.get("documents") and dense_results["documents"][0]:
+                docs = dense_results["documents"][0]
+                metas = dense_results["metadatas"][0]
+                distances = dense_results["distances"][0] if "distances" in dense_results and dense_results["distances"] else [0.0] * len(docs)
+                for i in range(len(docs)):
+                    dense_docs.append({
+                        "act": metas[i]["act"],
+                        "section": metas[i]["section"],
+                        "text": docs[i],
+                        "score": 1.0 - distances[i]
+                    })
+        except Exception as exc:
+            logger.warning(f"ChromaDB tier1 query warning: {exc}")
+            if "InvalidDimensionException" in type(exc).__name__ or "dimensionality" in str(exc):
+                try:
+                    self.client.delete_collection("tier1_law")
+                    self.collection = self.client.get_or_create_collection(
+                        name="tier1_law",
+                        embedding_function=self.emb_fn
+                    )
+                except Exception:
+                    pass
 
         # 2. Sparse (BM25) query
-        all_data = self.collection.get()
-        if not all_data or not all_data["documents"]:
+        try:
+            all_data = self.collection.get()
+        except Exception:
+            all_data = None
+
+        if not all_data or not all_data.get("documents"):
             return dense_docs[:top_k]
 
         documents = all_data["documents"]
@@ -68,4 +91,3 @@ class Tier1LawRetrieval:
 
         # 3. Fuse rankings
         return fuse_bm25_dense(bm25_docs, dense_docs, top_k=top_k)
-

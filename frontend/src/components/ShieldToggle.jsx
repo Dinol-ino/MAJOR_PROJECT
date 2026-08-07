@@ -1,4 +1,5 @@
 import React from 'react';
+import { ShieldIcon } from './Icons';
 import './ShieldToggle.css';
 
 export default function ShieldToggle({ shieldOn, onToggle }) {
@@ -15,7 +16,7 @@ export default function ShieldToggle({ shieldOn, onToggle }) {
         className={`shield-button ${shieldOn ? 'btn-active' : 'btn-inactive'}`}
         onClick={() => onToggle(!shieldOn)}
       >
-        <span className="shield-icon">🛡️</span>
+        <ShieldIcon size={18} color={shieldOn ? 'var(--safe-color)' : 'var(--danger-color)'} />
         <span className="slider-indicator"></span>
       </button>
     </div>

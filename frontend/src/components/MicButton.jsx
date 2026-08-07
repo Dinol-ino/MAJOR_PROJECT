@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { MicIcon } from './Icons';
 
 export default function MicButton({ onSpeechEnd }) {
   const [isListening, setIsListening] = useState(false);
@@ -61,14 +62,14 @@ export default function MicButton({ onSpeechEnd }) {
         width: '44px',
         height: '44px',
         display: 'flex',
-        align-items: 'center',
+        alignItems: 'center',
         justifyContent: 'center',
-        fontSize: '1.2rem',
+        cursor: 'pointer',
         boxShadow: isListening ? '0 0 12px var(--danger-color)' : 'none',
       }}
       title={isListening ? 'Listening... Click to stop' : 'Use voice input'}
     >
-      {isListening ? '🎙️' : '🎤'}
+      <MicIcon size={18} color={isListening ? 'var(--danger-color)' : 'var(--text-secondary)'} />
     </button>
   );
 }
