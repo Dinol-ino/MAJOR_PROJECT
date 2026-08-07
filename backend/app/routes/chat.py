@@ -1,3 +1,5 @@
+import logging
+from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException
 from app.schemas import ChatRequest, ChatResponse
 from app.config import settings
@@ -7,7 +9,6 @@ from app.defense.layer3_output_guard import Layer3OutputGuard
 from app.defense.audit_log import AuditLogger
 from app.retrieval.tier1_law import Tier1LawRetrieval
 from app.retrieval.tier2_user import Tier2UserRetrieval
-from app.retrieval.hybrid_rank import fuse_bm25_dense
 
 # Stage 5 Runtime Modules
 from app.runtime.runtime_manager import RuntimeManager
@@ -18,6 +19,7 @@ from app.runtime.hallucination_detector import HallucinationDetector
 from app.runtime.confidence_scorer import ConfidenceScorer
 from app.runtime.response_formatter import ResponseFormatter
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
 
 # Instantiate controllers
@@ -36,27 +38,61 @@ hallucination_detector = HallucinationDetector()
 confidence_scorer = ConfidenceScorer()
 response_formatter = ResponseFormatter()
 
+# In-memory store for active session titles
+_session_registry: Dict[str, Dict[str, Any]] = {}
+
+
+@router.get("/chat/sessions")
+def list_sessions():
+    """
+    Returns list of past task sessions for the Manus sidebar navigation.
+    """
+    sessions = []
+    for sid, meta in _session_registry.items():
+        sessions.append({
+            "session_id": sid,
+            "title": meta.get("title", f"Task {sid}"),
+            "created_at": meta.get("created_at"),
+            "model": meta.get("model", "qwen2.5:3b"),
+        })
+    return {"sessions": list(reversed(sessions))}
+
+
+@router.delete("/chat/sessions/{session_id}")
+def delete_session(session_id: str):
+    if session_id in _session_registry:
+        del _session_registry[session_id]
+    return {"status": "ok", "deleted": session_id}
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
-    # 1. Retrieve raw chunks from Tier-1 Law DB and Tier-2 User PDF DB
-    t1_results = tier1_retriever.query(request.message)
-    t2_results = tier2_retriever.query(request.session_id, request.message)
+    # Track session in registry for Manus Sidebar
+    if request.session_id not in _session_registry:
+        title = request.message[:35] + ("..." if len(request.message) > 35 else "")
+        _session_registry[request.session_id] = {
+            "title": title,
+            "created_at": "Just now",
+            "model": request.model or settings.DEFAULT_MODEL,
+        }
 
-    # 2. Hybrid Reciprocal Rank Fusion BM25 + dense ranking
-    retrieved_chunks = fuse_bm25_dense(t1_results, t2_results, top_k=3)
-
-    # --- SHIELD ON PIPELINE ---
+    # --- SHIELD ON PIPELINE (Defensive RAG Mode) ---
     if request.shield_on:
         # Layer 1: Input Guard Validation
-        is_clean, reason = input_guard.validate(request.message)
-        if not is_clean:
+        is_safe, category, reason = input_guard.validate(request.message)
+        if not is_safe:
             audit_logger.log(action="chat_blocked_input", layer="layer1")
             return ChatResponse(
-                answer=f"Request Blocked: {reason}",
+                answer=f"Query blocked by Security Shield ({category}): {reason}",
                 sources=[],
                 blocked_by="layer1",
                 block_reason=reason
             )
+
+        # Retrieval Engine (Tier 1 Statutory + Tier 2 User Documents)
+        t1_results = tier1_retriever.query(request.message)
+        t2_results = tier2_retriever.query(request.session_id, request.message)
+        retrieved_chunks = fuse_bm25_dense(t1_results, t2_results, top_k=5)
 
         # Context Builder & Token Budget Management
         context_pkg = context_builder.build(
@@ -113,6 +149,10 @@ async def chat_endpoint(request: ChatRequest):
 
     # --- SHIELD OFF PIPELINE (Unshielded Baseline) ---
     else:
+        t1_results = tier1_retriever.query(request.message)
+        t2_results = tier2_retriever.query(request.session_id, request.message)
+        retrieved_chunks = fuse_bm25_dense(t1_results, t2_results, top_k=5)
+
         fitted_chunks, _ = token_budget_manager.fit_chunks(0, retrieved_chunks)
         sources = citation_builder.build(fitted_chunks)
 

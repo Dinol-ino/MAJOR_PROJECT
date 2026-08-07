@@ -22,6 +22,32 @@ export const apiClient = {
   },
 
   /**
+   * GET /chat/sessions
+   */
+  async getSessions() {
+    const response = await fetch(`${BASE_URL}/chat/sessions`, {
+      method: 'GET',
+    });
+    if (!response.ok) {
+      throw new Error(`Get sessions failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * DELETE /chat/sessions/{session_id}
+   */
+  async deleteSession(sessionId) {
+    const response = await fetch(`${BASE_URL}/chat/sessions/${sessionId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      throw new Error(`Delete session failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
    * POST /upload
    */
   async upload(file, sessionId) {

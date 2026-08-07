@@ -2,11 +2,18 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../api/client';
 import { CpuIcon, DownloadIcon, CheckCircleIcon, RefreshIcon, ServerIcon } from './Icons';
 
-export default function HardwareForm({ onModelRecommended, selectedModel, setSelectedModel }) {
+export default function HardwareForm({
+  onModelRecommended,
+  selectedModel,
+  setSelectedModel,
+  isOpen,
+  onClose,
+  setRecommendedModels
+}) {
   const [detectedHw, setDetectedHw] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
   const [installedModels, setInstalledModels] = useState([]);
-  const [pullProgress, setPullProgress] = useState({}); // { model_id: { task_id, percent, status } }
+  const [pullProgress, setPullProgress] = useState({});
   const [manualOverride, setManualOverride] = useState(false);
   const [ram, setRam] = useState(8);
   const [vram, setVram] = useState(0);
@@ -15,16 +22,18 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
   const fetchRecommendationsAndHealth = useCallback(async (manualRam = null, manualVram = null) => {
     setLoading(true);
     try {
-      // 1. Fetch hardware recommendations
       const recData = await apiClient.recommend(manualRam, manualVram);
       setRecommendations(recData.recommended || []);
       setDetectedHw(recData.detected_hardware || null);
 
-      if (recData.recommended && recData.recommended.length > 0 && onModelRecommended) {
+      if (setRecommendedModels) {
+        setRecommendedModels(recData.recommended || []);
+      }
+
+      if (recData.recommended && recData.recommended.length > 0 && onModelRecommended && !selectedModel) {
         onModelRecommended(recData.recommended[0].model_id);
       }
 
-      // 2. Fetch health for installed models
       try {
         const healthData = await apiClient.getHealth();
         if (healthData.ollama && healthData.ollama.installed_models) {
@@ -38,9 +47,8 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
     } finally {
       setLoading(false);
     }
-  }, [onModelRecommended]);
+  }, [onModelRecommended, selectedModel, setRecommendedModels]);
 
-  // Auto-detect hardware on initial mount
   useEffect(() => {
     fetchRecommendationsAndHealth();
   }, [fetchRecommendationsAndHealth]);
@@ -59,7 +67,6 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
         [modelId]: { task_id: taskId, percent: 0, status: 'starting' },
       }));
 
-      // Poll progress every 1000ms
       const interval = setInterval(async () => {
         try {
           const prog = await apiClient.getPullProgress(taskId);
@@ -74,7 +81,6 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
 
           if (prog.status === 'done' || prog.percent >= 100) {
             clearInterval(interval);
-            // Refresh installed models
             const h = await apiClient.getHealth();
             if (h.ollama && h.ollama.installed_models) {
               setInstalledModels(h.ollama.installed_models);
@@ -91,7 +97,6 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
     }
   };
 
-  // Determine hardware tier text & limits
   const ramAvailable = detectedHw ? (detectedHw.ram_available_gb || detectedHw.ram_total_gb || 0) : ram;
   const vramAvailable = detectedHw ? (detectedHw.gpu_vram_gb || 0) : vram;
   
@@ -108,24 +113,51 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
     uploadLimit = 'Up to 5 files';
   }
 
+  if (isOpen === false) return null;
+
   return (
-    <div className="glass-panel" style={{ padding: '20px', borderRadius: '12px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-        <h3 style={{ fontFamily: 'var(--font-title)', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <CpuIcon size={18} color="var(--accent-color)" />
-          Hardware & Model Setup
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        right: 0,
+        width: '380px',
+        height: '100vh',
+        background: '#18181b',
+        borderLeft: '1px solid #27272a',
+        boxShadow: '-10px 0 30px rgba(0,0,0,0.6)',
+        padding: '24px',
+        zIndex: 1000,
+        boxSizing: 'border-box',
+        overflowY: 'auto',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h3 style={{ fontFamily: 'var(--font-title)', fontSize: '1.1rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <CpuIcon size={20} color="var(--accent-color)" />
+          System Hardware Specs
         </h3>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.2rem', cursor: 'pointer' }}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+        <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Mode</span>
         <button
           type="button"
           onClick={() => setManualOverride(!manualOverride)}
           style={{
             background: 'rgba(255,255,255,0.05)',
-            border: '1px solid var(--panel-border)',
+            border: '1px solid #27272a',
             borderRadius: '6px',
-            color: 'var(--text-secondary)',
+            color: '#f8fafc',
             fontSize: '0.75rem',
-            padding: '4px 8px',
+            padding: '4px 10px',
             cursor: 'pointer',
           }}
         >
@@ -133,42 +165,32 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
         </button>
       </div>
 
-      {/* Hardware Profile Summary */}
       {detectedHw && !manualOverride && (
-        <div style={{ background: 'rgba(0,0,0,0.25)', padding: '12px', borderRadius: '8px', marginBottom: '14px', border: '1px solid var(--panel-border)' }}>
-          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent-color)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <ServerIcon size={14} />
-            Detected Hardware Profile ({hwTier} Tier)
+        <div style={{ background: '#121214', padding: '14px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #27272a' }}>
+          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--accent-color)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <ServerIcon size={16} />
+            Hardware Profile ({hwTier} Tier)
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.8rem', color: '#94a3b8' }}>
             <div>CPU: {detectedHw.cpu_cores || 4} cores</div>
             <div>RAM: {Math.round(detectedHw.ram_total_gb || 8)} GB</div>
             <div>GPU: {detectedHw.gpu_name || (detectedHw.gpu_available ? 'Active GPU' : 'None (CPU-only)')}</div>
             <div>VRAM: {detectedHw.gpu_vram_gb || 0} GB</div>
           </div>
-          <div style={{ marginTop: '8px', fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '6px' }}>
+          <div style={{ marginTop: '10px', fontSize: '0.78rem', color: '#cbd5e1', borderTop: '1px solid #27272a', paddingTop: '8px' }}>
             File Upload Limit: <strong style={{ color: 'var(--safe-color)' }}>{uploadLimit}</strong>
           </div>
         </div>
       )}
 
-      {/* Manual Override Controls */}
       {manualOverride && (
-        <form onSubmit={handleManualSubmit} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
-          <div style={{ flex: 1, minWidth: '100px' }}>
-            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>System RAM</label>
+        <form onSubmit={handleManualSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+          <div>
+            <label style={{ fontSize: '0.8rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>System RAM</label>
             <select
               value={ram}
               onChange={(e) => setRam(parseInt(e.target.value))}
-              style={{
-                width: '100%',
-                background: '#0f172a',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--panel-border)',
-                borderRadius: '6px',
-                padding: '6px 8px',
-                fontSize: '0.8rem',
-              }}
+              style={{ width: '100%', background: '#121214', color: '#f8fafc', border: '1px solid #27272a', borderRadius: '6px', padding: '8px' }}
             >
               <option value={4}>4 GB</option>
               <option value={8}>8 GB</option>
@@ -176,20 +198,12 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
               <option value={32}>32 GB</option>
             </select>
           </div>
-          <div style={{ flex: 1, minWidth: '100px' }}>
-            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>VRAM / GPU</label>
+          <div>
+            <label style={{ fontSize: '0.8rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>VRAM / GPU</label>
             <select
               value={vram}
               onChange={(e) => setVram(parseInt(e.target.value))}
-              style={{
-                width: '100%',
-                background: '#0f172a',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--panel-border)',
-                borderRadius: '6px',
-                padding: '6px 8px',
-                fontSize: '0.8rem',
-              }}
+              style={{ width: '100%', background: '#121214', color: '#f8fafc', border: '1px solid #27272a', borderRadius: '6px', padding: '8px' }}
             >
               <option value={0}>CPU-only (0 GB)</option>
               <option value={2}>2 GB</option>
@@ -201,35 +215,17 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
           <button
             type="submit"
             disabled={loading}
-            style={{
-              alignSelf: 'flex-end',
-              background: 'var(--accent-color)',
-              border: 'none',
-              borderRadius: '6px',
-              padding: '7px 12px',
-              color: 'white',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
+            style={{ background: 'var(--accent-color)', border: 'none', borderRadius: '6px', padding: '8px', color: 'white', fontWeight: 600, cursor: 'pointer' }}
           >
-            Update
+            Update Hardware Override
           </button>
         </form>
       )}
 
-      {/* Suggested Models List & Auto-Pull */}
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-            Recommended Models:
-          </span>
-          <button
-            type="button"
-            onClick={() => fetchRecommendationsAndHealth(manualOverride ? ram : null, manualOverride ? vram : null)}
-            style={{ background: 'none', border: 'none', color: 'var(--accent-color)', cursor: 'pointer' }}
-            title="Refresh status"
-          >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          <span style={{ fontSize: '0.82rem', color: '#94a3b8', fontWeight: 600 }}>Recommended Models:</span>
+          <button type="button" onClick={() => fetchRecommendationsAndHealth(manualOverride ? ram : null, manualOverride ? vram : null)} style={{ background: 'none', border: 'none', color: 'var(--accent-color)', cursor: 'pointer' }}>
             <RefreshIcon size={14} />
           </button>
         </div>
@@ -248,20 +244,15 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
                 style={{
                   padding: '10px 12px',
                   borderRadius: '8px',
-                  background: isSelected ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255, 255, 255, 0.03)',
-                  border: `1px solid ${isSelected ? 'var(--accent-color)' : 'var(--panel-border)'}`,
+                  background: isSelected ? 'rgba(99, 102, 241, 0.12)' : '#121214',
+                  border: `1px solid ${isSelected ? 'var(--accent-color)' : '#27272a'}`,
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease',
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      {rec.display_name || mId}
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                      Size: {rec.size_gb || 2.0} GB | Context: {rec.context_window || 8192}
-                    </div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#f8fafc' }}>{rec.display_name || mId}</div>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Size: {rec.size_gb || 2.0} GB | Context: {rec.context_window || 8192}</div>
                   </div>
 
                   <div>
@@ -270,9 +261,7 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
                         <CheckCircleIcon size={12} /> Installed
                       </span>
                     ) : prog && prog.percent < 100 ? (
-                      <span style={{ fontSize: '0.72rem', color: 'var(--accent-color)' }}>
-                        Downloading {prog.percent}%
-                      </span>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--accent-color)' }}>Downloading {prog.percent}%</span>
                     ) : (
                       <button
                         type="button"
@@ -300,17 +289,9 @@ export default function HardwareForm({ onModelRecommended, selectedModel, setSel
                   </div>
                 </div>
 
-                {/* Progress bar streaming */}
                 {prog && prog.percent < 100 && (
                   <div style={{ marginTop: '8px', background: '#0f172a', borderRadius: '4px', height: '6px', overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        width: `${prog.percent}%`,
-                        height: '100%',
-                        background: 'var(--accent-color)',
-                        transition: 'width 0.3s ease',
-                      }}
-                    />
+                    <div style={{ width: `${prog.percent}%`, height: '100%', background: 'var(--accent-color)', transition: 'width 0.3s ease' }} />
                   </div>
                 )}
               </div>
