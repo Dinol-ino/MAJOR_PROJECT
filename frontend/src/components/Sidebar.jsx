@@ -3,14 +3,13 @@ import { apiClient } from '../api/client';
 import {
   ShieldIcon,
   PlusIcon,
-  SearchIcon,
   SidebarIcon,
   FolderIcon,
   BookIcon,
+  AuditIcon,
   SparklesIcon,
   SettingsIcon,
   TrashIcon,
-  UserIcon,
   LogOutIcon
 } from './Icons';
 
@@ -124,14 +123,9 @@ export default function Sidebar({
             dfrag
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button type="button" style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
-            <SearchIcon size={16} />
-          </button>
-          <button type="button" onClick={onToggleCollapse} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
-            <SidebarIcon size={16} />
-          </button>
-        </div>
+        <button type="button" onClick={onToggleCollapse} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
+          <SidebarIcon size={16} />
+        </button>
       </div>
 
       {/* Primary Action Button */}
@@ -158,37 +152,23 @@ export default function Sidebar({
         <span>New task</span>
       </button>
 
-      {/* Main Manus Nav Links */}
+      {/* Nav Links */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '24px' }}>
-        <div style={{ padding: '8px 10px', borderRadius: '6px', color: '#cbd5e1', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', background: 'rgba(255,255,255,0.03)' }}>
-          <SparklesIcon size={16} color="var(--accent-color)" /> Agent
+        <div style={{ padding: '8px 10px', borderRadius: '6px', color: '#cbd5e1', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255,255,255,0.03)' }}>
+          <SparklesIcon size={16} color="var(--accent-color)" /> Legal Copilot
         </div>
-        <div style={{ padding: '8px 10px', borderRadius: '6px', color: '#94a3b8', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-          <FolderIcon size={16} /> Plugins
+        <div style={{ padding: '8px 10px', borderRadius: '6px', color: '#94a3b8', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <BookIcon size={16} /> Statute Knowledge
         </div>
-        <div style={{ padding: '8px 10px', borderRadius: '6px', color: '#94a3b8', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-          <BookIcon size={16} /> Scheduled
-        </div>
-        <div style={{ padding: '8px 10px', borderRadius: '6px', color: '#94a3b8', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-          <BookIcon size={16} /> Library
-        </div>
-      </div>
-
-      {/* Projects Section */}
-      <div style={{ marginBottom: '20px' }}>
-        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>Projects</span>
-          <PlusIcon size={14} color="#64748b" style={{ cursor: 'pointer' }} />
-        </div>
-        <div style={{ padding: '8px 10px', borderRadius: '6px', color: '#94a3b8', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-          <FolderIcon size={16} /> New project
+        <div style={{ padding: '8px 10px', borderRadius: '6px', color: '#94a3b8', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <AuditIcon size={16} /> Cryptographic Audit
         </div>
       </div>
 
       {/* Tasks History Section */}
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
         <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-          Tasks
+          Task History
         </div>
 
         {sessions.length === 0 ? (
@@ -215,7 +195,6 @@ export default function Sidebar({
                     alignItems: 'center',
                     transition: 'background 0.15s ease',
                   }}
-                  className="sidebar-task-item"
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                     {s.title}
@@ -239,17 +218,14 @@ export default function Sidebar({
       <div style={{ borderTop: '1px solid #27272a', paddingTop: '14px', marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: '0.8rem' }}>
-            {user ? user.username?.[0]?.toUpperCase() || 'D' : 'D'}
+            {user ? (user.username?.[0] || 'U').toUpperCase() : 'U'}
           </div>
           <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#f8fafc', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120 }}>
-            {user ? user.username || user.email : 'Dinol Castelino'}
+            {user ? user.username || user.email || 'Legal User' : 'Legal User'}
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <button type="button" style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }} title="Settings">
-            <SettingsIcon size={16} />
-          </button>
           {onLogout && (
             <button type="button" onClick={onLogout} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }} title="Logout">
               <LogOutIcon size={16} />

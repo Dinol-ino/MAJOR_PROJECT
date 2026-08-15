@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import MicButton from './MicButton';
 import UploadButton from './UploadButton';
-import { SendIcon, SparklesIcon, FolderIcon, BookIcon } from './Icons';
+import { SendIcon, BookIcon, FolderIcon, SparklesIcon } from './Icons';
 
 export default function CommandInput({ onSendMessage, sessionId, onUploadSuccess }) {
   const [input, setInput] = useState('');
@@ -58,26 +58,9 @@ export default function CommandInput({ onSendMessage, sessionId, onUploadSuccess
 
         {/* Input Bar Controls */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '4px' }}>
-          {/* Left tools: Attachment (+) and Manus Desktop pill */}
+          {/* Left tools: Upload PDF(s) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <UploadButton sessionId={sessionId} onUploadSuccess={onUploadSuccess} />
-
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                background: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid #27272a',
-                borderRadius: '12px',
-                padding: '4px 10px',
-                fontSize: '0.78rem',
-                color: '#94a3b8',
-              }}
-            >
-              <SparklesIcon size={14} color="var(--accent-color)" />
-              <span>Legal Copilot Desktop</span>
-            </div>
           </div>
 
           {/* Right tools: STT Voice Mic and Submit Arrow */}

@@ -1,6 +1,8 @@
+import time
 import logging
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException
+
 from app.schemas import ChatRequest, ChatResponse
 from app.config import settings
 from app.defense.layer1_input_guard import Layer1InputGuard
@@ -9,6 +11,7 @@ from app.defense.layer3_output_guard import Layer3OutputGuard
 from app.defense.audit_log import AuditLogger
 from app.retrieval.tier1_law import Tier1LawRetrieval
 from app.retrieval.tier2_user import Tier2UserRetrieval
+from app.retrieval.hybrid_rank import fuse_bm25_dense
 
 # Stage 5 Runtime Modules
 from app.runtime.runtime_manager import RuntimeManager
@@ -45,7 +48,7 @@ _session_registry: Dict[str, Dict[str, Any]] = {}
 @router.get("/chat/sessions")
 def list_sessions():
     """
-    Returns list of past task sessions for the Manus sidebar navigation.
+    Returns list of past task sessions for the sidebar navigation.
     """
     sessions = []
     for sid, meta in _session_registry.items():
@@ -67,7 +70,9 @@ def delete_session(session_id: str):
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
-    # Track session in registry for Manus Sidebar
+    start_time = time.time()
+    
+    # Track session in registry for Sidebar
     if request.session_id not in _session_registry:
         title = request.message[:35] + ("..." if len(request.message) > 35 else "")
         _session_registry[request.session_id] = {
@@ -78,12 +83,22 @@ async def chat_endpoint(request: ChatRequest):
 
     # --- SHIELD ON PIPELINE (Defensive RAG Mode) ---
     if request.shield_on:
-        # Layer 1: Input Guard Validation
-        is_safe, category, reason = input_guard.validate(request.message)
+        # Layer 1: Input Guard Validation with query hash deduplication
+        is_safe, reason, inj_score, q_hash = input_guard.validate_with_score(request.message)
         if not is_safe:
-            audit_logger.log(action="chat_blocked_input", layer="layer1")
+            latency_ms = (time.time() - start_time) * 1000
+            audit_logger.log(
+                action="chat_blocked_input",
+                layer="layer1",
+                injection_score=inj_score,
+                retrieval_hits=0,
+                citations_used=0,
+                validation_pass_fail="blocked_input",
+                model_tier_used=request.model or settings.DEFAULT_MODEL,
+                latency_ms=latency_ms
+            )
             return ChatResponse(
-                answer=f"Query blocked by Security Shield ({category}): {reason}",
+                answer=f"Query blocked by Security Shield: {reason}",
                 sources=[],
                 blocked_by="layer1",
                 block_reason=reason
@@ -107,7 +122,7 @@ async def chat_endpoint(request: ChatRequest):
 
         sources = citation_builder.build(fitted_chunks)
 
-        # Layer 2: Secure Prompt Construction
+        # Layer 2: Secure Prompt Construction (with Presidio PII anonymization)
         prompt = trusted_context.build_prompt(request.message, fitted_chunks)
 
         # Invoke Stage 5 Runtime Abstraction Engine
@@ -118,10 +133,21 @@ async def chat_endpoint(request: ChatRequest):
             logger.error(f"Runtime engine generation error: {exc}", exc_info=True)
             raise HTTPException(status_code=502, detail=f"Runtime engine generation error: {str(exc)}")
 
-        # Layer 3: Output Guard Validation
+        # Layer 3: Output Guard Validation & Citation-existence Check
         is_valid, error_reason = output_guard.validate(raw_answer, fitted_chunks, prompt)
+        latency_ms = (time.time() - start_time) * 1000
+
         if not is_valid:
-            audit_logger.log(action="chat_blocked_output", layer="layer3")
+            audit_logger.log(
+                action="chat_blocked_output",
+                layer="layer3",
+                injection_score=inj_score,
+                retrieval_hits=len(retrieved_chunks),
+                citations_used=len(sources),
+                validation_pass_fail="blocked_output",
+                model_tier_used=request.model or settings.DEFAULT_MODEL,
+                latency_ms=latency_ms
+            )
             return ChatResponse(
                 answer=f"Response quarantined: {error_reason}",
                 sources=sources,
@@ -136,7 +162,16 @@ async def chat_endpoint(request: ChatRequest):
         hallucination_report = hallucination_detector.detect(formatted_answer, fitted_chunks)
         confidence = confidence_scorer.score(formatted_answer, fitted_chunks, hallucination_report)
 
-        audit_logger.log(action="chat_success", layer=None)
+        audit_logger.log(
+            action="chat_success",
+            layer=None,
+            injection_score=inj_score,
+            retrieval_hits=len(retrieved_chunks),
+            citations_used=len(sources),
+            validation_pass_fail="pass",
+            model_tier_used=request.model or settings.DEFAULT_MODEL,
+            latency_ms=latency_ms
+        )
 
         return ChatResponse(
             answer=formatted_answer,
@@ -146,6 +181,7 @@ async def chat_endpoint(request: ChatRequest):
             confidence_score=confidence,
             hallucination_flags=hallucination_report.signals
         )
+
 
     # --- SHIELD OFF PIPELINE (Unshielded Baseline) ---
     else:

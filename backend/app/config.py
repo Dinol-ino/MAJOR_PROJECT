@@ -27,8 +27,14 @@ class Settings(BaseModel):
     GENERATOR_CONTEXT_TOKENS: int = int(os.getenv("GENERATOR_CONTEXT_TOKENS", "4096"))
     CITATION_TEXT_MAX_CHARS: int = int(os.getenv("CITATION_TEXT_MAX_CHARS", "500"))
 
+    # Stage 1 — Security & Validation Parameters
+    INJECTION_RISK_THRESHOLD: float = float(os.getenv("INJECTION_RISK_THRESHOLD", "0.7"))
+    GROUNDING_OVERLAP_THRESHOLD: float = float(os.getenv("GROUNDING_OVERLAP_THRESHOLD", "0.05"))
+    ENABLE_PII_SCANNING: bool = os.getenv("ENABLE_PII_SCANNING", "true").lower() == "true"
+
     # Stage 5 — User Memory
     USER_PROFILE_CACHE_TTL: int = int(os.getenv("USER_PROFILE_CACHE_TTL", "86400"))
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "*"]
+    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "tauri://localhost"]
 
 settings = Settings()
+

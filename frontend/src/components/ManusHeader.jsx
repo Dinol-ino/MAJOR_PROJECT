@@ -8,17 +8,16 @@ export default function ManusHeader({
   recommendedModels,
   shieldOn,
   setShieldOn,
-  onToggleHardwareDrawer,
-  detectedHw
+  onToggleHardwareDrawer
 }) {
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
 
   return (
     <header
       style={{
-        height: '56px',
+        height: '52px',
         borderBottom: '1px solid #27272a',
-        padding: '0 24px',
+        padding: '0 20px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -27,25 +26,26 @@ export default function ManusHeader({
         zIndex: 10,
       }}
     >
-      {/* Left: Model Selector Dropdown (Manus 1.6 Lite style) */}
+      {/* Left: Model Selector Dropdown */}
       <div style={{ position: 'relative' }}>
         <button
           type="button"
           onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
           style={{
-            background: 'none',
-            border: 'none',
+            background: 'rgba(255, 255, 255, 0.04)',
+            border: '1px solid #27272a',
+            borderRadius: '8px',
+            padding: '6px 12px',
             color: '#f8fafc',
-            fontFamily: 'var(--font-title)',
-            fontSize: '1rem',
-            fontWeight: 700,
+            fontSize: '0.88rem',
+            fontWeight: 600,
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
+            gap: '8px',
             cursor: 'pointer',
           }}
         >
-          <span>{selectedModel ? selectedModel.toUpperCase() : 'MANUS 1.6 LITE'}</span>
+          <span>Model: {selectedModel ? selectedModel.toUpperCase() : 'QWEN2.5:3B'}</span>
           <ChevronDownIcon size={14} color="#94a3b8" />
         </button>
 
@@ -53,19 +53,19 @@ export default function ManusHeader({
           <div
             style={{
               position: 'absolute',
-              top: '40px',
+              top: '42px',
               left: 0,
               background: '#1e1e22',
               border: '1px solid #27272a',
               borderRadius: '8px',
-              width: '220px',
+              width: '240px',
               padding: '6px 0',
-              boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+              boxShadow: '0 10px 25px rgba(0,0,0,0.6)',
               zIndex: 100,
             }}
           >
             <div style={{ padding: '6px 12px', fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
-              Dynamic Recommended Models
+              Recommended Local Models
             </div>
             {recommendedModels.map((m) => {
               const mId = m.model_id || m.model;
@@ -96,8 +96,8 @@ export default function ManusHeader({
         )}
       </div>
 
-      {/* Right Controls: Hardware Drawer Trigger, Shield Toggle, Plan Badge */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      {/* Right Controls: Hardware Specs & Security Shield */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <button
           type="button"
           onClick={onToggleHardwareDrawer}
@@ -119,16 +119,6 @@ export default function ManusHeader({
         </button>
 
         <ShieldToggle shieldOn={shieldOn} onToggle={setShieldOn} />
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid #27272a', borderRadius: '16px', padding: '3px 10px', fontSize: '0.78rem', color: '#94a3b8' }}>
-          <span>Free plan</span>
-          <span style={{ color: 'var(--accent-color)', fontWeight: 600, cursor: 'pointer' }}>Upgrade</span>
-        </div>
-
-        <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <SparklesIcon size={14} color="#64748b" />
-          <span>1,242</span>
-        </div>
       </div>
     </header>
   );

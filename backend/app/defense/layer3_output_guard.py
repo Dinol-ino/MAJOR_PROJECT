@@ -46,11 +46,33 @@ class Layer3OutputGuard:
             return True
 
         intersection = answer_words.intersection(chunks_words)
-        # Grounded if at least 1 content word overlaps or ratio exceeds threshold
-        if len(intersection) >= 1 or (len(intersection) / len(answer_words)) >= self.jaccard_threshold:
+        jaccard_ratio = len(intersection) / len(answer_words)
+        if jaccard_ratio >= self.jaccard_threshold:
             return True
             
         return False
+
+    def verify_citation_existence(self, answer: str, retrieved_chunks: List[Dict[str, Any]]) -> bool:
+        """
+        Verifies that citations mentioned in the answer actually exist in the retrieved corpus metadata.
+        Catches fabricated document IDs or acts not present in retrieved context.
+        """
+        if not retrieved_chunks:
+            return True
+
+        valid_acts = {c.get("act", "").lower() for c in retrieved_chunks if c.get("act")}
+        
+        # Match "Under IT Act", "Section 66 of IT Act", "Act: IT Act"
+        matches = re.findall(r"(?:Act:\s*([A-Za-z0-9\s]+)|(?:under|in|of|the)?\s*([A-Za-z0-9]+(?:\s+[A-Za-z0-9]+){0,2})\s+Act)", answer, re.IGNORECASE)
+        for match in matches:
+            raw_name = (match[0] or match[1]).strip().lower()
+            act_name = re.sub(r"^(?:under|in|of|the|this|a|an)\s+", "", raw_name).strip()
+            if len(act_name) >= 2 and act_name not in ["the", "this", "indian", "law", "general"]:
+                if not any(act_name in v or v in act_name for v in valid_acts):
+                    logger.warning(f"Fabricated citation detected: '{act_name}' not in retrieved corpus {valid_acts}")
+                    return False
+        return True
+
 
     def validate(self, answer: str, retrieved_chunks: List[Dict[str, Any]], system_prompt: str) -> Tuple[bool, Optional[str]]:
         """
@@ -74,7 +96,11 @@ class Layer3OutputGuard:
         if retrieved_chunks and not self.check_grounding(answer, retrieved_chunks):
             return False, "Grounding check failed: answer lacks significant token overlap with sources."
 
-        # 3. Citation formatting ONLY when document chunks were retrieved
+        # 3. Citation existence check against vector metadata
+        if retrieved_chunks and not self.verify_citation_existence(answer, retrieved_chunks):
+            return False, "Citation existence check failed: response references unverified external act/document."
+
+        # 4. Citation formatting ONLY when document chunks were retrieved
         if retrieved_chunks:
             citation_pattern = r"(?:Section|Sec\.?)\s*\d+|Act|Clause|Article|\bIPC\b|\bIT\b|\bCPC\b|\bCrPC\b"
             if not re.search(citation_pattern, answer, re.IGNORECASE):
@@ -82,3 +108,4 @@ class Layer3OutputGuard:
                 self.last_clean_answer = f"{answer}\n\n*References: {', '.join(doc_names)}*"
 
         return True, None
+

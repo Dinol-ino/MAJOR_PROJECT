@@ -21,11 +21,11 @@ class OllamaClient:
 
     async def generate(self, prompt: str, model: Optional[str] = None) -> str:
         """
-        Generate text response with generous timeouts and exponential backoff.
+        Generate text response with 300s model loading headroom and backoff retries.
         """
         target_model = model or self.default_model
-        max_retries = 2
-        initial_delay = 1.0
+        max_retries = 3
+        initial_delay = 2.0
 
         for attempt in range(max_retries):
             try:
@@ -38,15 +38,20 @@ class OllamaClient:
                         except Exception:
                             pass
                     raise OllamaUnavailableError(
-                        f"Model '{target_model}' is not pulled in Ollama yet. Use the UI 'Auto-Pull' button or pull it via Ollama API."
+                        f"Model '{target_model}' is not pulled in Ollama yet. Click 'Auto-Pull' in Hardware Specs panel."
                     ) from exc
+                if exc.response.status_code in (500, 502, 503, 504):
+                    logger.warning(f"Ollama server HTTP {exc.response.status_code} on attempt {attempt + 1}. Retrying...")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(initial_delay * (2 ** attempt))
+                        continue
                 if attempt == max_retries - 1:
                     raise OllamaUnavailableError(f"Ollama server HTTP {exc.response.status_code} error.") from exc
             except (httpx.RequestError, httpx.TimeoutException) as exc:
-                logger.warning(f"Ollama generate attempt {attempt + 1} timed out/failed: {exc}")
+                logger.warning(f"Ollama generate attempt {attempt + 1} failed: {exc}")
                 if attempt == max_retries - 1:
                     raise OllamaUnavailableError(
-                        f"Ollama generation timed out at {self.base_url}. High CPU load or model initialization in container."
+                        f"Ollama generation timed out at {self.base_url}. Model initialization in container required more time."
                     ) from exc
                 await asyncio.sleep(initial_delay * (2 ** attempt))
 
@@ -56,7 +61,7 @@ class OllamaClient:
         target_model = model or self.default_model
         timeout = httpx.Timeout(
             connect=30.0,
-            read=180.0,
+            read=300.0,
             write=30.0,
             pool=30.0,
         )
@@ -89,7 +94,7 @@ class OllamaClient:
     async def _call_ollama(self, prompt: str, model: str) -> str:
         timeout = httpx.Timeout(
             connect=30.0,
-            read=180.0,
+            read=300.0,
             write=30.0,
             pool=30.0,
         )

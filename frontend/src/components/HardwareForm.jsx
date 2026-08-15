@@ -47,7 +47,7 @@ export default function HardwareForm({
     } finally {
       setLoading(false);
     }
-  }, [onModelRecommended, selectedModel, setRecommendedModels]);
+  }, []);
 
   useEffect(() => {
     fetchRecommendationsAndHealth();
