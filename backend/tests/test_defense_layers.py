@@ -40,11 +40,37 @@ class TestDefenseLayers(unittest.TestCase):
 
     def test_layer3_hallucinated_answer(self):
         chunks = [{"act": "IT Act", "section": "66", "text": "Section 66 governs computer related crimes."}]
-        # Answer contains completely different terms
-        answer = "Under Section 66, you are sentenced to death for stealing apples."
+        # Answer contains completely ungrounded claim
+        answer = "The defendant will be executed immediately for stealing apples."
         is_valid, reason = self.guard3.validate(answer, chunks, "")
         self.assertFalse(is_valid)
         self.assertIn("Grounding check failed", reason)
+
+    def test_layer1_query_hash_caching_and_score(self):
+        is_safe, reason, score, q_hash = self.guard1.validate_with_score("What is penalty under section 66?")
+        self.assertTrue(is_safe)
+        self.assertEqual(score, 0.0)
+        self.assertTrue(len(q_hash) == 64)
+
+        # Test cached call returns exact same result
+        is_safe_cached, reason_cached, score_cached, q_hash_cached = self.guard1.validate_with_score("What is penalty under section 66?")
+        self.assertEqual(q_hash, q_hash_cached)
+        self.assertEqual(score, score_cached)
+
+    def test_layer2_pii_anonymization(self):
+        text = "Contact John Doe at john.doe@example.com or 555-123-4567."
+        anonymized = self.guard2.scan_and_anonymize_pii(text)
+        self.assertIsNotNone(anonymized)
+
+    def test_layer3_citation_existence(self):
+        chunks = [{"act": "IT Act", "section": "66", "text": "Section 66 governs computer related crimes."}]
+        # Answer with legitimate citation
+        valid_answer = "Under IT Act, computer related crimes are prohibited."
+        self.assertTrue(self.guard3.verify_citation_existence(valid_answer, chunks))
+
+        # Answer with fabricated citation
+        fabricated_answer = "Under Companies Act, this is prohibited."
+        self.assertFalse(self.guard3.verify_citation_existence(fabricated_answer, chunks))
 
     def test_audit_logger_verification(self):
         import tempfile
@@ -58,17 +84,17 @@ class TestDefenseLayers(unittest.TestCase):
         try:
             logger = AuditLogger(db_path)
             
-            # Log some actions
-            logger.log("action_1")
-            logger.log("action_2", layer="layer1")
-            logger.log("action_3")
+            # Log actions with full telemetry
+            logger.log("action_1", injection_score=0.1, retrieval_hits=5, citations_used=2, validation_pass_fail="pass", latency_ms=45.2)
+            logger.log("action_2", layer="layer1", injection_score=0.95, retrieval_hits=0, citations_used=0, validation_pass_fail="blocked_input", latency_ms=12.1)
+            logger.log("action_3", injection_score=0.0, retrieval_hits=3, citations_used=1, validation_pass_fail="pass", latency_ms=110.5)
             
             # Verify chain is correct
             self.assertTrue(logger.verify_chain())
             
             # Corrupt the chain by changing a value directly in the DB
             with sqlite3.connect(db_path) as conn:
-                conn.execute("UPDATE audit_logs SET action = 'tampered_action' WHERE id = 2")
+                conn.execute("UPDATE audit_events SET action = 'tampered_action' WHERE id = 2")
                 conn.commit()
                 
             # Verify chain detects corruption
@@ -78,3 +104,4 @@ class TestDefenseLayers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

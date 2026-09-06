@@ -16,7 +16,35 @@ export const apiClient = {
       }),
     });
     if (!response.ok) {
-      throw new Error(`Chat request failed with status: ${response.status}`);
+      const errData = await response.json().catch(() => ({}));
+      const errorMsg = errData.detail || errData.message || `Chat request failed with status: ${response.status}`;
+      throw new Error(errorMsg);
+    }
+    return response.json();
+  },
+
+  /**
+   * GET /chat/sessions
+   */
+  async getSessions() {
+    const response = await fetch(`${BASE_URL}/chat/sessions`, {
+      method: 'GET',
+    });
+    if (!response.ok) {
+      throw new Error(`Get sessions failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * DELETE /chat/sessions/{session_id}
+   */
+  async deleteSession(sessionId) {
+    const response = await fetch(`${BASE_URL}/chat/sessions/${sessionId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      throw new Error(`Delete session failed with status: ${response.status}`);
     }
     return response.json();
   },
@@ -35,6 +63,26 @@ export const apiClient = {
     });
     if (!response.ok) {
       throw new Error(`Upload request failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * POST /upload/batch
+   */
+  async uploadBatch(files, sessionId) {
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
+    formData.append('session_id', sessionId);
+
+    const response = await fetch(`${BASE_URL}/upload/batch`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      throw new Error(`Batch upload request failed with status: ${response.status}`);
     }
     return response.json();
   },
@@ -108,6 +156,19 @@ export const apiClient = {
     });
     if (!response.ok) {
       throw new Error(`Audit log request failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * GET /mcp/status
+   */
+  async getMcpStatus() {
+    const response = await fetch(`${BASE_URL}/mcp/status`, {
+      method: 'GET',
+    });
+    if (!response.ok) {
+      throw new Error(`MCP status request failed with status: ${response.status}`);
     }
     return response.json();
   },

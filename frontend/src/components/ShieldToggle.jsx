@@ -1,24 +1,36 @@
 import React from 'react';
-import { ShieldIcon } from './Icons';
-import './ShieldToggle.css';
+import { CheckShieldIcon, ShieldAlertIcon } from './Icons';
 
 export default function ShieldToggle({ shieldOn, onToggle }) {
   return (
-    <div className={`shield-container glass-panel ${shieldOn ? 'shield-active' : 'shield-inactive'}`}>
-      <div className="shield-info">
-        <span className="shield-label">Security Shield</span>
-        <span className={`shield-status ${shieldOn ? 'status-on' : 'status-off'}`}>
-          {shieldOn ? 'ON / PROTECTED' : 'OFF / VULNERABLE'}
-        </span>
-      </div>
-      <button 
-        type="button" 
-        className={`shield-button ${shieldOn ? 'btn-active' : 'btn-inactive'}`}
-        onClick={() => onToggle(!shieldOn)}
-      >
-        <ShieldIcon size={18} color={shieldOn ? 'var(--safe-color)' : 'var(--danger-color)'} />
-        <span className="slider-indicator"></span>
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={() => onToggle(!shieldOn)}
+      style={{
+        background: shieldOn ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+        border: `1px solid ${shieldOn ? 'var(--defense-pass)' : 'var(--defense-block)'}`,
+        borderRadius: '16px',
+        padding: '5px 12px',
+        color: shieldOn ? 'var(--defense-pass)' : 'var(--defense-block)',
+        fontSize: '0.78rem',
+        fontWeight: 700,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        boxShadow: shieldOn ? '0 0 10px rgba(16, 185, 129, 0.2)' : 'none',
+      }}
+      title={
+        shieldOn
+          ? '3-Layer Defensive Shield ACTIVE (L1: Input Guard, L2: Presidio PII, L3: Output Grounding Guard)'
+          : '3-Layer Defensive Shield DISABLED (Unprotected Baseline Mode)'
+      }
+    >
+      {shieldOn ? (
+        <CheckShieldIcon size={14} color="var(--defense-pass)" />
+      ) : (
+        <ShieldAlertIcon size={14} color="var(--defense-block)" />
+      )}
+      <span>Shield: {shieldOn ? 'ON' : 'OFF'}</span>
+    </button>
   );
 }

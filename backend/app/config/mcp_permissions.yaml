@@ -1,0 +1,106 @@
+# DFrag Model Context Protocol (MCP) Tool Permissions & Policy
+# Phase 08 — MCP Gateway & Policy Engine Configuration
+
+version: "1.0.0"
+
+# Global MCP settings
+global:
+  enabled: true
+  enforce_policy: true
+  default_timeout_sec: 10.0
+  max_calls_per_request: 10
+  rate_limit_per_min: 60
+
+# Formal Tool Categories with Network Mode & Quotas
+categories:
+  LOCAL_RETRIEVAL:
+    description: "In-process statutory and IPC retrieval against local ChromaDB corpus."
+    required_mode: "OFFLINE"
+    max_calls_per_request: 10
+    timeout_sec: 5.0
+    rate_limit_per_min: 120
+    allowed_tools:
+      - "local_statute_search"
+      - "local_provision_lookup"
+
+  DOCUMENT_SEARCH:
+    description: "Search and retrieval across user-uploaded documents (Tier 2 Chroma collection)."
+    required_mode: "OFFLINE"
+    max_calls_per_request: 10
+    timeout_sec: 5.0
+    rate_limit_per_min: 60
+    allowed_tools:
+      - "user_document_search"
+      - "document_metadata_lookup"
+
+  LEGAL_SEARCH:
+    description: "Read-only legal corpus search across registered statutes and offline precedents."
+    required_mode: "OFFLINE"
+    max_calls_per_request: 8
+    timeout_sec: 8.0
+    rate_limit_per_min: 60
+    allowed_tools:
+      - "legal_corpus_query"
+      - "case_law_indexer"
+
+  CURRENT_LAW:
+    description: "Live lookup of gazette notifications and recent legislative amendments."
+    required_mode: "ONLINE"
+    max_calls_per_request: 5
+    timeout_sec: 15.0
+    rate_limit_per_min: 30
+    allowed_tools:
+      - "gazette_amendment_fetcher"
+      - "live_statute_checker"
+
+  CASE_LAW_SEARCH:
+    description: "Live search across Indian Kanoon and Supreme Court judgments."
+    required_mode: "ONLINE"
+    max_calls_per_request: 5
+    timeout_sec: 15.0
+    rate_limit_per_min: 30
+    allowed_tools:
+      - "kanoon_case_search"
+      - "sc_judgment_fetcher"
+
+  GOVERNMENT_SOURCE:
+    description: "Official government portals (IndiaCode, Law Commission Reports)."
+    required_mode: "ONLINE"
+    max_calls_per_request: 3
+    timeout_sec: 20.0
+    rate_limit_per_min: 20
+    allowed_tools:
+      - "indiacode_fetcher"
+      - "law_commission_report_query"
+
+  DEEP_RESEARCH:
+    description: "Multi-step composite research combining local and allowlisted external sources."
+    required_mode: "OFFLINE"
+    max_calls_per_request: 15
+    timeout_sec: 30.0
+    rate_limit_per_min: 20
+    allowed_tools:
+      - "composite_precedent_synthesizer"
+      - "cross_statute_analyzer"
+
+# External MCP Server Permissions (Legal sources and local microservices only)
+servers:
+  local-statute-server:
+    enabled: true
+    default_policy: "allow"
+    allowed_tools:
+      - "local_statute_search"
+      - "local_provision_lookup"
+      - "user_document_search"
+    denied_tools: []
+
+  indian-legal-gateway:
+    enabled: false
+    status: "PLANNED"
+    default_policy: "read_only"
+    allowed_tools:
+      - "indiacode_fetcher"
+      - "kanoon_case_search"
+      - "live_statute_checker"
+    denied_tools: []
+

@@ -1,0 +1,46 @@
+# DFrag Cleared Legal Sources Allowlist
+# Validated against Phase 10 Online/Offline Legal Research Policy
+# Default Network Mode is strictly OFFLINE unless human approved.
+
+version: "1.0.0"
+default_network_mode: "OFFLINE"
+
+allowed_domains:
+  - domain: "indiankanoon.org"
+    category: "Case Law & Judgments"
+    description: "Search engine for Indian law, Supreme Court and High Court judgments."
+    rate_limit_per_minute: 20
+    requires_approval: false
+
+  - domain: "indiacode.nic.in"
+    category: "Official Statutory Acts"
+    description: "Official digital repository of all Central and State enactments."
+    rate_limit_per_minute: 30
+    requires_approval: false
+
+  - domain: "sci.gov.in"
+    category: "Supreme Court Official"
+    description: "Official portal of the Supreme Court of India."
+    rate_limit_per_minute: 10
+    requires_approval: false
+
+  - domain: "mca.gov.in"
+    category: "Ministry of Corporate Affairs"
+    description: "Companies Act rules, forms, and regulatory notifications."
+    rate_limit_per_minute: 10
+    requires_approval: false
+
+  - domain: "egazette.gov.in"
+    category: "The Gazette of India"
+    description: "Official publication of new bills, enactments, and amendments."
+    rate_limit_per_minute: 10
+    requires_approval: false
+
+denied_patterns:
+  - "*.blogspot.com"
+  - "*.wordpress.com"
+  - "reddit.com"
+  - "twitter.com"
+  - "x.com"
+  - "facebook.com"
+  - "quora.com"

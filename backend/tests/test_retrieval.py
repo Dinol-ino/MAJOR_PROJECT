@@ -68,11 +68,12 @@ class TestRetrieval(unittest.TestCase):
         self.assertEqual(chunks[0]["section"], "66")
         self.assertIn("Penalty details", chunks[0]["text"])
 
-        # Fallback test
+        # Fallback test for un-sectioned text
         fallback_text = "Some random text without any section headers. Just normal sentences. " * 30
         chunks_fallback = chunker.chunk_document(fallback_text)
         self.assertTrue(len(chunks_fallback) > 1)
         self.assertEqual(chunks_fallback[0]["section"], "Chunk 1")
+
 
     def test_pdf_extractor_limits(self):
         # Create a small dummy text file (pretending it's a PDF) to test size limit check
@@ -88,30 +89,26 @@ class TestRetrieval(unittest.TestCase):
     def test_retrievers_integration(self):
         # Initialize retrievers using temporary directory for ChromaDB storage
         t1 = Tier1LawRetrieval(self.test_dir)
+        t1.bm25_index.clear()
         t2 = Tier2UserRetrieval(self.test_dir)
         
         # Verify empty collections return empty lists
         self.assertEqual(t1.query("unauthorized access"), [])
         self.assertEqual(t2.query("session_1", "unauthorized access"), [])
 
-        # Add mock documents directly to collections to test search & fusion
-        # Tier-1 Law
-        t1.collection.add(
-            documents=[
-                "Section 43: Unauthorized access to computer network is illegal.",
-                "Section 66: Computer related offences penalty guidelines."
-            ],
-            metadatas=[
-                {"act": "IT Act", "section": "43"},
-                {"act": "IT Act", "section": "66"}
-            ],
-            ids=["doc1", "doc2"]
-        )
+        # Add mock documents via add_document to synchronize both Chroma and BM25
+        t1.add_document("doc1", "Section 43: Unauthorized access to computer network is illegal.", {"act": "IT Act", "section": "43"})
+        t1.add_document("doc2", "Section 66: Computer related offences penalty guidelines.", {"act": "IT Act", "section": "66"})
 
         results = t1.query("penalty guidelines", top_k=1)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["section"], "66")
         self.assertEqual(results[0]["act"], "IT Act")
+
+        # Verify BM25 caching works on subsequent query call
+        results_cached = t1.query("penalty guidelines", top_k=1)
+        self.assertEqual(len(results_cached), 1)
+        self.assertEqual(results_cached[0]["section"], "66")
 
         # Tier-2 User Uploads
         t2.add_documents("session_123", "contract.pdf", "Section 1 governs the payment agreement.\nSection 2 governs liability limits.")
@@ -125,6 +122,27 @@ class TestRetrieval(unittest.TestCase):
         res_diff_user = t2.query("session_abc", "liability limits", top_k=1)
         self.assertEqual(res_diff_user, [])
 
+    def test_corpus_pipeline_diff(self):
+        from app.ingestion.corpus_pipeline import CorpusPipeline
+        pipeline = CorpusPipeline()
+        doc_id = "statute_sec_66"
+        initial_text = "Section 66 governs computer related offences with fine up to 5 lakh rupees."
+        
+        res1 = pipeline.process_and_verify(doc_id, initial_text)
+        self.assertFalse(res1["has_diff"])
+        self.assertFalse(res1["flagged_for_review"])
+
+        # Re-processing unchanged text should produce no diff
+        res2 = pipeline.process_and_verify(doc_id, initial_text)
+        self.assertFalse(res2["has_diff"])
+
+        # Processing modified text should produce exactly one flagged diff
+        modified_text = "Section 66 governs computer related offences with fine up to 10 lakh rupees."
+        res3 = pipeline.process_and_verify(doc_id, modified_text)
+        self.assertTrue(res3["has_diff"])
+        self.assertTrue(res3["flagged_for_review"])
+
 if __name__ == "__main__":
     unittest.main()
+
 

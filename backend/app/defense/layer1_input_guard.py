@@ -1,44 +1,27 @@
-import re
-from typing import Tuple, Optional
+import logging
+from typing import Tuple, Optional, Dict, Any
+from app.security.injection_gate import InjectionGate, injection_gate
+from app.config import settings
 
-# Regex and keyword rules for Layer 1
-INJECTION_KEYWORDS = [
-    r"ignore\s+(?:previous|the)\s+instructions",
-    r"you\s+are\s+now\s+dan",
-    r"system\s+prompt\s+extraction",
-    r"role\s+override",
-    r"delimiter\s+breaking"
-]
+logger = logging.getLogger(__name__)
 
-SQL_PROBES = [
-    r"';\s*drop\s+table",
-    r"union\s+select",
-    r"or\s+1\s*=\s*1",
-    r"exec\s*\(\s*char\("
-]
 
 class Layer1InputGuard:
-    def __init__(self, max_length: int = 1000):
-        self.max_length = max_length
+    """
+    Layer 1 Input Guard (Phase 07 Bridge).
+    Delegates to the hard-gate InjectionGate validator.
+    """
+
+    def __init__(self, max_length: Optional[int] = None, risk_threshold: Optional[float] = None):
+        self.max_length = max_length if max_length is not None else settings.security.max_query_chars
+        self.risk_threshold = risk_threshold if risk_threshold is not None else settings.INJECTION_RISK_THRESHOLD
+        self.gate = InjectionGate(max_length=self.max_length, risk_threshold=self.risk_threshold)
+
+    def get_query_hash(self, message: str) -> str:
+        return self.gate.compute_query_hash(message)
+
+    def validate_with_score(self, message: str) -> Tuple[bool, Optional[str], float, str]:
+        return self.gate.evaluate_query(message)
 
     def validate(self, message: str) -> Tuple[bool, Optional[str]]:
-        """
-        Validates the incoming message against Layer 1 rules.
-        Returns:
-            Tuple[bool, Optional[str]]: (is_clean, block_reason)
-        """
-        # 1. Length Check
-        if len(message) > self.max_length:
-            return False, "Query length exceeds maximum limit."
-
-        # 2. Injection Pattern Checks
-        for pattern in INJECTION_KEYWORDS:
-            if re.search(pattern, message, re.IGNORECASE):
-                return False, f"Potential prompt injection detected (pattern: {pattern})."
-
-        # 3. SQL / Command Injection Probe Checks
-        for pattern in SQL_PROBES:
-            if re.search(pattern, message, re.IGNORECASE):
-                return False, f"Potential SQL/command injection probe detected."
-
-        return True, None
+        return self.gate.validate(message)

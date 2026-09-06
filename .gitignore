@@ -1,45 +1,217 @@
-# Python Junk
+# ============================================================
+# Defensive RAG — Root .gitignore
+# ============================================================
+
+
+# ------------------------------------------------------------
+# Python
+# ------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
+
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.coverage
+.coverage.*
+htmlcov/
+
 venv/
 .venv/
 env/
+ENV/
 *.egg-info/
-.mypy_cache/
 
-# Node/React/Vite Junk
+
+# ------------------------------------------------------------
+# Python Build / Packaging
+# ------------------------------------------------------------
+build/
+dist/
+*.whl
+pip-wheel-metadata/
+*.egg
+
+
+# ------------------------------------------------------------
+# Node / React / Vite
+# ------------------------------------------------------------
 node_modules/
 dist/
 dist-ssr/
+.vite/
 *.local
 .eslintcache
-.vite/
 
-# Databases and Vector Stores (Local Persistence)
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+
+# ------------------------------------------------------------
+# Databases / Vector Stores / Local Persistence
+# ------------------------------------------------------------
 chroma_db/
+chroma-data/
 *.db
 *.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
 
+# Local vector/database persistence
+data/
+storage/
+persist/
+vector_store/
+vectorstore/
+
+
+# ------------------------------------------------------------
+# Logs
+# ------------------------------------------------------------
+*.log
+logs/
+log/
+*.log.*
+
+# Application/runtime logs
+runtime_logs/
+audit_logs/
+
+
+# ------------------------------------------------------------
 # Secrets & Environment Files
+# ------------------------------------------------------------
 .env
-.env*.local
+.env.*
+!.env.example
+!.env.template
 
-# IDEs & Editors
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+
+# ------------------------------------------------------------
+# Local Model Files / ML Artifacts
+# ------------------------------------------------------------
+# Large model/checkpoint files
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.onnx
+*.h5
+*.keras
+*.joblib
+*.pkl
+
+# Model/cache directories
+models/
+model_cache/
+hf_cache/
+huggingface/
+.cache/
+.huggingface/
+
+
+# ------------------------------------------------------------
+# RAG / Retrieval Generated Artifacts
+# ------------------------------------------------------------
+embeddings/
+embedding_cache/
+retrieval_cache/
+reranker_cache/
+index_cache/
+
+# Generated chunks / processed corpus
+processed_data/
+chunk_cache/
+ingestion_cache/
+
+
+# ------------------------------------------------------------
+# Temporary / Runtime Files
+# ------------------------------------------------------------
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+
+*.bak
+*.swp
+*.swo
+*~
+
+
+# ------------------------------------------------------------
+# Docker
+# ------------------------------------------------------------
+docker-compose.override.yml
+docker-compose.local.yml
+
+# Docker generated/runtime data
+.docker/
+docker-data/
+
+
+# ------------------------------------------------------------
+# IDEs / Editors
+# ------------------------------------------------------------
 .vscode/
 .idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.swp
+*.iml
 
-# OS Junk
+# VS Code local history
+.history/
+
+
+# ------------------------------------------------------------
+# OS
+# ------------------------------------------------------------
 .DS_Store
+.DS_Store?
 Thumbs.db
 desktop.ini
 
-# User/Local test acts
-project/data/acts_raw/*.txt
-!project/data/acts_raw/.gitkeep
+
+# ------------------------------------------------------------
+# Test / Coverage Artifacts
+# ------------------------------------------------------------
+.pytest_cache/
+.tox/
+.nox/
+coverage.xml
+*.coverage
+
+
+# ------------------------------------------------------------
+# Jupyter
+# ------------------------------------------------------------
+.ipynb_checkpoints/
+
+
+# ------------------------------------------------------------
+# Temporary Documentation / Generated Reports
+# ------------------------------------------------------------
+# Uncomment ONLY if these are generated automatically:
+# reports/generated/
+# docs/generated/
+
+
+# ------------------------------------------------------------
+# Project-specific local artifacts
+# ------------------------------------------------------------
+.local/
+.local-data/
+.runtime/
+.runtime-data/
