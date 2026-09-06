@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from app.config import settings
 
 class TokenBudgetManager:
@@ -6,10 +6,10 @@ class TokenBudgetManager:
     Manages context token limits dynamically to prevent model context overflow.
     Truncates lowest trust score chunks first.
     """
-    def __init__(self, context_limit: int = 4096, max_output_tokens: int = 1024):
-        self.max_context = context_limit
+    def __init__(self, context_limit: Optional[int] = None, max_output_tokens: Optional[int] = None):
+        self.max_context = context_limit if context_limit is not None else settings.GENERATOR_CONTEXT_TOKENS
         self.safety_margin = settings.TOKEN_BUDGET_SAFETY_MARGIN
-        self.max_output = max_output_tokens
+        self.max_output = max_output_tokens if max_output_tokens is not None else settings.GENERATOR_MAX_OUTPUT_TOKENS
         self.available_prompt_tokens = max(512, self.max_context - self.max_output - self.safety_margin)
 
     def fit_chunks(self, base_prompt_tokens: int, chunks: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:

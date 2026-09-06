@@ -27,9 +27,14 @@ class ModelEntry:
 class ModelRegistry:
     def __init__(self, yaml_path: Optional[str] = None):
         if yaml_path is None:
-            # Default location: backend/data/model_registry.yaml
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            yaml_path = os.path.join(base_dir, "data", "model_registry.yaml")
+            # Primary location: backend/app/config/model_registry.yaml
+            config_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            candidate = os.path.join(config_dir, "config", "model_registry.yaml")
+            if os.path.exists(candidate):
+                yaml_path = candidate
+            else:
+                base_dir = os.path.dirname(config_dir)
+                yaml_path = os.path.join(base_dir, "data", "model_registry.yaml")
 
         self.yaml_path = yaml_path
         self._entries: Dict[str, ModelEntry] = {}
@@ -105,33 +110,27 @@ class ModelRegistry:
         return self._entries.get(model_id)
 
     def recommended_for(self, hw: HardwareProfile) -> List[ModelEntry]:
-        # Filter logic:
-        # 1. RAM available headroom check (85%)
-        # 2. VRAM check if GPU available
-        # 3. AVX2 support check
-        valid = []
-        ram_budget = hw.ram_available_gb * 0.85
+        # Scoring logic based on hardware compatibility:
+        # Tier order: standard/legal domain prioritized when hardware permits, floor model as fallback
+        ram_budget = max(hw.ram_available_gb, hw.ram_total_gb * 0.75)
         vram_budget = (hw.gpu_vram_gb * 0.85) if (hw.gpu_available and hw.gpu_vram_gb) else 0.0
 
-        tier_order = {"premium": 4, "recommended": 3, "standard": 2, "minimum": 1}
+        tier_order = {"standard": 3, "recommended": 3, "premium": 2, "minimum": 1}
 
-        for model in self._entries.values():
-            if model.requires_avx2 and not hw.supports_avx2:
-                continue
+        models = list(self._entries.values())
 
-            # If GPU is required for model, verify VRAM
-            if model.vram_required_gb and model.vram_required_gb > vram_budget:
-                continue
+        def score_model(m: ModelEntry) -> float:
+            score = tier_order.get(m.tier, 1) * 10.0
+            # Preferred legal models get priority
+            if "legal" in m.model_id.lower() or "saullm" in m.model_id.lower():
+                score += 5.0
+            # If model fits in available RAM, boost score
+            if m.ram_required_gb <= ram_budget:
+                score += 3.0
+            else:
+                score -= 4.0
+            return score
 
-            # RAM requirement check
-            if model.ram_required_gb > max(ram_budget, hw.ram_total_gb * 0.7):
-                continue
+        models.sort(key=score_model, reverse=True)
+        return models
 
-            valid.append(model)
-
-        # Sort by tier weight desc, context window desc
-        valid.sort(
-            key=lambda m: (tier_order.get(m.tier, 0), m.context_window, -m.size_gb),
-            reverse=True
-        )
-        return valid if valid else list(self._entries.values())

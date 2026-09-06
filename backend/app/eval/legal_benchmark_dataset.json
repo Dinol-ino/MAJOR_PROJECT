@@ -1,0 +1,236 @@
+[
+  {
+    "id": "eval_001",
+    "category": "direct_lookup",
+    "query": "What is the penalty for computer related offences under Section 66 of the IT Act?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "66",
+    "expected_answer_contains": "imprisonment",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_002",
+    "category": "multi_hop",
+    "query": "How are unauthorized computer access and penalty linked under the IT Act?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "43, 66",
+    "expected_answer_contains": "Section 43",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_003",
+    "category": "missing_context_refusal",
+    "query": "What are the rules for maritime boundary dispute arbitration under Indian law?",
+    "ground_truth_act": null,
+    "ground_truth_section": null,
+    "expected_answer_contains": "cannot answer",
+    "should_refuse": true
+  },
+  {
+    "id": "eval_004",
+    "category": "superseded_trap",
+    "query": "What are the active provisions for repealed Section 12?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "12",
+    "expected_answer_contains": "superseded",
+    "should_refuse": true
+  },
+  {
+    "id": "eval_005",
+    "category": "direct_lookup",
+    "query": "What does Section 43 of the IT Act say about unauthorized access?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "43",
+    "expected_answer_contains": "penalty",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_006",
+    "category": "direct_lookup",
+    "query": "What is the definition of a 'computer' under the IT Act 2000?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "2",
+    "expected_answer_contains": "electronic",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_007",
+    "category": "citation_correctness",
+    "query": "Under which section of the IT Act is cyberstalking addressed?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "66A",
+    "expected_answer_contains": "66A",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_008",
+    "category": "missing_context_refusal",
+    "query": "What are the tax implications of cryptocurrency trading in India in 2025?",
+    "ground_truth_act": null,
+    "ground_truth_section": null,
+    "expected_answer_contains": "cannot answer",
+    "should_refuse": true
+  },
+  {
+    "id": "eval_009",
+    "category": "multi_hop",
+    "query": "What is the relationship between Section 66B and Section 66 of the IT Act?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "66, 66B",
+    "expected_answer_contains": "dishonestly",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_010",
+    "category": "freshness_required",
+    "query": "What are the latest amendments to the IT Act regarding data protection?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "43A",
+    "expected_answer_contains": "sensitive personal data",
+    "should_refuse": false,
+    "freshness_sensitive": true,
+    "note": "Answer must indicate corpus date; warn if legislation may have changed."
+  },
+  {
+    "id": "eval_011",
+    "category": "conflict_detection",
+    "query": "Is data localization mandatory under current Indian law?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "43A",
+    "expected_answer_contains": "sensitive",
+    "should_refuse": false,
+    "conflict_present": true,
+    "note": "Corpus may contain conflicting provisions from draft and enacted PDPB; response should surface conflict."
+  },
+  {
+    "id": "eval_012",
+    "category": "superseded_trap",
+    "query": "What are the penalties under the old Section 87(2)(zg) of the IT Act before it was amended?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "87",
+    "expected_answer_contains": "superseded",
+    "should_refuse": true
+  },
+  {
+    "id": "eval_013",
+    "category": "direct_lookup",
+    "query": "What powers does Section 69 of the IT Act give to the government?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "69",
+    "expected_answer_contains": "intercept",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_014",
+    "category": "citation_correctness",
+    "query": "Which section makes publishing obscene material in electronic form an offence?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "67",
+    "expected_answer_contains": "67",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_015",
+    "category": "missing_context_refusal",
+    "query": "What is the procedure for filing a writ petition in the Supreme Court of India?",
+    "ground_truth_act": null,
+    "ground_truth_section": null,
+    "expected_answer_contains": "cannot answer",
+    "should_refuse": true
+  },
+  {
+    "id": "eval_016",
+    "category": "multi_hop",
+    "query": "How does Section 72A relate to data breach disclosure obligations under Section 72?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "72, 72A",
+    "expected_answer_contains": "personal information",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_017",
+    "category": "freshness_required",
+    "query": "What does the Digital Personal Data Protection Act 2023 require from data fiduciaries?",
+    "ground_truth_act": "DPDPA 2023",
+    "ground_truth_section": null,
+    "expected_answer_contains": "data fiduciary",
+    "should_refuse": false,
+    "freshness_sensitive": true,
+    "note": "If DPDPA 2023 is not in corpus, system must refuse rather than hallucinate."
+  },
+  {
+    "id": "eval_018",
+    "category": "conflict_detection",
+    "query": "Is Section 66A of the IT Act currently enforceable?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "66A",
+    "expected_answer_contains": "struck down",
+    "should_refuse": false,
+    "conflict_present": true,
+    "note": "Section 66A was struck down by SC in Shreya Singhal case; corpus text may still contain the original provision text."
+  },
+  {
+    "id": "eval_019",
+    "category": "direct_lookup",
+    "query": "What is the maximum imprisonment under Section 66C of the IT Act?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "66C",
+    "expected_answer_contains": "three years",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_020",
+    "category": "citation_correctness",
+    "query": "Under which section is identity theft under the IT Act punishable?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "66C",
+    "expected_answer_contains": "66C",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_021",
+    "category": "missing_context_refusal",
+    "query": "What are the GST implications of cross-border SaaS sales in India?",
+    "ground_truth_act": null,
+    "ground_truth_section": null,
+    "expected_answer_contains": "cannot answer",
+    "should_refuse": true
+  },
+  {
+    "id": "eval_022",
+    "category": "multi_hop",
+    "query": "How do Sections 67, 67A, and 67B of the IT Act collectively address obscene content online?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "67, 67A, 67B",
+    "expected_answer_contains": "67",
+    "should_refuse": false
+  },
+  {
+    "id": "eval_023",
+    "category": "freshness_required",
+    "query": "What changes did the IT (Amendment) Act 2008 make to the original IT Act 2000?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": null,
+    "expected_answer_contains": "2008",
+    "should_refuse": false,
+    "freshness_sensitive": false
+  },
+  {
+    "id": "eval_024",
+    "category": "superseded_trap",
+    "query": "What are the provisions of Section 78 of the IT Act before the 2008 amendment?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "78",
+    "expected_answer_contains": "superseded",
+    "should_refuse": true
+  },
+  {
+    "id": "eval_025",
+    "category": "direct_lookup",
+    "query": "What is the role of the Cyber Appellate Tribunal under the IT Act?",
+    "ground_truth_act": "IT Act 2000",
+    "ground_truth_section": "48",
+    "expected_answer_contains": "appeal",
+    "should_refuse": false
+  }
+]

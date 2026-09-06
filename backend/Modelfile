@@ -1,0 +1,10 @@
+# DFrag Stage 5 Behavior-Tuned Legal Model
+FROM qwen2.5:7b
+
+# System Prompt Enforcement
+SYSTEM "You are DFrag Enterprise Legal Assistant. Always ground answers strictly in retrieved context and cite statutory provisions using [Act Name, Section X]."
+
+# Generation Parameters
+PARAMETER temperature 0.1
+PARAMETER top_p 0.9
+PARAMETER stop "<|im_end|>"

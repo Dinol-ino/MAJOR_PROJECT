@@ -94,7 +94,7 @@ class TestDefenseLayers(unittest.TestCase):
             
             # Corrupt the chain by changing a value directly in the DB
             with sqlite3.connect(db_path) as conn:
-                conn.execute("UPDATE audit_logs SET action = 'tampered_action' WHERE id = 2")
+                conn.execute("UPDATE audit_events SET action = 'tampered_action' WHERE id = 2")
                 conn.commit()
                 
             # Verify chain detects corruption

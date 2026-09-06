@@ -1,6 +1,6 @@
 import time
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException
 
 from app.schemas import ChatRequest, ChatResponse
@@ -22,6 +22,8 @@ from app.runtime.hallucination_detector import HallucinationDetector
 from app.runtime.confidence_scorer import ConfidenceScorer
 from app.runtime.response_formatter import ResponseFormatter
 
+from app.memory.durable_memory import DurableMemoryManager
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
 
@@ -29,7 +31,8 @@ router = APIRouter(tags=["chat"])
 input_guard = Layer1InputGuard()
 trusted_context = Layer2TrustedContext()
 output_guard = Layer3OutputGuard()
-audit_logger = AuditLogger(settings.SQLITE_DB_PATH)
+audit_logger = AuditLogger()
+durable_memory = DurableMemoryManager()
 
 tier1_retriever = Tier1LawRetrieval(settings.CHROMA_PERSIST_DIR)
 tier2_retriever = Tier2UserRetrieval(settings.CHROMA_PERSIST_DIR)
@@ -41,48 +44,96 @@ hallucination_detector = HallucinationDetector()
 confidence_scorer = ConfidenceScorer()
 response_formatter = ResponseFormatter()
 
-# In-memory store for active session titles
-_session_registry: Dict[str, Dict[str, Any]] = {}
-
 
 @router.get("/chat/sessions")
-def list_sessions():
+def list_sessions(user_id: str = "default_user"):
     """
-    Returns list of past task sessions for the sidebar navigation.
+    Returns list of past task sessions for the sidebar navigation from durable memory.
     """
+    conversations = durable_memory.get_user_conversations(user_id=user_id)
     sessions = []
-    for sid, meta in _session_registry.items():
+    for conv in conversations:
         sessions.append({
-            "session_id": sid,
-            "title": meta.get("title", f"Task {sid}"),
-            "created_at": meta.get("created_at"),
-            "model": meta.get("model", "qwen2.5:3b"),
+            "session_id": conv["conversation_id"],
+            "title": conv.get("title", f"Task {conv['conversation_id'][:8]}"),
+            "created_at": conv.get("created_at"),
+            "user_id": conv.get("user_id"),
         })
-    return {"sessions": list(reversed(sessions))}
+    return {"sessions": sessions}
+
+
+@router.get("/chat/sessions/{session_id}/messages")
+def get_session_messages(session_id: str, user_id: str = "default_user"):
+    """
+    Returns full transcript message history for a specific conversation.
+    """
+    messages = durable_memory.get_conversation_messages(session_id, user_id=user_id)
+    return {"session_id": session_id, "messages": messages}
 
 
 @router.delete("/chat/sessions/{session_id}")
-def delete_session(session_id: str):
-    if session_id in _session_registry:
-        del _session_registry[session_id]
+def delete_session(session_id: str, user_id: str = "default_user"):
+    durable_memory.delete_conversation(session_id, user_id=user_id)
     return {"status": "ok", "deleted": session_id}
+
+
+@router.get("/chat/memory/semantic")
+def list_semantic_memories(user_id: str = "default_user", category: Optional[str] = None):
+    """Lists structured semantic facts and preferences for a user."""
+    return {"memories": durable_memory.get_semantic_memories(user_id=user_id, category=category)}
+
+
+@router.post("/chat/memory/semantic")
+def create_semantic_memory(user_id: str = "default_user", category: str = "preference", key: str = "", value: str = ""):
+    """Stores a contextual fact or preference in persistent semantic memory."""
+    mem = durable_memory.save_semantic_memory(user_id=user_id, category=category, key=key, value=value)
+    return {"status": "ok", "memory": mem}
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
     start_time = time.time()
     
-    # Track session in registry for Sidebar
-    if request.session_id not in _session_registry:
-        title = request.message[:35] + ("..." if len(request.message) > 35 else "")
-        _session_registry[request.session_id] = {
-            "title": title,
-            "created_at": "Just now",
-            "model": request.model or settings.DEFAULT_MODEL,
-        }
+    # Write-through persistence: record user turn
+    durable_memory.create_conversation_if_not_exists(
+        conversation_id=request.session_id,
+        user_id="default_user",
+        title=request.message[:35] + ("..." if len(request.message) > 35 else "")
+    )
+    durable_memory.add_message(
+        conversation_id=request.session_id,
+        role="user",
+        content=request.message,
+        user_id="default_user"
+    )
 
     # --- SHIELD ON PIPELINE (Defensive RAG Mode) ---
     if request.shield_on:
+        # Bounded State Machine Orchestration (Phase 09)
+        if settings.orchestrator.enabled:
+            from app.orchestrator.state_machine import research_orchestrator
+            orch_res = await research_orchestrator.execute(
+                query=request.message,
+                session_id=request.session_id,
+                user_id="default_user",
+                model=request.model,
+                shield_on=True
+            )
+            durable_memory.add_message(
+                conversation_id=request.session_id,
+                role="assistant",
+                content=orch_res.answer,
+                citations=orch_res.sources,
+                user_id="default_user"
+            )
+            return ChatResponse(
+                answer=orch_res.answer,
+                sources=orch_res.sources,
+                blocked_by=orch_res.blocked_by,
+                block_reason=orch_res.block_reason
+            )
+
+        # Direct Fallback Pipeline (Rollback Mode)
         # Layer 1: Input Guard Validation with query hash deduplication
         is_safe, reason, inj_score, q_hash = input_guard.validate_with_score(request.message)
         if not is_safe:
@@ -97,8 +148,15 @@ async def chat_endpoint(request: ChatRequest):
                 model_tier_used=request.model or settings.DEFAULT_MODEL,
                 latency_ms=latency_ms
             )
+            blocked_msg = f"Query blocked by Security Shield: {reason}"
+            durable_memory.add_message(
+                conversation_id=request.session_id,
+                role="assistant",
+                content=blocked_msg,
+                user_id="default_user"
+            )
             return ChatResponse(
-                answer=f"Query blocked by Security Shield: {reason}",
+                answer=blocked_msg,
                 sources=[],
                 blocked_by="layer1",
                 block_reason=reason
@@ -125,13 +183,42 @@ async def chat_endpoint(request: ChatRequest):
         # Layer 2: Secure Prompt Construction (with Presidio PII anonymization)
         prompt = trusted_context.build_prompt(request.message, fitted_chunks)
 
-        # Invoke Stage 5 Runtime Abstraction Engine
+        # Invoke Stage 5 Runtime Abstraction Engine with automatic OOM fallback
         runtime = RuntimeManager.get()
+        target_model = request.model or settings.DEFAULT_MODEL
         try:
-            raw_answer = await runtime.generate(prompt, model=request.model)
+            raw_answer = await runtime.generate(prompt, model=target_model)
         except Exception as exc:
-            logger.error(f"Runtime engine generation error: {exc}", exc_info=True)
-            raise HTTPException(status_code=502, detail=f"Runtime engine generation error: {str(exc)}")
+            # Determine a real fallback model — never fall back to the same model that just failed
+            fallback_model = settings.OLLAMA_FALLBACK_MODEL.strip() or settings.DEFAULT_MODEL
+            if fallback_model.lower() == target_model.lower():
+                # If configured fallback is same as primary, try default model if different
+                fallback_model = settings.DEFAULT_MODEL if target_model.lower() != settings.DEFAULT_MODEL.lower() else ""
+
+            logger.warning(
+                f"Runtime engine generation error on model '{target_model}': {exc}. "
+                f"Attempting automatic fallback to '{fallback_model}'."
+            )
+            # Log fallback event to audit logger
+            audit_logger.log(
+                action="chat_model_fallback",
+                layer="runtime",
+                injection_score=inj_score,
+                retrieval_hits=len(retrieved_chunks),
+                citations_used=len(sources),
+                validation_pass_fail="fallback_tier0",
+                model_tier_used=f"{fallback_model} (Tier 0 Fallback)",
+                latency_ms=(time.time() - start_time) * 1000
+            )
+            if fallback_model:
+                try:
+                    raw_answer = await runtime.generate(prompt, model=fallback_model)
+                except Exception as fallback_exc:
+                    logger.error(f"Fallback to '{fallback_model}' also failed: {fallback_exc}", exc_info=True)
+                    raise HTTPException(status_code=502, detail=f"Model generation error on both primary ('{target_model}') and fallback ('{fallback_model}') tiers: {str(fallback_exc)}")
+            else:
+                raise HTTPException(status_code=502, detail=f"Model generation error on '{target_model}' and no viable fallback model available: {str(exc)}")
+
 
         # Layer 3: Output Guard Validation & Citation-existence Check
         is_valid, error_reason = output_guard.validate(raw_answer, fitted_chunks, prompt)
@@ -148,8 +235,17 @@ async def chat_endpoint(request: ChatRequest):
                 model_tier_used=request.model or settings.DEFAULT_MODEL,
                 latency_ms=latency_ms
             )
+            quarantine_msg = f"Response quarantined: {error_reason}"
+            sources_dict = [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in sources]
+            durable_memory.add_message(
+                conversation_id=request.session_id,
+                role="assistant",
+                content=quarantine_msg,
+                citations=sources_dict,
+                user_id="default_user"
+            )
             return ChatResponse(
-                answer=f"Response quarantined: {error_reason}",
+                answer=quarantine_msg,
                 sources=sources,
                 blocked_by="layer3",
                 block_reason=error_reason
@@ -173,6 +269,15 @@ async def chat_endpoint(request: ChatRequest):
             latency_ms=latency_ms
         )
 
+        sources_dict = [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in sources]
+        durable_memory.add_message(
+            conversation_id=request.session_id,
+            role="assistant",
+            content=formatted_answer,
+            citations=sources_dict,
+            user_id="default_user"
+        )
+
         return ChatResponse(
             answer=formatted_answer,
             sources=sources,
@@ -181,6 +286,7 @@ async def chat_endpoint(request: ChatRequest):
             confidence_score=confidence,
             hallucination_flags=hallucination_report.signals
         )
+
 
 
     # --- SHIELD OFF PIPELINE (Unshielded Baseline) ---

@@ -1,18 +1,45 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
 
 :root {
-  --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
-  --panel-bg: rgba(30, 41, 59, 0.7);
-  --panel-border: rgba(255, 255, 255, 0.08);
+  /* Consensus Dark Theme Palette */
+  --bg-app: #0d0f14;
+  --bg-sidebar: #111319;
+  --bg-card: #151821;
+  --bg-card-hover: #1b1f2b;
+  --bg-input: #171b26;
+  --bg-modal: #13161f;
+  
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-medium: #222634;
+  --border-active: #32384a;
+  
+  /* Typography */
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
-  --accent-color: #6366f1;
-  --accent-hover: #4f46e5;
-  --danger-color: #ef4444;
-  --safe-color: #10b981;
-  --font-sans: 'Inter', sans-serif;
-  --font-title: 'Outfit', sans-serif;
-  --shadow-glow: 0 8px 32px 0 rgba(99, 102, 241, 0.15);
+  --text-muted: #64748b;
+  --text-dim: #475569;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-title: 'Outfit', var(--font-sans);
+  
+  /* Brand & Accents */
+  --accent-cyan: #00d2b4;         /* Consensus Turquoise */
+  --accent-blue: #38bdf8;         /* Sky / Primary highlight */
+  --accent-indigo: #6366f1;       /* AI Copilot Indigo */
+  --accent-gradient: linear-gradient(135deg, #00d2b4 0%, #38bdf8 50%, #6366f1 100%);
+  
+  /* Defense Status Colors */
+  --defense-pass: #10b981;        /* Shield Active (Emerald) */
+  --defense-review: #f59e0b;      /* Review Needed (Amber) */
+  --defense-block: #ef4444;       /* Shield Quarantined (Rose) */
+  --defense-glow: 0 0 16px rgba(16, 185, 129, 0.25);
+  
+  /* Shadows & Glows */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
+  --glow-cyan: 0 0 20px rgba(0, 210, 180, 0.2);
+  --glow-indigo: 0 0 20px rgba(99, 102, 241, 0.2);
 }
 
 * {
@@ -21,38 +48,128 @@
   padding: 0;
 }
 
-body {
-  font-family: var(--font-sans);
-  background: var(--bg-gradient);
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg-app);
   color: var(--text-primary);
-  min-height: 100vh;
-  overflow-x: hidden;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Glassmorphism utility classes */
-.glass-panel {
-  background: var(--panel-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-.glow-text {
-  text-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-/* Button animation details */
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+/* Utility Classes */
+.font-title {
+  font-family: var(--font-title);
+}
+
+.glass-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.glass-card:hover {
+  border-color: var(--border-medium);
+  box-shadow: var(--shadow-md);
+}
+
+.glow-pill {
+  position: relative;
+  overflow: hidden;
+}
+
+.glow-pill::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  transition: all 0.5s ease;
+}
+
+.glow-pill:hover::before {
+  left: 100%;
+}
+
+/* Pulse animation for active generating state */
+@keyframes pulse-subtle {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.99);
+  }
+}
+
+.pulse-text {
+  animation: pulse-subtle 2s infinite ease-in-out;
+}
+
+/* Subtle fade in for views */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.view-container {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+/* Interactive Buttons */
 button {
   cursor: pointer;
-  transition: all 0.2s ease-in-out;
+  font-family: inherit;
+  transition: all 0.15s ease-in-out;
 }
 
 button:hover {
-  transform: translateY(-1px);
+  filter: brightness(1.08);
 }
 
 button:active {
-  transform: translateY(1px);
+  transform: scale(0.98);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  filter: none;
+  transform: none;
+}
+
+input, textarea, select {
+  font-family: inherit;
 }

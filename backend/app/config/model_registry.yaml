@@ -1,0 +1,129 @@
+# DFrag Centralized Model Registry
+# Format validated against app.system.model_registry.ModelEntry
+
+version: "1.0.0"
+updated: "2026-08-26"
+
+models:
+  - model_id: "gemma2:2b"
+    display_name: "Gemma 2 2B (Lightweight Floor)"
+    provider: "ollama"
+    size_gb: 1.6
+    ram_required_gb: 3.0
+    vram_required_gb: 2.0
+    context_window: 4096
+    quantization: "q4_k_m"
+    tier: "minimum"
+    requires_avx2: false
+    language_support: ["en", "hi"]
+    ollama_tag: "gemma2:2b"
+
+  - model_id: "qwen2.5:3b"
+    display_name: "Qwen 2.5 3B (Standard Floor)"
+    provider: "ollama"
+    size_gb: 1.9
+    ram_required_gb: 4.0
+    vram_required_gb: 4.0
+    context_window: 8192
+    quantization: "q4_k_m"
+    tier: "minimum"
+    requires_avx2: true
+    language_support: ["en", "hi"]
+    ollama_tag: "qwen2.5:3b"
+
+  - model_id: "llama3.2:3b"
+    display_name: "Llama 3.2 3B"
+    provider: "ollama"
+    size_gb: 2.0
+    ram_required_gb: 5.0
+    vram_required_gb: 4.0
+    context_window: 8192
+    quantization: "q4_k_m"
+    tier: "standard"
+    requires_avx2: true
+    language_support: ["en"]
+    ollama_tag: "llama3.2:3b"
+
+  - model_id: "qwen2.5:7b"
+    display_name: "Qwen 2.5 7B (High Accuracy)"
+    provider: "ollama"
+    size_gb: 4.7
+    ram_required_gb: 8.0
+    vram_required_gb: 6.0
+    context_window: 8192
+    quantization: "q4_k_m"
+    tier: "standard"
+    requires_avx2: true
+    language_support: ["en", "hi"]
+    ollama_tag: "qwen2.5:7b"
+
+  - model_id: "dfrag-legal:7b"
+    display_name: "DFrag Legal 7B (Specialized Indian Law)"
+    provider: "ollama"
+    size_gb: 4.7
+    ram_required_gb: 8.0
+    vram_required_gb: 6.0
+    context_window: 8192
+    quantization: "q4_k_m"
+    tier: "standard"
+    requires_avx2: true
+    language_support: ["en", "hi"]
+    ollama_tag: "dfrag-legal:7b"
+
+  - model_id: "saullm:7b"
+    display_name: "SaulLM 7B (Legal Domain LLM)"
+    provider: "ollama"
+    size_gb: 4.7
+    ram_required_gb: 8.0
+    vram_required_gb: 6.0
+    context_window: 8192
+    quantization: "q4_k_m"
+    tier: "standard"
+    requires_avx2: true
+    language_support: ["en"]
+    ollama_tag: "saullm:7b"
+
+
+  - model_id: "qwen2.5:14b"
+    display_name: "Qwen 2.5 14B (Enterprise Tier 2)"
+    provider: "ollama"
+    size_gb: 9.0
+    ram_required_gb: 16.0
+    vram_required_gb: 12.0
+    context_window: 16384
+    quantization: "q4_k_m"
+    tier: "premium"
+    requires_avx2: true
+    language_support: ["en", "hi"]
+    ollama_tag: "qwen2.5:14b"
+
+task_routes:
+  security_classification:
+    method: "deterministic_rules"
+    description: "Deterministic regex and injection risk scoring. LLM generation bypassed."
+  intent_routing:
+    tier: "minimum"
+    preferred_model: "qwen2.5:3b"
+    description: "Fast query intent and tool classification."
+  query_reformulation:
+    tier: "minimum"
+    preferred_model: "qwen2.5:3b"
+    description: "Statutory query keyword expansion."
+  summarization:
+    tier_short: "minimum"
+    tier_complex: "standard"
+    complexity_threshold_chars: 4000
+    preferred_models:
+      short: "qwen2.5:3b"
+      complex: "qwen2.5:7b"
+    description: "Context-length-aware document summarization."
+  legal_reasoning:
+    tier: "hardware_dependent"
+    preferred_models:
+      minimum: "qwen2.5:3b"
+      standard: "qwen2.5:7b"
+      premium: "qwen2.5:14b"
+    description: "Complex statutory analysis and case law synthesis."
+  citation_verification:
+    method: "deterministic_overlap"
+    description: "Deterministic citation existence and span overlap validation."

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldIcon } from './Icons';
+import { CheckShieldIcon, ShieldAlertIcon } from './Icons';
 
 export default function ShieldToggle({ shieldOn, onToggle }) {
   return (
@@ -7,22 +7,29 @@ export default function ShieldToggle({ shieldOn, onToggle }) {
       type="button"
       onClick={() => onToggle(!shieldOn)}
       style={{
-        background: shieldOn ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-        border: `1px solid ${shieldOn ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+        background: shieldOn ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+        border: `1px solid ${shieldOn ? 'var(--defense-pass)' : 'var(--defense-block)'}`,
         borderRadius: '16px',
-        padding: '4px 12px',
-        color: shieldOn ? '#22c55e' : '#ef4444',
+        padding: '5px 12px',
+        color: shieldOn ? 'var(--defense-pass)' : 'var(--defense-block)',
         fontSize: '0.78rem',
-        fontWeight: 600,
+        fontWeight: 700,
         display: 'flex',
         alignItems: 'center',
         gap: '6px',
-        cursor: 'pointer',
-        transition: 'all 0.2s ease',
+        boxShadow: shieldOn ? '0 0 10px rgba(16, 185, 129, 0.2)' : 'none',
       }}
-      title={shieldOn ? 'Security Shield Active (Protected)' : 'Security Shield Disabled'}
+      title={
+        shieldOn
+          ? '3-Layer Defensive Shield ACTIVE (L1: Input Guard, L2: Presidio PII, L3: Output Grounding Guard)'
+          : '3-Layer Defensive Shield DISABLED (Unprotected Baseline Mode)'
+      }
     >
-      <ShieldIcon size={14} color={shieldOn ? '#22c55e' : '#ef4444'} />
+      {shieldOn ? (
+        <CheckShieldIcon size={14} color="var(--defense-pass)" />
+      ) : (
+        <ShieldAlertIcon size={14} color="var(--defense-block)" />
+      )}
       <span>Shield: {shieldOn ? 'ON' : 'OFF'}</span>
     </button>
   );

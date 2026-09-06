@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: dfrag_memory
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
   backend:
     build:
       context: ./backend
@@ -9,12 +25,18 @@ services:
       - chroma-data:/workspace/chroma_db
       - sqlite-data:/workspace/db
     environment:
+      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/dfrag_memory
+      - REDIS_URL=redis://redis:6379
       - OLLAMA_URL=http://host.docker.internal:11434
       - DEFAULT_MODEL=qwen2.5:3b
+      - ANONYMIZED_TELEMETRY=False
       - CHROMA_PERSIST_DIR=/workspace/chroma_db
       - SQLITE_DB_PATH=/workspace/db/audit_log.db
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - postgres
+      - redis
 
   frontend:
     build:
@@ -25,9 +47,13 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    environment:
+      - VITE_PROXY_TARGET=http://backend:8000
     depends_on:
       - backend
 
 volumes:
+  pg-data:
   chroma-data:
   sqlite-data:
+

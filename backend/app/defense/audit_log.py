@@ -1,59 +1,66 @@
-import sqlite3
 import hashlib
+import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from contextlib import contextmanager
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
+
+from app.config import settings
+from app.db.models import Base, AuditEvent
+from app.db.engine import get_sync_engine, get_sync_session
+
+logger = logging.getLogger(__name__)
+
 
 class AuditLogger:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
-        self._init_db()
+    """
+    Cryptographic SHA-256 hash-chained audit logging engine.
+    Persists tamper-evident telemetry to PostgreSQL/SQLite via SQLAlchemy ORM (AuditEvent model).
+    """
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path or settings.SQLITE_DB_PATH
+        if db_path and not (db_path.startswith("postgres://") or db_path.startswith("postgresql://")):
+            url = f"sqlite:///{db_path}" if not db_path.startswith("sqlite://") else db_path
+            self._engine = create_engine(url, connect_args={"check_same_thread": False}, echo=False)
+            Base.metadata.create_all(bind=self._engine)
+            with self._engine.connect() as conn:
+                try:
+                    conn.execute(Base.metadata.tables["audit_events"].select().limit(0))
+                except Exception:
+                    pass
+            self._session_factory = sessionmaker(bind=self._engine, autoflush=False, autocommit=False)
+        else:
+            self._engine = None
+            self._session_factory = None
+            try:
+                engine = get_sync_engine()
+                Base.metadata.create_all(bind=engine)
+            except Exception as e:
+                logger.warning(f"Could not initialize audit schema on startup: {e}")
 
-    def _init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS audit_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ts TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    layer TEXT,
-                    injection_score REAL,
-                    retrieval_hits INTEGER,
-                    citations_used INTEGER,
-                    validation_pass_fail TEXT,
-                    model_tier_used TEXT,
-                    latency_ms REAL,
-                    hash TEXT NOT NULL,
-                    prev_hash TEXT NOT NULL
-                )
-            """)
-            conn.commit()
-            
-            # Migration check for existing DB missing new columns
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(audit_logs)")
-            existing_cols = {row[1] for row in cursor.fetchall()}
-            
-            new_cols = {
-                "injection_score": "REAL",
-                "retrieval_hits": "INTEGER",
-                "citations_used": "INTEGER",
-                "validation_pass_fail": "TEXT",
-                "model_tier_used": "TEXT",
-                "latency_ms": "REAL"
-            }
-            for col_name, col_type in new_cols.items():
-                if col_name not in existing_cols:
-                    conn.execute(f"ALTER TABLE audit_logs ADD COLUMN {col_name} {col_type}")
-            conn.commit()
+    @contextmanager
+    def _get_session(self):
+        if self._session_factory:
+            session: Session = self._session_factory()
+            try:
+                yield session
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+            finally:
+                session.close()
+        else:
+            with get_sync_session() as session:
+                yield session
 
     def get_latest_hash(self) -> str:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT hash FROM audit_logs ORDER BY id DESC LIMIT 1")
-            row = cursor.fetchone()
-            if row:
-                return row[0]
-            # Genesis hash (64 zeros)
+        with self._get_session() as session:
+            latest = session.query(AuditEvent).order_by(AuditEvent.id.desc()).first()
+            if latest:
+                return latest.hash
             return "0000000000000000000000000000000000000000000000000000000000000000"
 
     def log(
@@ -72,34 +79,37 @@ class AuditLogger:
         """
         ts = datetime.utcnow().isoformat() + "Z"
         prev_hash = self.get_latest_hash()
-        
-        layer_str = str(layer) if layer else "null"
-        inj_str = f"{injection_score:.4f}" if injection_score is not None else "null"
-        hits_str = str(retrieval_hits) if retrieval_hits is not None else "null"
-        cites_str = str(citations_used) if citations_used is not None else "null"
-        val_str = str(validation_pass_fail) if validation_pass_fail else "null"
-        tier_str = str(model_tier_used) if model_tier_used else "null"
-        lat_str = f"{latency_ms:.2f}" if latency_ms is not None else "null"
+        from app.security.audit_ledger import CryptographicAuditLedger
+        current_hash = CryptographicAuditLedger.compute_event_hash(
+            prev_hash=prev_hash,
+            ts=ts,
+            action=action,
+            layer=layer,
+            injection_score=injection_score,
+            retrieval_hits=retrieval_hits,
+            citations_used=citations_used,
+            validation_pass_fail=validation_pass_fail,
+            model_tier_used=model_tier_used,
+            latency_ms=latency_ms
+        )
 
-        hash_input = f"{ts}|{action}|{layer_str}|{inj_str}|{hits_str}|{cites_str}|{val_str}|{tier_str}|{lat_str}|{prev_hash}"
-        current_hash = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
+        event = AuditEvent(
+            ts=ts,
+            action=action,
+            layer=layer,
+            injection_score=injection_score,
+            retrieval_hits=retrieval_hits,
+            citations_used=citations_used,
+            validation_pass_fail=validation_pass_fail,
+            model_tier_used=model_tier_used,
+            latency_ms=latency_ms,
+            hash=current_hash,
+            prev_hash=prev_hash
+        )
 
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO audit_logs (
-                    ts, action, layer, injection_score, retrieval_hits, 
-                    citations_used, validation_pass_fail, model_tier_used, 
-                    latency_ms, hash, prev_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    ts, action, layer, injection_score, retrieval_hits,
-                    citations_used, validation_pass_fail, model_tier_used,
-                    latency_ms, current_hash, prev_hash
-                )
-            )
-            conn.commit()
+        with self._get_session() as session:
+            session.add(event)
+            session.flush()
 
         return {
             "ts": ts,
@@ -110,44 +120,38 @@ class AuditLogger:
         }
 
     def fetch_all(self) -> List[Dict[str, Any]]:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT ts, action, layer, injection_score, retrieval_hits, 
-                       citations_used, validation_pass_fail, model_tier_used, 
-                       latency_ms, hash, prev_hash 
-                FROM audit_logs ORDER BY id ASC
-            """)
-            rows = cursor.fetchall()
-            return [dict(r) for r in rows]
+        with self._get_session() as session:
+            events = session.query(AuditEvent).order_by(AuditEvent.id.asc()).all()
+            return [e.to_dict() for e in events]
 
     def verify_chain(self) -> bool:
         """
         Verifies the cryptographic integrity of the entire audit log chain.
         """
+        from app.security.audit_ledger import CryptographicAuditLedger
         rows = self.fetch_all()
         expected_prev_hash = "0000000000000000000000000000000000000000000000000000000000000000"
-        
+
         for row in rows:
             if row["prev_hash"] != expected_prev_hash:
                 return False
-                
-            layer_str = str(row["layer"]) if row["layer"] else "null"
-            inj_str = f"{row['injection_score']:.4f}" if row.get('injection_score') is not None else "null"
-            hits_str = str(row['retrieval_hits']) if row.get('retrieval_hits') is not None else "null"
-            cites_str = str(row['citations_used']) if row.get('citations_used') is not None else "null"
-            val_str = str(row['validation_pass_fail']) if row.get('validation_pass_fail') else "null"
-            tier_str = str(row['model_tier_used']) if row.get('model_tier_used') else "null"
-            lat_str = f"{row['latency_ms']:.2f}" if row.get('latency_ms') is not None else "null"
 
-            hash_input = f"{row['ts']}|{row['action']}|{layer_str}|{inj_str}|{hits_str}|{cites_str}|{val_str}|{tier_str}|{lat_str}|{row['prev_hash']}"
-            computed_hash = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
-            
+            computed_hash = CryptographicAuditLedger.compute_event_hash(
+                prev_hash=row["prev_hash"],
+                ts=row["ts"],
+                action=row["action"],
+                layer=row.get("layer"),
+                injection_score=row.get("injection_score"),
+                retrieval_hits=row.get("retrieval_hits"),
+                citations_used=row.get("citations_used"),
+                validation_pass_fail=row.get("validation_pass_fail"),
+                model_tier_used=row.get("model_tier_used"),
+                latency_ms=row.get("latency_ms")
+            )
+
             if row["hash"] != computed_hash:
                 return False
-                
-            expected_prev_hash = row["hash"]
-            
-        return True
 
+            expected_prev_hash = row["hash"]
+
+        return True

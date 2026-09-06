@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import MicButton from './MicButton';
 import UploadButton from './UploadButton';
-import { SendIcon, BookIcon, FolderIcon, SparklesIcon } from './Icons';
+import { SendIcon, BookIcon, FolderIcon, SparklesIcon, ScaleIcon } from './Icons';
 
-export default function CommandInput({ onSendMessage, sessionId, onUploadSuccess }) {
+export default function CommandInput({ onSendMessage, sessionId, onUploadSuccess, isGenerating }) {
   const [input, setInput] = useState('');
 
   const handleSend = (e) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || isGenerating) return;
     onSendMessage(input);
     setInput('');
   };
@@ -18,40 +18,43 @@ export default function CommandInput({ onSendMessage, sessionId, onUploadSuccess
   };
 
   const handlePillClick = (promptText) => {
+    if (isGenerating) return;
     onSendMessage(promptText);
   };
 
   return (
-    <div style={{ width: '100%', maxWidth: '780px', margin: '0 auto' }}>
+    <div style={{ width: '100%', maxWidth: '760px', margin: '0 auto' }}>
       {/* Floating Command Box */}
       <form
         onSubmit={handleSend}
         style={{
-          background: '#1e1e22',
-          border: '1px solid #27272a',
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-medium)',
           borderRadius: '16px',
-          padding: '12px 16px',
-          boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
+          padding: '14px 18px',
+          boxShadow: 'var(--shadow-md)',
           display: 'flex',
           flexDirection: 'column',
           gap: '12px',
           transition: 'border-color 0.2s ease',
+          opacity: isGenerating ? 0.7 : 1,
         }}
-        className="command-box"
+        className="glow-pill"
       >
-        {/* Main Input Textarea/Input */}
+        {/* Main Input Textarea */}
         <input
           type="text"
           value={input}
+          disabled={isGenerating}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Assign a legal task or type / for options"
+          placeholder={isGenerating ? "Legal AI is generating response..." : "Ask a legal question, analyze statutes, or research case law..."}
           style={{
             width: '100%',
             background: 'transparent',
             border: 'none',
             outline: 'none',
-            color: '#f8fafc',
-            fontSize: '1.02rem',
+            color: 'var(--text-primary)',
+            fontSize: '1rem',
             boxSizing: 'border-box',
           }}
         />
@@ -69,9 +72,9 @@ export default function CommandInput({ onSendMessage, sessionId, onUploadSuccess
 
             <button
               type="submit"
-              disabled={!input.trim()}
+              disabled={!input.trim() || isGenerating}
               style={{
-                background: input.trim() ? 'var(--accent-color)' : 'rgba(255, 255, 255, 0.08)',
+                background: (input.trim() && !isGenerating) ? 'var(--accent-gradient)' : 'rgba(255, 255, 255, 0.08)',
                 border: 'none',
                 borderRadius: '50%',
                 width: '36px',
@@ -80,8 +83,9 @@ export default function CommandInput({ onSendMessage, sessionId, onUploadSuccess
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                cursor: input.trim() ? 'pointer' : 'default',
+                cursor: (input.trim() && !isGenerating) ? 'pointer' : 'default',
                 transition: 'all 0.2s ease',
+                boxShadow: (input.trim() && !isGenerating) ? 'var(--shadow-sm)' : 'none',
               }}
             >
               <SendIcon size={16} />
@@ -104,57 +108,72 @@ export default function CommandInput({ onSendMessage, sessionId, onUploadSuccess
           type="button"
           onClick={() => handlePillClick("Analyze IT Act Section 66 penalties and compliance requirements")}
           style={{
-            background: '#18181b',
-            border: '1px solid #27272a',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
             borderRadius: '20px',
             padding: '6px 14px',
-            fontSize: '0.8rem',
-            color: '#94a3b8',
+            fontSize: '0.78rem',
+            color: 'var(--text-secondary)',
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
-            cursor: 'pointer',
           }}
         >
-          <BookIcon size={14} /> Analyze Section 66
+          <BookIcon size={14} color="var(--accent-cyan)" /> Analyze Section 66
         </button>
 
         <button
           type="button"
-          onClick={() => handlePillClick("What are the key provisions of Companies Act 2013 regarding director liability?")}
+          onClick={() => handlePillClick("What are the key provisions of Companies Act 2013 regarding director liability and fraud under Section 447?")}
           style={{
-            background: '#18181b',
-            border: '1px solid #27272a',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
             borderRadius: '20px',
             padding: '6px 14px',
-            fontSize: '0.8rem',
-            color: '#94a3b8',
+            fontSize: '0.78rem',
+            color: 'var(--text-secondary)',
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
-            cursor: 'pointer',
           }}
         >
-          <FolderIcon size={14} /> Research Companies Act
+          <ScaleIcon size={14} color="var(--accent-blue)" /> Research Companies Act
         </button>
 
         <button
           type="button"
-          onClick={() => handlePillClick("Draft a legal notice for breach of non-disclosure contract")}
+          onClick={() => handlePillClick("Draft a legal notice for breach of non-disclosure contract under Indian Contract Act Section 73")}
           style={{
-            background: '#18181b',
-            border: '1px solid #27272a',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
             borderRadius: '20px',
             padding: '6px 14px',
-            fontSize: '0.8rem',
-            color: '#94a3b8',
+            fontSize: '0.78rem',
+            color: 'var(--text-secondary)',
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
-            cursor: 'pointer',
           }}
         >
-          <SparklesIcon size={14} /> Draft Legal Notice
+          <SparklesIcon size={14} color="var(--accent-indigo)" /> Draft Legal Notice
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handlePillClick("Explain cheating and forgery offences under Bharatiya Nyaya Sanhita (BNS 2023) Section 318")}
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '20px',
+            padding: '6px 14px',
+            fontSize: '0.78rem',
+            color: 'var(--text-secondary)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <FolderIcon size={14} color="var(--defense-pass)" /> BNS 2023 Cheating
         </button>
       </div>
     </div>

@@ -24,3 +24,9 @@ def build_runtime(runtime_name: str | None = None) -> LLMRuntime:
         return OllamaRuntime()
 
     return OllamaRuntime()
+
+
+class RuntimeFactory:
+    @staticmethod
+    def create(runtime_name: str | None = None) -> LLMRuntime:
+        return build_runtime(runtime_name)

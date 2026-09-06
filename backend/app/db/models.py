@@ -1,0 +1,299 @@
+from datetime import datetime
+from typing import Optional, List, Dict, Any
+from sqlalchemy import (
+    Column,
+    String,
+    Text,
+    DateTime,
+    Float,
+    Integer,
+    ForeignKey,
+    JSON,
+    Index,
+)
+from sqlalchemy.orm import declarative_base, relationship
+
+Base = declarative_base()
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    conversation_id = Column(String(64), primary_key=True, index=True)
+    user_id = Column(String(64), nullable=False, index=True, default="default_user")
+    title = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "conversation_id": self.conversation_id,
+            "user_id": self.user_id,
+            "title": self.title,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    message_id = Column(String(64), primary_key=True, index=True)
+    conversation_id = Column(String(64), ForeignKey("conversations.conversation_id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String(32), nullable=False)  # 'user', 'assistant', 'system'
+    content = Column(Text, nullable=False)
+    citations = Column(JSON, nullable=True)
+    blocked_by = Column(String(64), nullable=True)
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    conversation = relationship("Conversation", back_populates="messages")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "message_id": self.message_id,
+            "conversation_id": self.conversation_id,
+            "role": self.role,
+            "content": self.content,
+            "citations": self.citations,
+            "blocked_by": self.blocked_by,
+            "latency_ms": self.latency_ms,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class SemanticMemory(Base):
+    __tablename__ = "semantic_memory"
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    category = Column(String(64), nullable=False, index=True)  # 'preference', 'fact', 'entity'
+    key = Column(String(128), nullable=False)
+    value = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_semantic_user_cat_key", "user_id", "category", "key"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "category": self.category,
+            "key": self.key,
+            "value": self.value,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class DocumentMemory(Base):
+    __tablename__ = "document_memory"
+
+    doc_id = Column(String(64), primary_key=True)
+    session_id = Column(String(64), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    file_size_bytes = Column(Integer, nullable=True)
+    page_count = Column(Integer, nullable=True)
+    chunk_count = Column(Integer, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "doc_id": self.doc_id,
+            "session_id": self.session_id,
+            "filename": self.filename,
+            "file_size_bytes": self.file_size_bytes,
+            "page_count": self.page_count,
+            "chunk_count": self.chunk_count,
+            "metadata_json": self.metadata_json,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ResearchSession(Base):
+    __tablename__ = "research_sessions"
+
+    session_id = Column(String(64), primary_key=True)
+    topic = Column(Text, nullable=False)
+    status = Column(String(32), default="active", nullable=False)  # 'active', 'completed', 'failed'
+    findings = Column(Text, nullable=True)
+    sources = Column(JSON, nullable=True)
+    citations = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "topic": self.topic,
+            "status": self.status,
+            "findings": self.findings,
+            "sources": self.sources,
+            "citations": self.citations,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ResearchSource(Base):
+    __tablename__ = "research_sources"
+
+    source_id = Column(String(64), primary_key=True)
+    session_id = Column(String(64), ForeignKey("research_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
+    source_url = Column(Text, nullable=False)
+    title = Column(Text, nullable=True)
+    snippet = Column(Text, nullable=True)
+    retrieved_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source_id": self.source_id,
+            "session_id": self.session_id,
+            "source_url": self.source_url,
+            "title": self.title,
+            "snippet": self.snippet,
+            "retrieved_at": self.retrieved_at.isoformat() if self.retrieved_at else None,
+        }
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ts = Column(String(64), nullable=False)
+    action = Column(String(128), nullable=False, index=True)
+    layer = Column(String(64), nullable=True)
+    injection_score = Column(Float, nullable=True)
+    retrieval_hits = Column(Integer, nullable=True)
+    citations_used = Column(Integer, nullable=True)
+    validation_pass_fail = Column(String(32), nullable=True)
+    model_tier_used = Column(String(64), nullable=True)
+    latency_ms = Column(Float, nullable=True)
+    hash = Column(String(64), nullable=False)
+    prev_hash = Column(String(64), nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "ts": self.ts,
+            "action": self.action,
+            "layer": self.layer,
+            "injection_score": self.injection_score,
+            "retrieval_hits": self.retrieval_hits,
+            "citations_used": self.citations_used,
+            "validation_pass_fail": self.validation_pass_fail,
+            "model_tier_used": self.model_tier_used,
+            "latency_ms": self.latency_ms,
+            "hash": self.hash,
+            "prev_hash": self.prev_hash,
+        }
+
+
+class MCPToolCall(Base):
+    __tablename__ = "mcp_tool_calls"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(64), nullable=True, index=True)
+    tool_name = Column(String(64), nullable=False, index=True)
+    category = Column(String(64), nullable=False, index=True)
+    network_mode = Column(String(32), nullable=False)
+    input_payload = Column(JSON, nullable=True)
+    output_preview = Column(Text, nullable=True)
+    is_allowed = Column(Integer, default=1, nullable=False)
+    policy_reason = Column(String(256), nullable=True)
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "session_id": self.session_id,
+            "tool_name": self.tool_name,
+            "category": self.category,
+            "network_mode": self.network_mode,
+            "input_payload": self.input_payload,
+            "output_preview": self.output_preview,
+            "is_allowed": bool(self.is_allowed),
+            "policy_reason": self.policy_reason,
+            "latency_ms": self.latency_ms,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class RequestMetricsRecord(Base):
+    __tablename__ = "request_metrics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_id = Column(String(64), nullable=False, unique=True, index=True)
+    session_id = Column(String(64), nullable=True, index=True)
+    endpoint = Column(String(128), nullable=False, default="/chat")
+    total_duration_ms = Column(Float, nullable=False, default=0.0)
+    ttft_ms = Column(Float, nullable=True)
+    retrieval_ms = Column(Float, nullable=True)
+    mcp_ms = Column(Float, nullable=True)
+    tokens_in = Column(Integer, nullable=False, default=0)
+    tokens_out = Column(Integer, nullable=False, default=0)
+    model_tier = Column(String(32), nullable=True)
+    security_blocked = Column(Integer, default=0, nullable=False)
+    metrics_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "request_id": self.request_id,
+            "session_id": self.session_id,
+            "endpoint": self.endpoint,
+            "total_duration_ms": self.total_duration_ms,
+            "ttft_ms": self.ttft_ms,
+            "retrieval_ms": self.retrieval_ms,
+            "mcp_ms": self.mcp_ms,
+            "tokens_in": self.tokens_in,
+            "tokens_out": self.tokens_out,
+            "model_tier": self.model_tier,
+            "security_blocked": bool(self.security_blocked),
+            "metrics": self.metrics_json or {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class EvalRunRecord(Base):
+    """
+    Phase 12 — Eval Run Store.
+    Persists evaluation results per category per run for trend tracking.
+    One row per (run_id, category) pair.
+    """
+    __tablename__ = "eval_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(64), nullable=False, index=True)
+    git_commit = Column(String(64), nullable=True)
+    category = Column(String(64), nullable=False)          # security | memory | mcp | legal | retrieval | performance
+    score = Column(Float, nullable=False, default=0.0)     # 0.0-1.0
+    pass_count = Column(Integer, nullable=False, default=0)
+    total_count = Column(Integer, nullable=False, default=0)
+    status = Column(String(16), nullable=False, default="PASS")  # PASS | FAIL | SKIP
+    details_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_eval_runs_run_id_category", "run_id", "category"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "run_id": self.run_id,
+            "git_commit": self.git_commit,
+            "category": self.category,
+            "score": self.score,
+            "pass_count": self.pass_count,
+            "total_count": self.total_count,
+            "status": self.status,
+            "details": self.details_json or {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

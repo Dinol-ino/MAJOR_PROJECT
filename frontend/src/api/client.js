@@ -16,7 +16,9 @@ export const apiClient = {
       }),
     });
     if (!response.ok) {
-      throw new Error(`Chat request failed with status: ${response.status}`);
+      const errData = await response.json().catch(() => ({}));
+      const errorMsg = errData.detail || errData.message || `Chat request failed with status: ${response.status}`;
+      throw new Error(errorMsg);
     }
     return response.json();
   },
@@ -154,6 +156,19 @@ export const apiClient = {
     });
     if (!response.ok) {
       throw new Error(`Audit log request failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * GET /mcp/status
+   */
+  async getMcpStatus() {
+    const response = await fetch(`${BASE_URL}/mcp/status`, {
+      method: 'GET',
+    });
+    if (!response.ok) {
+      throw new Error(`MCP status request failed with status: ${response.status}`);
     }
     return response.json();
   },
