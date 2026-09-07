@@ -44,7 +44,7 @@ class L2RetrievalCache:
         return results
 
     def set_tier1_results(self, query: str, top_k: int, results: List[Dict[str, Any]]) -> None:
-        if not self.enabled:
+        if not self.enabled or not results:
             return
         key = make_l2_retrieval_key(
             query=query,
@@ -84,7 +84,7 @@ class L2RetrievalCache:
         session_id: str,
         results: List[Dict[str, Any]]
     ) -> None:
-        if not self.enabled:
+        if not self.enabled or not results:
             return
         key = make_l2_retrieval_key(
             query=query,

@@ -7,6 +7,8 @@ class ChatRequest(BaseModel):
     session_id: str
     shield_on: bool
     model: Optional[str] = None
+    vault_id: Optional[str] = None
+    reasoning_effort: Optional[str] = "off"  # "off" | "low" | "high"
 
 class CitationSource(BaseModel):
     act: str
@@ -24,7 +26,12 @@ class ChatResponse(BaseModel):
     blocked_by: Optional[str] = None  # None | "layer1" | "layer1.5" | "layer2" | "layer3"
     block_reason: Optional[str] = None
     confidence_score: Optional[float] = None
+    grounding_score: Optional[float] = None
     hallucination_flags: Optional[List[str]] = None
+    reasoning_trace: Optional[str] = None
+    citations_parsed: Optional[List[dict]] = None
+    model_used: Optional[str] = None
+    runtime_used: Optional[str] = None
 
 # --- /upload Endpoint Schemas ---
 class UploadResponse(BaseModel):

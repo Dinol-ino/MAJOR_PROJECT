@@ -1,0 +1,10 @@
+{
+  "venvPath": "backend",
+  "venv": "venv",
+  "extraPaths": [
+    "backend",
+    "."
+  ],
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": false
+}

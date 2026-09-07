@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
@@ -10,26 +11,80 @@ from sqlalchemy import (
     ForeignKey,
     JSON,
     Index,
+    Boolean,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String(64), primary_key=True, index=True)
+    username = Column(String(64), unique=True, index=True, nullable=False)
+    email = Column(String(128), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(128), default="Legal Practitioner")
+    role = Column(String(32), default="attorney")
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "username": self.username,
+            "email": self.email,
+            "full_name": self.full_name,
+            "role": self.role,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ProjectVault(Base):
+    __tablename__ = "project_vaults"
+
+    id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(64), nullable=False, index=True, default="default_user")
+    vault_name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    conversations = relationship("Conversation", back_populates="vault", cascade="all, delete-orphan")
+    documents = relationship("DocumentMemory", back_populates="vault", cascade="all, delete-orphan")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "vault_id": self.id,
+            "user_id": self.user_id,
+            "vault_name": self.vault_name,
+            "description": self.description,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "conversation_count": len(self.conversations) if self.conversations else 0,
+            "document_count": len(self.documents) if self.documents else 0,
+        }
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
     conversation_id = Column(String(64), primary_key=True, index=True)
+    project_vault_id = Column(String(64), ForeignKey("project_vaults.id", ondelete="SET NULL"), nullable=True, index=True)
     user_id = Column(String(64), nullable=False, index=True, default="default_user")
     title = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
+    vault = relationship("ProjectVault", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "id": self.conversation_id,
             "conversation_id": self.conversation_id,
+            "project_vault_id": self.project_vault_id,
             "user_id": self.user_id,
             "title": self.title,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -45,23 +100,40 @@ class Message(Base):
     role = Column(String(32), nullable=False)  # 'user', 'assistant', 'system'
     content = Column(Text, nullable=False)
     citations = Column(JSON, nullable=True)
+    citations_json = Column(JSON, nullable=True)
+    reasoning_trace = Column(Text, nullable=True)
+    model_used = Column(String(64), nullable=True)
+    runtime_used = Column(String(16), nullable=True)
+    token_count = Column(Integer, nullable=True)
     blocked_by = Column(String(64), nullable=True)
     latency_ms = Column(Float, nullable=True)
+    grounding_score = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     conversation = relationship("Conversation", back_populates="messages")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "id": self.message_id,
             "message_id": self.message_id,
             "conversation_id": self.conversation_id,
             "role": self.role,
             "content": self.content,
-            "citations": self.citations,
+            "citations": self.citations or self.citations_json,
+            "citations_json": self.citations_json or self.citations,
+            "citations_parsed": self.citations_json or self.citations,
+            "reasoning_trace": self.reasoning_trace,
+            "grounding_score": self.grounding_score,
+            "model_used": self.model_used,
+            "runtime_used": self.runtime_used,
+            "token_count": self.token_count,
             "blocked_by": self.blocked_by,
             "latency_ms": self.latency_ms,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+ChatMessage = Message
 
 
 class SemanticMemory(Base):
@@ -95,23 +167,60 @@ class DocumentMemory(Base):
     __tablename__ = "document_memory"
 
     doc_id = Column(String(64), primary_key=True)
-    session_id = Column(String(64), nullable=False, index=True)
+    session_id = Column(String(64), nullable=True, index=True)
+    project_vault_id = Column(String(64), ForeignKey("project_vaults.id", ondelete="CASCADE"), nullable=True, index=True)
     filename = Column(String(255), nullable=False)
+    file_hash = Column(String(64), nullable=True, index=True)
     file_size_bytes = Column(Integer, nullable=True)
     page_count = Column(Integer, nullable=True)
-    chunk_count = Column(Integer, nullable=True)
+    chunk_count = Column(Integer, nullable=True, default=0)
+    vector_ns = Column(String(128), nullable=True)
+    ingest_status = Column(String(32), nullable=False, default="ready")
+    ingest_error = Column(Text, nullable=True)
+    ingest_progress = Column(Integer, nullable=False, default=100)
     metadata_json = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
+    vault = relationship("ProjectVault", back_populates="documents")
+    pages = relationship("DocumentPage", back_populates="document", cascade="all, delete-orphan")
+
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "id": self.doc_id,
             "doc_id": self.doc_id,
             "session_id": self.session_id,
+            "project_vault_id": self.project_vault_id,
             "filename": self.filename,
+            "file_hash": self.file_hash,
             "file_size_bytes": self.file_size_bytes,
             "page_count": self.page_count,
             "chunk_count": self.chunk_count,
+            "vector_ns": self.vector_ns,
+            "ingest_status": self.ingest_status,
+            "ingest_error": self.ingest_error,
+            "ingest_progress": self.ingest_progress,
             "metadata_json": self.metadata_json,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class DocumentPage(Base):
+    __tablename__ = "document_pages"
+
+    id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    doc_id = Column(String(64), ForeignKey("document_memory.doc_id", ondelete="CASCADE"), nullable=False, index=True)
+    page_no = Column(Integer, nullable=False)
+    raw_text = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    document = relationship("DocumentMemory", back_populates="pages")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "doc_id": self.doc_id,
+            "page_no": self.page_no,
+            "raw_text": self.raw_text,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -297,3 +406,127 @@ class EvalRunRecord(Base):
             "details": self.details_json or {},
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class SystemSetting(Base):
+    """
+    Spec 02 — Encrypted Settings & Key Vault Store.
+    Persists system settings and Fernet-encrypted API credentials.
+    """
+    __tablename__ = "system_settings"
+
+    key = Column(String(64), primary_key=True, index=True)
+    encrypted_value = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "key": self.key,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class Statute(Base):
+    """
+    Spec 04 — Dynamic Statute Catalog.
+    Represents an Indian statutory enactment synced from MCP servers, local corpus, or vault documents.
+    """
+    __tablename__ = "statutes"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    slug = Column(String(128), nullable=False, unique=True, index=True)
+    title = Column(String(512), nullable=False)
+    year = Column(Integer, nullable=True)
+    domain = Column(String(64), nullable=False)  # criminal, cyber, corporate, tax, civil, constitutional, procedural, commercial
+    source = Column(String(64), nullable=False)  # mcp:ansvar, mcp:themis, mcp:nyaya, mcp:taxbykk, vault_doc, seed_india_code
+    section_count = Column(Integer, nullable=False, default=0)
+    currency_checked_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    sections = relationship("StatuteSection", back_populates="statute", cascade="all, delete-orphan", order_by="StatuteSection.number")
+
+    def to_dict(self, include_sections: bool = False) -> Dict[str, Any]:
+        data = {
+            "id": self.id,
+            "slug": self.slug,
+            "title": self.title,
+            "name": self.title,
+            "year": self.year,
+            "domain": self.domain,
+            "category": self.domain.title(),
+            "source": self.source,
+            "section_count": self.section_count or (len(self.sections) if self.sections else 0),
+            "currency_checked_at": self.currency_checked_at.isoformat() if self.currency_checked_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+        if include_sections and self.sections:
+            data["sections"] = [s.to_dict() for s in self.sections]
+        return data
+
+
+class StatuteSection(Base):
+    """
+    Spec 04 — Individual Statute Section with raw text and penalty information.
+    """
+    __tablename__ = "statute_sections"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    statute_id = Column(String(36), ForeignKey("statutes.id", ondelete="CASCADE"), nullable=False, index=True)
+    number = Column(String(16), nullable=False)   # "66", "66B", "302", "420"
+    heading = Column(String(512), nullable=True)
+    raw_text = Column(Text, nullable=True)
+    page_ref = Column(Integer, nullable=True)
+    embedding_ready = Column(Boolean, default=False)
+
+    statute = relationship("Statute", back_populates="sections")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "statute_id": self.statute_id,
+            "number": self.number,
+            "section": self.number,
+            "heading": self.heading,
+            "title": self.heading or f"Section {self.number}",
+            "text": self.raw_text,
+            "raw_text": self.raw_text,
+            "page_ref": self.page_ref,
+            "embedding_ready": self.embedding_ready,
+        }
+
+
+class CitationEdge(Base):
+    """
+    Spec 04 — Persistent Citation Relationship Edge.
+    Connects statutes, sections, precedents, and user documents based on LLM citations and MCP relationships.
+    """
+    __tablename__ = "citation_edges"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    src_type = Column(String(32), nullable=False)   # section, precedent, vault_doc, case, statute
+    src_key = Column(String(128), nullable=False, index=True)
+    dst_type = Column(String(32), nullable=False)   # section, precedent, vault_doc, case, statute
+    dst_key = Column(String(128), nullable=False, index=True)
+    relation = Column(String(64), nullable=False)   # cites, interprets, cross_applies, referred_in, supersedes, contains
+    origin = Column(String(32), nullable=False)     # llm_citation, mcp_relation, vault_doc, user_pin
+    conversation_id = Column(String(64), nullable=True, index=True)
+    message_id = Column(String(64), nullable=True, index=True)
+    confidence = Column(Float, nullable=True, default=1.0)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "src_type": self.src_type,
+            "src_key": self.src_key,
+            "dst_type": self.dst_type,
+            "dst_key": self.dst_key,
+            "relation": self.relation,
+            "origin": self.origin,
+            "conversation_id": self.conversation_id,
+            "message_id": self.message_id,
+            "confidence": self.confidence,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+

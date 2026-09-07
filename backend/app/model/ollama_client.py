@@ -82,9 +82,13 @@ class OllamaClient:
 
             except (httpx.RequestError, httpx.TimeoutException) as exc:
                 logger.warning(f"Ollama generate attempt {attempt + 1} failed: {exc}")
+                if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+                    raise OllamaUnavailableError(
+                        f"Ollama daemon is unreachable at {self.base_url}: {exc}"
+                    ) from exc
                 if attempt == max_retries - 1:
                     raise OllamaUnavailableError(
-                        f"Ollama generation timed out at {self.base_url}. Model initialization in container required more time."
+                        f"Ollama generation timed out at {self.base_url}."
                     ) from exc
                 await asyncio.sleep(initial_delay * (2 ** attempt))
 
@@ -93,10 +97,10 @@ class OllamaClient:
     async def generate_stream(self, prompt: str, model: Optional[str] = None):
         target_model = (model or self.default_model).strip().lower()
         timeout = httpx.Timeout(
-            connect=30.0,
-            read=300.0,
-            write=30.0,
-            pool=30.0,
+            connect=2.0,
+            read=25.0,
+            write=10.0,
+            pool=5.0,
         )
         payload: Dict[str, Any] = {
             "model": target_model,
@@ -123,10 +127,10 @@ class OllamaClient:
 
     async def _call_ollama(self, prompt: str, model: str, force_cpu: bool = False) -> str:
         timeout = httpx.Timeout(
-            connect=30.0,
-            read=300.0,
-            write=30.0,
-            pool=30.0,
+            connect=2.0,
+            read=25.0,
+            write=10.0,
+            pool=5.0,
         )
         options = self._build_options(force_cpu=force_cpu)
         payload: Dict[str, Any] = {

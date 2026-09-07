@@ -19,6 +19,8 @@ async def recommend_endpoint(request: RecommendRequest):
         hw.gpu_available = request.vram_gb > 0
 
     recs = registry.recommended_for(hw)
+    if not recs:
+        recs = [m for m in registry.all_models() if m.tier in ("minimum", "standard")] or registry.all_models()
 
     recommended_list = [
         RecommendedModel(

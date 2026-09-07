@@ -2,7 +2,6 @@ import os
 import logging
 from typing import List, Dict, Any, Optional
 import chromadb
-from chromadb.utils import embedding_functions
 
 from app.retrieval.client import get_shared_chroma_client
 from app.retrieval.hybrid_rank import fuse_bm25_dense
@@ -77,6 +76,10 @@ class Tier1LawRetrieval:
 
     def query(self, text: str, top_k: Optional[int] = None) -> List[Dict[str, Any]]:
         k = top_k or settings.retrieval.top_k
+
+        if not self._synced:
+            self._sync_bm25_if_needed()
+            self._synced = True
 
         # 1. Check L2 Retrieval Cache (Phase 04)
         try:

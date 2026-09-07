@@ -21,7 +21,10 @@ def build_runtime(runtime_name: str | None = None) -> LLMRuntime:
     if target == "transformers":
         # Fallback to OllamaRuntime if transformers is selected but model loading delegates to Ollama
         logger.info("Using OllamaRuntime as backend driver for Transformers architecture.")
-        return OllamaRuntime()
+    if target in ("cloud", "grok", "zai"):
+        from app.runtime.cloud_runtime import CloudRuntime
+        prov = "zai" if target == "zai" else ("grok" if target == "grok" else None)
+        return CloudRuntime(provider=prov)
 
     return OllamaRuntime()
 

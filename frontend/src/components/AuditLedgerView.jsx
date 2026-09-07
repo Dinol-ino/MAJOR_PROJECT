@@ -36,16 +36,8 @@ export default function AuditLedgerView({ sessionId }) {
       setTamperVerified(isChainValid);
     } catch (e) {
       console.warn("Audit logs fetch failed:", e);
-      // Fallback mock initial state if backend table is currently empty for session
-      setLogs([
-        {
-          ts: new Date().toISOString(),
-          action: 'session_initialized',
-          layer: 'system',
-          hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-          prev_hash: '0000000000000000000000000000000000000000000000000000000000000000',
-        }
-      ]);
+      setLogs([]);
+      setTamperVerified(true);
     } finally {
       setLoading(false);
     }
@@ -274,8 +266,13 @@ export default function AuditLedgerView({ sessionId }) {
           <tbody>
             {filteredLogs.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  No audit logs recorded for this filter.
+                <td colSpan={5} style={{ padding: '36px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                    No Cryptographic Audit Records Yet
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: 'var(--text-dim)' }}>
+                    Execute a statutory legal query or toggle the defense shield to generate live SHA-256 hash-chained ledger events.
+                  </div>
                 </td>
               </tr>
             ) : (

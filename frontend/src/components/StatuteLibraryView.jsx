@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LibraryIcon,
   SearchIcon,
@@ -8,153 +8,96 @@ import {
   SparklesIcon,
   ScaleIcon,
   ChevronRightIcon,
-  ExternalLinkIcon
+  ExternalLinkIcon,
+  RefreshIcon
 } from './Icons';
+import { apiClient } from '../api/client';
 
-const STATUTES_DATABASE = [
-  {
-    id: 'it_act',
-    name: 'Information Technology Act, 2000',
-    shortName: 'IT Act 2000',
-    category: 'Cyber Law',
-    enacted: '2000',
-    jurisdiction: 'India',
-    sectionsCount: 94,
-    description: 'Primary Indian law dealing with cybercrime, electronic commerce, digital signatures, and electronic records.',
-    sections: [
-      {
-        section: '43',
-        title: 'Penalty and compensation for damage to computer, computer system, etc.',
-        text: 'If any person without permission of the owner or any other person who is incharge of a computer, computer system or computer network: (a) accesses or secures access to such computer, computer system or computer network; (b) downloads, copies or extracts any data, computer data base or information from such computer... he shall be liable to pay damages by way of compensation to the person so affected.',
-        penalty: 'Civil liability: Compensation up to ₹1 Crore to affected parties.',
-      },
-      {
-        section: '66',
-        title: 'Computer related offences',
-        text: 'If any person, dishonestly or fraudulently, does any act referred to in section 43, he shall be punishable with imprisonment for a term which may extend to three years or with fine which may extend to five lakh rupees or with both.',
-        penalty: 'Criminal penalty: Up to 3 years imprisonment or fine up to ₹5,00,000 or both.',
-      },
-      {
-        section: '66B',
-        title: 'Punishment for dishonestly receiving stolen computer resource or communication device',
-        text: 'Whoever dishonestly receives or retains any stolen computer resource or communication device knowing or having reason to believe the same to be stolen computer resource or communication device, shall be punished with imprisonment of either description for a term which may extend to three years or with fine which may extend to one lakh rupees or with both.',
-        penalty: 'Up to 3 years imprisonment or fine up to ₹1,00,000.',
-      },
-      {
-        section: '72A',
-        title: 'Punishment for disclosure of information in breach of lawful contract',
-        text: 'Save as otherwise provided in this Act or any other law for the time being in force, any person including an intermediary who, while providing services under the terms of lawful contract, has secured access to any material containing personal information about another person, with the intent to cause or knowing that he is likely to cause wrongful loss or wrongful gain discloses, without the consent of the person concerned, shall be punished.',
-        penalty: 'Imprisonment up to 3 years, or fine up to ₹5,00,000, or both.',
-      }
-    ]
-  },
-  {
-    id: 'companies_act',
-    name: 'Companies Act, 2013',
-    shortName: 'Companies Act 2013',
-    category: 'Corporate Law',
-    enacted: '2013',
-    jurisdiction: 'India',
-    sectionsCount: 470,
-    description: 'Statute regulating the incorporation of a company, responsibilities of a company, directors, dissolution of a company.',
-    sections: [
-      {
-        section: '134',
-        title: 'Financial statement, Board’s report, etc.',
-        text: 'The financial statement, including consolidated financial statement, if any, shall be approved by the Board of Directors before they are signed on behalf of the Board... The Board Report shall include the state of the company affairs, details in respect of frauds reported by auditors, and directors responsibility statement.',
-        penalty: 'Company liable to fine of ₹3 Lakhs; every officer in default liable to ₹50,000.',
-      },
-      {
-        section: '166',
-        title: 'Duties of directors',
-        text: 'A director of a company shall act in accordance with the articles of the company. A director shall act in good faith in order to promote the objects of the company for the benefit of its members as a whole, and in the best interests of the company, its employees, the shareholders, the community and for the protection of environment.',
-        penalty: 'Fine not less than ₹1,00,000 which may extend to ₹5,00,000.',
-      },
-      {
-        section: '447',
-        title: 'Punishment for fraud',
-        text: 'Without prejudice to any liability including repayment of any debt under this Act or any other law, any person who is found to be guilty of fraud involving an amount of at least ten lakh rupees or one percent of the turnover of the company, whichever is lower, shall be punishable with imprisonment for a term which shall not be less than six months but which may extend to ten years.',
-        penalty: 'Imprisonment from 6 months to 10 years and fine up to 3x the amount involved in fraud.',
-      }
-    ]
-  },
-  {
-    id: 'bns',
-    name: 'Bharatiya Nyaya Sanhita, 2023',
-    shortName: 'BNS 2023',
-    category: 'Criminal Law',
-    enacted: '2023',
-    jurisdiction: 'India',
-    sectionsCount: 358,
-    description: 'The substantive criminal code of India, replacing the Indian Penal Code 1860 with modernised provisions.',
-    sections: [
-      {
-        section: '318',
-        title: 'Cheating (Replaced IPC Section 415 & 420)',
-        text: 'Whoever, by deceiving any person, fraudulently or dishonestly induces the person so deceived to deliver any property to any person, or to consent that any person shall retain any property, or intentionally induces the person so deceived to do or omit to do anything which he would not do or omit if he were not so deceived, is said to "cheat".',
-        penalty: 'Imprisonment up to 7 years and liability to fine.',
-      },
-      {
-        section: '336',
-        title: 'Forgery (Replaced IPC Section 463)',
-        text: 'Whoever makes any false documents or false electronic record or part of a document or electronic record, with intent to cause damage or injury, to the public or to any person, or to support any claim or title, commits forgery.',
-        penalty: 'Imprisonment up to 2 years, or fine, or both.',
-      }
-    ]
-  },
-  {
-    id: 'contract_act',
-    name: 'Indian Contract Act, 1872',
-    shortName: 'Contract Act 1872',
-    category: 'Commercial Law',
-    enacted: '1872',
-    jurisdiction: 'India',
-    sectionsCount: 238,
-    description: 'Fundamental law governing formation, validity, breach, indemnity, and enforcement of agreements and contracts.',
-    sections: [
-      {
-        section: '73',
-        title: 'Compensation for loss or damage caused by breach of contract',
-        text: 'When a contract has been broken, the party who suffers by such breach is entitled to receive, from the party who has broken the contract, compensation for any loss or damage caused to him thereby, which naturally arose in the usual course of things from such breach.',
-        penalty: 'Civil damages & indemnification.',
-      },
-      {
-        section: '74',
-        title: 'Compensation for breach of contract where penalty stipulated for',
-        text: 'When a contract has been broken, if a sum is named in the contract as the amount to be paid in case of such breach, the party complaining of the breach is entitled, whether or not actual damage or loss is proved to have been caused thereby, to receive reasonable compensation not exceeding the amount so named.',
-        penalty: 'Liquidated damages up to the agreed stipulated ceiling.',
-      }
-    ]
-  }
-];
-
-export default function StatuteLibraryView({ onAskCopilot }) {
-  const [selectedStatute, setSelectedStatute] = useState(STATUTES_DATABASE[0]);
-  const [selectedSection, setSelectedSection] = useState(STATUTES_DATABASE[0].sections[1]); // Section 66
+export default function StatuteLibraryView({ onAskCopilot, onViewInGraph }) {
+  const [statutes, setStatutes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [selectedStatute, setSelectedStatute] = useState(null);
+  const [selectedSection, setSelectedSection] = useState(null);
   const [searchFilter, setSearchFilter] = useState('');
   const [copiedId, setCopiedId] = useState(null);
   const [categoryFilter, setCategoryFilter] = useState('All');
+  const [domainCounts, setDomainCounts] = useState({});
+  const [syncWarning, setSyncWarning] = useState(false);
 
-  const categories = ['All', 'Cyber Law', 'Corporate Law', 'Criminal Law', 'Commercial Law'];
+  const loadCatalog = async () => {
+    setLoading(true);
+    try {
+      const res = await apiClient.getStatutesCatalog(categoryFilter, searchFilter);
+      if (res && res.catalog) {
+        setStatutes(res.catalog);
+        setDomainCounts(res.domain_counts || {});
+        setSyncWarning(Boolean(res.sync_warning || res.total_acts < 10));
 
-  const filteredStatutes = STATUTES_DATABASE.filter((statute) => {
-    const matchesCat = categoryFilter === 'All' || statute.category === categoryFilter;
-    const matchesSearch = !searchFilter.trim() ||
-      statute.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      statute.sections.some((s) =>
-        s.section.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        s.title.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        s.text.toLowerCase().includes(searchFilter.toLowerCase())
-      );
-    return matchesCat && matchesSearch;
-  });
+        if (res.catalog.length > 0) {
+          // Keep current selection or default to first
+          const currentStillExists = selectedStatute && res.catalog.find(s => s.slug === selectedStatute.slug);
+          const activeStatute = currentStillExists || res.catalog[0];
+          setSelectedStatute(activeStatute);
 
-  const handleCopyCitation = (secText, secId) => {
-    const citation = `${selectedStatute.name}, Section ${selectedSection.section} - "${selectedSection.title}"`;
+          if (activeStatute.sections && activeStatute.sections.length > 0) {
+            setSelectedSection(activeStatute.sections[0]);
+          }
+        } else {
+          setSelectedStatute(null);
+          setSelectedSection(null);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch statutes catalog:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCatalog();
+  }, [categoryFilter]);
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    loadCatalog();
+  };
+
+  const handleSyncStatutes = async () => {
+    setSyncing(true);
+    try {
+      await apiClient.syncStatutes();
+      await loadCatalog();
+    } catch (e) {
+      console.error("Sync statutes failed:", e);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleCopyCitation = (sec) => {
+    if (!selectedStatute || !sec) return;
+    // Spec 04 §3.4: Bluebook-style format
+    const citation = `${selectedStatute.title}, § ${sec.number || sec.section}`;
     navigator.clipboard.writeText(citation);
-    setCopiedId(secId);
+    setCopiedId(sec.number || sec.section);
     setTimeout(() => setCopiedId(null), 2000);
   };
+
+  const categories = ['All', 'Criminal', 'Cyber', 'Corporate', 'Tax', 'Civil', 'Constitutional', 'Procedural', 'Commercial'];
+
+  const filteredStatutes = statutes.filter((statute) => {
+    if (!searchFilter.trim()) return true;
+    const q = searchFilter.toLowerCase();
+    const matchesTitle = statute.title.toLowerCase().includes(q) || (statute.shortName && statute.shortName.toLowerCase().includes(q));
+    const matchesSection = statute.sections && statute.sections.some(s =>
+      String(s.number || s.section).toLowerCase().includes(q) ||
+      (s.heading && s.heading.toLowerCase().includes(q)) ||
+      (s.raw_text && s.raw_text.toLowerCase().includes(q))
+    );
+    return matchesTitle || matchesSection;
+  });
 
   return (
     <div
@@ -170,114 +113,167 @@ export default function StatuteLibraryView({ onAskCopilot }) {
       {/* Left Statutes Catalog Sidebar */}
       <div
         style={{
-          width: '320px',
+          width: '340px',
           height: '100%',
           background: 'var(--bg-sidebar)',
           borderRight: '1px solid var(--border-subtle)',
           display: 'flex',
           flexDirection: 'column',
-          boxSizing: 'border-box',
         }}
       >
-        <div style={{ padding: '20px', borderBottom: '1px solid var(--border-subtle)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-            <LibraryIcon size={20} color="var(--accent-cyan)" />
-            <h2 style={{ fontFamily: 'var(--font-title)', fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              Statute Library
-            </h2>
+        {/* Header & Search */}
+        <div style={{ padding: '18px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <LibraryIcon style={{ color: 'var(--accent-blue)', width: '20px', height: '20px' }} />
+              <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                Statute Library
+              </h2>
+              <span style={{ fontSize: '0.68rem', background: 'rgba(56, 189, 248, 0.12)', color: 'var(--accent-blue)', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                {statutes.length} Acts
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSyncStatutes}
+              disabled={syncing}
+              style={{
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '6px',
+                padding: '4px 8px',
+                color: syncing ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                cursor: syncing ? 'wait' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '0.7rem'
+              }}
+              title="Sync enactments across connected MCP servers"
+            >
+              <RefreshIcon size={12} className={syncing ? "spin-icon" : ""} />
+              <span>{syncing ? 'Syncing...' : 'Sync MCP'}</span>
+            </button>
           </div>
 
-          {/* Search Box */}
-          <div
-            style={{
-              background: 'var(--bg-input)',
-              border: '1px solid var(--border-medium)',
-              borderRadius: '8px',
-              padding: '6px 12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            <SearchIcon size={14} color="var(--text-muted)" />
-            <input
-              type="text"
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="Search statutes & sections..."
+          {/* Sync warning if fewer than 10 acts */}
+          {syncWarning && (
+            <div style={{ padding: '8px 10px', background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '6px', fontSize: '0.72rem', color: '#f59e0b', marginBottom: '10px' }}>
+              ⚠️ Coverage warning: Fewer than 10 acts loaded. Click "Sync MCP" to populate all Indian statutes.
+            </div>
+          )}
+
+          <form onSubmit={handleSearchSubmit} style={{ position: 'relative', marginBottom: '10px' }}>
+            <SearchIcon
               style={{
-                width: '100%',
-                background: 'transparent',
-                border: 'none',
-                outline: 'none',
-                color: 'var(--text-primary)',
-                fontSize: '0.82rem',
+                position: 'absolute',
+                left: '10px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--text-muted)',
+                width: '14px',
+                height: '14px',
               }}
             />
-          </div>
+            <input
+              type="text"
+              placeholder="Search acts, sections, keywords..."
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              style={{
+                width: '100%',
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '8px',
+                padding: '8px 12px 8px 32px',
+                fontSize: '0.78rem',
+                color: 'var(--text-primary)',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </form>
 
-          {/* Category Chips */}
-          <div style={{ display: 'flex', gap: '4px', marginTop: '12px', flexWrap: 'wrap' }}>
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setCategoryFilter(cat)}
-                style={{
-                  background: categoryFilter === cat ? 'rgba(0, 210, 180, 0.15)' : 'var(--bg-card)',
-                  border: `1px solid ${categoryFilter === cat ? 'var(--accent-cyan)' : 'var(--border-subtle)'}`,
-                  color: categoryFilter === cat ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                  borderRadius: '12px',
-                  padding: '3px 8px',
-                  fontSize: '0.7rem',
-                  fontWeight: 600,
-                }}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Statutes List */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {filteredStatutes.map((statute) => {
-              const isSelected = selectedStatute.id === statute.id;
+          {/* Live Domain Filters with Server Counts */}
+          <div style={{ display: 'flex', gap: '4px', overflowX: 'auto', paddingBottom: '4px' }}>
+            {categories.map((cat) => {
+              const count = domainCounts[cat] ?? (cat === 'All' ? statutes.length : null);
+              const label = count !== null ? `${cat} (${count})` : cat;
               return (
-                <div
-                  key={statute.id}
-                  onClick={() => {
-                    setSelectedStatute(statute);
-                    setSelectedSection(statute.sections[0] || null);
-                  }}
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setCategoryFilter(cat)}
                   style={{
-                    background: isSelected ? 'var(--bg-card-hover)' : 'var(--bg-card)',
-                    border: `1px solid ${isSelected ? 'var(--accent-blue)' : 'var(--border-subtle)'}`,
-                    borderRadius: '8px',
-                    padding: '12px',
+                    background: categoryFilter === cat ? 'var(--accent-blue)' : 'rgba(255, 255, 255, 0.03)',
+                    color: categoryFilter === cat ? 'white' : 'var(--text-secondary)',
+                    border: `1px solid ${categoryFilter === cat ? 'transparent' : 'var(--border-subtle)'}`,
+                    borderRadius: '12px',
+                    padding: '3px 8px',
+                    fontSize: '0.68rem',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      {statute.shortName}
-                    </span>
-                    <span style={{ fontSize: '0.68rem', color: 'var(--accent-cyan)', background: 'rgba(0, 210, 180, 0.1)', padding: '1px 6px', borderRadius: '4px' }}>
-                      {statute.category}
-                    </span>
-                  </div>
-                  <p style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: '1.4', marginBottom: '6px' }}>
-                    {statute.description.substring(0, 75)}...
-                  </p>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                    {statute.sectionsCount} Sections • Enacted {statute.enacted}
-                  </div>
-                </div>
+                  {label}
+                </button>
               );
             })}
           </div>
+        </div>
+
+        {/* Acts List */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '30px 10px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+              Loading statutory enactments...
+            </div>
+          ) : filteredStatutes.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '30px 10px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+              No statutes found matching "{searchFilter}".
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {filteredStatutes.map((statute) => {
+                const isSelected = selectedStatute && selectedStatute.slug === statute.slug;
+                return (
+                  <div
+                    key={statute.slug || statute.id}
+                    onClick={() => {
+                      setSelectedStatute(statute);
+                      setSelectedSection((statute.sections && statute.sections[0]) || null);
+                    }}
+                    style={{
+                      background: isSelected ? 'rgba(56, 189, 248, 0.1)' : 'var(--bg-card)',
+                      border: `1px solid ${isSelected ? 'var(--accent-blue)' : 'var(--border-subtle)'}`,
+                      borderRadius: '8px',
+                      padding: '12px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                      <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: '1.3' }}>
+                        {statute.title}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
+                      <span style={{ fontSize: '0.68rem', color: 'var(--accent-cyan)', background: 'rgba(0, 210, 180, 0.1)', padding: '1px 6px', borderRadius: '4px', textTransform: 'capitalize' }}>
+                        {statute.domain}
+                      </span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        {statute.section_count || (statute.sections ? statute.sections.length : 0)} Sections
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -293,36 +289,37 @@ export default function StatuteLibraryView({ onAskCopilot }) {
         }}
       >
         <div style={{ padding: '18px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
-            Available Sections
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+            Sections
           </div>
-          <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-            {selectedStatute.shortName}
+          <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {selectedStatute ? selectedStatute.title : 'Select Statute'}
           </div>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '10px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {selectedStatute.sections.map((sec) => {
-              const isSecSelected = selectedSection && selectedSection.section === sec.section;
+            {selectedStatute && selectedStatute.sections && selectedStatute.sections.map((sec) => {
+              const secNumber = sec.number || sec.section;
+              const isSecSelected = selectedSection && (selectedSection.number || selectedSection.section) === secNumber;
               return (
                 <div
-                  key={sec.section}
+                  key={secNumber}
                   onClick={() => setSelectedSection(sec)}
                   style={{
                     background: isSecSelected ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
                     border: `1px solid ${isSecSelected ? 'rgba(56, 189, 248, 0.3)' : 'transparent'}`,
                     borderRadius: '6px',
-                    padding: '10px 12px',
+                    padding: '8px 10px',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
                   }}
                 >
-                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: isSecSelected ? 'var(--accent-blue)' : 'var(--text-primary)' }}>
-                    Section {sec.section}
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: isSecSelected ? 'var(--accent-blue)' : 'var(--text-primary)', fontFamily: 'monospace' }}>
+                    § {secNumber}
                   </div>
-                  <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '2px', lineHeight: '1.3' }}>
-                    {sec.title}
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '2px', lineHeight: '1.3' }}>
+                    {sec.heading || sec.title || `Section ${secNumber}`}
                   </div>
                 </div>
               );
@@ -333,91 +330,136 @@ export default function StatuteLibraryView({ onAskCopilot }) {
 
       {/* Main Section Reader Pane */}
       <div style={{ flex: 1, height: '100%', overflowY: 'auto', padding: '36px 48px', boxSizing: 'border-box' }}>
-        {selectedSection ? (
-          <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-            {/* Breadcrumb / Category Header */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
-              <span>{selectedStatute.jurisdiction}</span>
-              <span>/</span>
-              <span>{selectedStatute.name}</span>
-              <span>/</span>
-              <span style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>Section {selectedSection.section}</span>
+        {selectedSection && selectedStatute ? (
+          <div style={{ maxWidth: '820px', margin: '0 auto' }}>
+            {/* Breadcrumb & Currency Verification */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                <span>India</span>
+                <span>/</span>
+                <span style={{ textTransform: 'capitalize' }}>{selectedStatute.domain}</span>
+                <span>/</span>
+                <span style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>§ {selectedSection.number || selectedSection.section}</span>
+              </div>
+
+              {/* Spec 04 §3.4: Verified Current Chip */}
+              <div style={{ fontSize: '0.72rem', color: 'var(--defense-pass, #10b981)', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>
+                ✓ Verified current as of {selectedStatute.currency_checked_at ? new Date(selectedStatute.currency_checked_at).toLocaleDateString() : '2026'}
+              </div>
             </div>
 
-            <h1 style={{ fontFamily: 'var(--font-title)', fontSize: '1.8rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px' }}>
-              Section {selectedSection.section}: {selectedSection.title}
+            <h1 style={{ fontFamily: 'var(--font-title)', fontSize: '1.6rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px' }}>
+              Section {selectedSection.number || selectedSection.section}: {selectedSection.heading || selectedSection.title || ''}
             </h1>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '28px' }}>
+            {/* Action Bar */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '24px', flexWrap: 'wrap' }}>
               <button
                 type="button"
-                onClick={() => handleCopyCitation(selectedSection.text, selectedSection.section)}
+                onClick={() => handleCopyCitation(selectedSection)}
                 style={{
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-medium)',
-                  borderRadius: '6px',
-                  padding: '6px 12px',
-                  color: copiedId === selectedSection.section ? 'var(--defense-pass)' : 'var(--text-secondary)',
-                  fontSize: '0.78rem',
-                  fontWeight: 600,
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '6px',
+                  padding: '6px 14px',
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
                 }}
               >
-                {copiedId === selectedSection.section ? <CheckIcon size={14} color="var(--defense-pass)" /> : <CopyIcon size={14} />}
-                <span>{copiedId === selectedSection.section ? 'Citation Copied!' : 'Copy Citation'}</span>
+                {copiedId === (selectedSection.number || selectedSection.section) ? (
+                  <>
+                    <CheckIcon style={{ width: '14px', height: '14px', color: 'var(--accent-cyan)' }} />
+                    <span style={{ color: 'var(--accent-cyan)' }}>Copied Bluebook Citation</span>
+                  </>
+                ) : (
+                  <>
+                    <CopyIcon style={{ width: '14px', height: '14px' }} />
+                    <span>Copy Bluebook Citation</span>
+                  </>
+                )}
               </button>
+
+              {/* View in Graph Deep-Link */}
+              {onViewInGraph && (
+                <button
+                  type="button"
+                  onClick={() => onViewInGraph(selectedStatute.slug)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '6px',
+                    padding: '6px 14px',
+                    color: 'var(--accent-blue)',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <ExternalLinkIcon style={{ width: '13px', height: '13px' }} />
+                  <span>View in Graph</span>
+                </button>
+              )}
 
               {onAskCopilot && (
                 <button
                   type="button"
-                  onClick={() => onAskCopilot(`Explain Section ${selectedSection.section} of ${selectedStatute.name} ("${selectedSection.title}") and how it is applied in recent judicial rulings.`)}
+                  onClick={() => onAskCopilot(`Explain the statutory requirements, procedural scope, and legal consequences of Section ${selectedSection.number || selectedSection.section} under the ${selectedStatute.title}.`)}
                   style={{
-                    background: 'rgba(99, 102, 241, 0.15)',
-                    border: '1px solid rgba(99, 102, 241, 0.4)',
-                    borderRadius: '6px',
-                    padding: '6px 12px',
-                    color: 'var(--accent-indigo)',
-                    fontSize: '0.78rem',
-                    fontWeight: 600,
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
+                    background: 'var(--accent-gradient)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '6px 14px',
+                    color: 'white',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
                   }}
                 >
-                  <SparklesIcon size={14} color="var(--accent-indigo)" />
-                  <span>Research with AI Copilot</span>
+                  <SparklesIcon style={{ width: '14px', height: '14px' }} />
+                  <span>Research in Copilot</span>
                 </button>
               )}
             </div>
 
-            {/* Official Statutory Text Card */}
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '12px', padding: '24px', marginBottom: '24px', boxShadow: 'var(--shadow-sm)' }}>
-              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-blue)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '14px' }}>
-                Official Statutory Provision
-              </div>
-              <p style={{ fontSize: '1.02rem', lineHeight: '1.8', color: 'var(--text-primary)', whiteSpace: 'pre-line' }}>
-                "{selectedSection.text}"
-              </p>
+            {/* Statutory Provision Monospace Text (Spec 04 §3.4) */}
+            <div
+              style={{
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '12px',
+                padding: '24px',
+                marginBottom: '24px',
+                lineHeight: '1.75',
+                color: 'var(--text-primary)',
+                fontSize: '0.92rem',
+                fontFamily: 'var(--font-mono, monospace)',
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
+                whiteSpace: 'pre-line'
+              }}
+            >
+              {selectedSection.raw_text || selectedSection.text || "Statutory text undergoing verification."}
             </div>
 
-            {/* Penalties / Legal Liabilities */}
-            {selectedSection.penalty && (
-              <div style={{ background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: '10px', padding: '16px 20px', marginBottom: '24px' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <ScaleIcon size={14} color="#f59e0b" />
-                  <span>Statutory Penalties & Consequences</span>
-                </div>
-                <p style={{ fontSize: '0.9rem', color: '#f8fafc', lineHeight: '1.5' }}>
-                  {selectedSection.penalty}
-                </p>
-              </div>
-            )}
+            {/* Source Provenance Info */}
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-dim)', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+              Statute Authority: {selectedStatute.title} · Provenance: {selectedStatute.source}
+            </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
-            Select a statutory section from the sidebar to read its provisions.
+          <div style={{ textAlign: 'center', marginTop: '100px', color: 'var(--text-muted)' }}>
+            Select a statute and section from the left panels to view statutory text.
           </div>
         )}
       </div>

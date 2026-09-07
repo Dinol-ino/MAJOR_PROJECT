@@ -45,26 +45,50 @@ def seed_database():
         
     collection = client.get_or_create_collection("tier1_law", embedding_function=emb_fn)
 
+    from app.retrieval.bm25_index import tier1_bm25_index
+
+    ACT_CANONICAL_NAMES = {
+        "Companies_Act_2013": "Companies Act, 2013",
+        "IT_Act": "Information Technology Act, 2000",
+        "BNS_2023": "Bharatiya Nyaya Sanhita, 2023",
+        "BNSS_2023": "Bharatiya Nagarik Suraksha Sanhita, 2023",
+        "Contract_Act_1872": "Indian Contract Act, 1872",
+    }
+
     chunker = SectionAwareChunker()
+    total_chunks = 0
+
     for file_name in files:
-        act_name = os.path.splitext(file_name)[0]
+        base_name = os.path.splitext(file_name)[0]
+        canonical_act = ACT_CANONICAL_NAMES.get(base_name, base_name.replace("_", " "))
         file_path = os.path.join(raw_data_dir, file_name)
         
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
             
-        chunks = chunker.chunk_document(content, act_name=act_name)
-        print(f"Parsed {len(chunks)} chunks for {act_name}.")
+        chunks = chunker.chunk_document(content, act_name=canonical_act)
+        print(f"Parsed {len(chunks)} chunks for {canonical_act}.")
         
         if chunks:
             documents = [c["text"] for c in chunks]
-            metadatas = [{"act": c["act"], "section": str(c["section"])} for c in chunks]
-            ids = [f"{act_name}_{c['section']}_{i}" for i, c in enumerate(chunks)]
+            metadatas = [
+                {
+                    "act": c["act"],
+                    "section": str(c["section"]),
+                    "doc_type": "statutory_law",
+                    "source": file_name
+                }
+                for c in chunks
+            ]
+            ids = [f"{base_name}_{c['section']}_{i}" for i, c in enumerate(chunks)]
             
             collection.add(documents=documents, metadatas=metadatas, ids=ids)
-            print(f"Successfully loaded {len(chunks)} chunks into ChromaDB for {act_name}.")
+            tier1_bm25_index.add_documents_batch(doc_ids=ids, documents=documents, metadatas=metadatas)
+            total_chunks += len(chunks)
+            print(f"Successfully loaded {len(chunks)} chunks into ChromaDB & BM25 for {canonical_act}.")
             
-    print("Tier-1 Database seeding completed successfully.")
+    tier1_bm25_index.save()
+    print(f"Tier-1 Database seeding completed successfully. Total statutory chunks: {total_chunks}.")
 
 if __name__ == "__main__":
     seed_database()

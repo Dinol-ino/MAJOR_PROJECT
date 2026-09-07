@@ -1,8 +1,42 @@
 CHAPTER I - PRELIMINARY
 Section 1. Short title, extent, commencement and application. - (1) This Act may be called the Information Technology Act, 2000.
-(2) It shall extend to the whole of India.
+(2) It shall extend to the whole of India and, save as otherwise provided in this Act, it applies also to any offence or contravention thereunder committed outside India by any person.
+(3) It shall come into force on such date as the Central Government may appoint.
 
-CHAPTER II - OFFENCES AND PUNISHMENTS
-Section 43. Penalty and compensation for damage to computer, computer system, etc. - If any person without permission of the owner or any other person who is incharge of a computer...
+CHAPTER II - DIGITAL SIGNATURE AND ELECTRONIC SIGNATURE
+Section 3. Authentication of electronic records. - (1) Subject to the provisions of this section any subscriber may authenticate an electronic record by affixing his digital signature.
+(2) The authentication of the electronic record shall be effected by the use of asymmetric crypto system and hash function which envelop and transform the initial electronic record into another electronic record.
+
+CHAPTER IX - PENALTIES, COMPENSATION AND ADJUDICATION
+Section 43. Penalty and compensation for damage to computer, computer system, etc. - If any person without permission of the owner or any other person who is incharge of a computer, computer system or computer network:
+(a) accesses or secures access to such computer, computer system or computer network;
+(b) downloads, copies or extracts any data, computer data base or information from such computer;
+(c) introduces or causes to be introduced any computer contaminant or computer virus into any computer;
+(d) damages or causes to be damaged any computer, computer system or computer data;
+(e) disrupts or causes disruption of any computer, computer system or computer network;
+(f) denies or causes the denial of access to any person authorised to access any computer;
+(g) provides any assistance to any person to facilitate access to a computer in contravention of the provisions of this Act;
+(h) charges the services availed of by a person to the account of another person by tampering with or manipulating any computer;
+(i) destroys, deletes or alters any information residing in a computer resource or diminishes its value or utility;
+(j) steals, conceals, destroys or alters or causes any person to steal, conceal, destroy or alter any computer source code,
+he shall be liable to pay damages by way of compensation to the person so affected.
+
+Section 43A. Compensation for failure to protect data. - Where a body corporate, possessing, dealing or handling any sensitive personal data or information in a computer resource which it owns, controls or operates, is negligent in implementing and maintaining reasonable security practices and procedures and thereby causes wrongful loss or wrongful gain to any person, such body corporate shall be liable to pay damages by way of compensation to the person so affected.
+
+CHAPTER XI - OFFENCES
 Section 66. Computer related offences. - If any person, dishonestly or fraudulently, does any act referred to in section 43, he shall be punishable with imprisonment for a term which may extend to three years or with fine which may extend to five lakh rupees, or with both.
-Section 67. Punishment for publishing or transmitting obscene material in electronic form. - Whoever publishes or transmits or causes to be published or transmitted in the electronic form, any material which is lascivious or appeals to the prurient interest...
+
+Section 66B. Punishment for dishonestly receiving stolen computer resource or communication device. - Whoever dishonestly receives or retains any stolen computer resource or communication device knowing or having reason to believe the same to be stolen computer resource or communication device, shall be punished with imprisonment of either description for a term which may extend to three years or with fine which may extend to one lakh rupees, or with both.
+
+Section 66C. Punishment for identity theft. - Whoever, fraudulently or dishonestly make use of the electronic signature, password or any other unique identification feature of any other person, shall be punished with imprisonment of either description for a term which may extend to three years and shall also be liable to fine with may extend to rupees one lakh.
+
+Section 66D. Punishment for cheating by personation by using computer resource. - Whoever, by means of any communication device or computer resource cheats by personation, shall be punished with imprisonment of either description for a term which may extend to three years and shall also be liable to fine which may extend to one lakh rupees.
+
+Section 66E. Punishment for violation of privacy. - Whoever, intentionally or knowingly captures, publishes or transmits the image of a private area of any person without his or her consent, under circumstances violating the privacy of that person, shall be punished with imprisonment which may extend to three years or with fine not exceeding two lakh rupees, or with both.
+
+Section 66F. Punishment for cyber terrorism. - (1) Whoever, with intent to threaten the unity, integrity, security or sovereignty of India or to strike terror in the people or any section of the people by denying or causing the denial of access to any person authorized to access computer resource, or attempts to penetrate or access a computer resource without authorization or exceeding authorized access, commits the offence of cyber terrorism.
+(2) Whoever commits or conspires to commit cyber terrorism shall be punishable with imprisonment which may extend to imprisonment for life.
+
+Section 67. Punishment for publishing or transmitting obscene material in electronic form. - Whoever publishes or transmits or causes to be published or transmitted in the electronic form, any material which is lascivious or appeals to the prurient interest or if its effect is such as to tend to deprave and corrupt persons who are likely, having regard to all relevant circumstances, to read, see or hear the matter contained or embodied in it, shall be punished on first conviction with imprisonment of either description for a term which may extend to three years and with fine which may extend to five lakh rupees.
+
+Section 72A. Punishment for disclosure of information in breach of lawful contract. - Save as otherwise provided in this Act or any other law for the time being in force, any person including an intermediary who, while providing services under the terms of lawful contract, has secured access to any material containing personal information about another person, with the intent to cause or knowing that he is likely to cause wrongful loss or wrongful gain discloses, without the consent of the person concerned, shall be punished with imprisonment for a term which may extend to three years, or with fine which may extend to five lakh rupees, or with both.

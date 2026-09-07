@@ -15,6 +15,15 @@ services:
     ports:
       - "6379:6379"
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: dfrag-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: always
+
   backend:
     build:
       context: ./backend
@@ -27,7 +36,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/dfrag_memory
       - REDIS_URL=redis://redis:6379
-      - OLLAMA_URL=http://host.docker.internal:11434
+      - OLLAMA_URL=http://ollama:11434
       - DEFAULT_MODEL=qwen2.5:3b
       - ANONYMIZED_TELEMETRY=False
       - CHROMA_PERSIST_DIR=/workspace/chroma_db
@@ -37,6 +46,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - ollama
 
   frontend:
     build:
@@ -56,4 +66,6 @@ volumes:
   pg-data:
   chroma-data:
   sqlite-data:
+  ollama-models:
+
 

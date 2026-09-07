@@ -86,17 +86,32 @@ class OutputValidator:
             return True, None
 
         valid_acts = {c.get("act", "").lower().strip() for c in retrieved_chunks if c.get("act")}
-        
-        matches = re.findall(
-            r"(?:Act:\s*([A-Za-z0-9\s]+)|(?:under|in|of|the)?\s*([A-Za-z0-9]+(?:\s+[A-Za-z0-9]+){0,2})\s+Act)",
+        expanded_valid = set(valid_acts)
+        for act in valid_acts:
+            expanded_valid.add(re.sub(r",?\s*\d{4}", "", act).strip())
+            for word in act.split():
+                if len(word) > 2 and word not in ["act", "the", "indian", "law", "sanhita", "code"]:
+                    expanded_valid.add(word)
+
+        # Exclude common statutory pronouns and generic references like "under this Act", "of this Act"
+        cleaned_answer = re.sub(
+            r"\b(?:under|in|of|by|to|for|with|from|against|upon|repayment\s+of\s+(?:any\s+)?debt\s+under)\s+(?:this|the|said|such|any|an)\s+Act\b",
+            " ",
             answer,
-            re.IGNORECASE
+            flags=re.IGNORECASE
+        )
+        cleaned_answer = re.sub(r"\b(?:this|the|said|such|any|an)\s+Act\b", " ", cleaned_answer, flags=re.IGNORECASE)
+
+        # Match named acts: e.g. "Companies Act", "Information Technology Act", "Act: Companies Act"
+        matches = re.findall(
+            r"(?:Act:\s*([A-Za-z0-9\s]+)|\b([A-Z][a-zA-Z0-9]*(?:\s+[A-Z][a-zA-Z0-9]*)*)\s+(?:Act|Code|Sanhita)(?:,?\s*\d{4})?\b)",
+            cleaned_answer
         )
         for match in matches:
             raw_name = (match[0] or match[1]).strip().lower()
             act_name = re.sub(r"^(?:under|in|of|the|this|a|an)\s+", "", raw_name).strip()
-            if len(act_name) >= 2 and act_name not in ["the", "this", "indian", "law", "general", "legal"]:
-                if not any(act_name in v or v in act_name for v in valid_acts):
+            if len(act_name) >= 3 and act_name not in ["the", "this", "indian", "law", "general", "legal", "said", "such", "any", "other", "debt under this"]:
+                if not any(act_name in v or v in act_name for v in expanded_valid):
                     logger.warning(f"Unverified citation in output: '{act_name}' not in retrieved corpus {valid_acts}")
                     return False, f"Citation existence check failed: response references unverified act '{act_name}'."
         return True, None

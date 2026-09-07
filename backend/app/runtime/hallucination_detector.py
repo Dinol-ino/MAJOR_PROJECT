@@ -25,13 +25,18 @@ class HallucinationDetector:
         # Build set of section numbers present in chunk texts and metadata fields
         context_sections = set()
         for c in chunks:
-            sec_meta = str(c.get("section", ""))
+            if isinstance(c, dict):
+                sec_meta = str(c.get("section", ""))
+                text_val = str(c.get("text", ""))
+            else:
+                sec_meta = ""
+                text_val = str(c)
+
             context_sections.update(self.SECTION_REGEX.findall(sec_meta))
             if sec_meta:
                 # Direct match for simple numeric or alphanumeric section identifiers (e.g. "302", "420")
                 context_sections.add(sec_meta.strip())
             
-            text_val = c.get("text", "")
             context_sections.update(self.SECTION_REGEX.findall(text_val))
 
         for sec in cited_sections:

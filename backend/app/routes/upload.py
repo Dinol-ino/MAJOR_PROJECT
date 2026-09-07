@@ -6,13 +6,12 @@ from app.schemas import UploadResponse
 from app.config import settings
 from app.defense.audit_log import AuditLogger
 from app.memory.durable_memory import DurableMemoryManager
-from app.ingestion.pdf_extract import PDFExtractor
+from app.security.pdf_sanitizer import pdf_sanitizer
 from app.retrieval.tier2_user import Tier2UserRetrieval
 
 router = APIRouter(tags=["upload"])
 audit_logger = AuditLogger()
 durable_memory = DurableMemoryManager()
-pdf_extractor = PDFExtractor(max_size_mb=settings.MAX_FILE_SIZE_MB, max_pages=settings.MAX_FILE_PAGES)
 tier2_retriever = Tier2UserRetrieval(settings.CHROMA_PERSIST_DIR)
 
 
@@ -30,35 +29,27 @@ async def upload_endpoint(file: UploadFile = File(...), session_id: str = Form(.
         )
         
     try:
-        fd, temp_file_path = tempfile.mkstemp(suffix=".pdf")
-        try:
-            with os.fdopen(fd, "wb") as tmp:
-                content = await file.read()
-                tmp.write(content)
-            
-            text = pdf_extractor.extract_text(temp_file_path)
-            chunks_added = tier2_retriever.add_documents(session_id, file.filename, text)
-            
-            # Persist document metadata in PostgreSQL / SQLite DocumentMemory
-            doc_id = f"doc_{session_id[:8]}_{file.filename}"
-            durable_memory.save_document_memory(
-                doc_id=doc_id,
-                session_id=session_id,
-                filename=file.filename,
-                file_size_bytes=len(content),
-                chunk_count=chunks_added,
-                metadata_json={"source": "single_upload"}
-            )
+        content = await file.read()
+        text, metadata = pdf_sanitizer.extract_clean_text(content)
+        chunks_added = tier2_retriever.add_documents(session_id, file.filename, text)
+        
+        # Persist document metadata in PostgreSQL / SQLite DocumentMemory
+        doc_id = f"doc_{session_id[:8]}_{file.filename}"
+        durable_memory.save_document_memory(
+            doc_id=doc_id,
+            session_id=session_id,
+            filename=file.filename,
+            file_size_bytes=len(content),
+            chunk_count=chunks_added,
+            metadata_json={"source": "single_upload", "pages": metadata.get("total_pages")}
+        )
 
-            return UploadResponse(
-                status="ok",
-                chunks_added=chunks_added,
-                filename=file.filename,
-                reason=None
-            )
-        finally:
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
+        return UploadResponse(
+            status="ok",
+            chunks_added=chunks_added,
+            filename=file.filename,
+            reason=None
+        )
     except Exception as exc:
         return UploadResponse(
             status="rejected",
@@ -88,36 +79,28 @@ async def upload_batch_endpoint(files: List[UploadFile] = File(...), session_id:
             continue
 
         try:
-            fd, temp_file_path = tempfile.mkstemp(suffix=".pdf")
-            try:
-                with os.fdopen(fd, "wb") as tmp:
-                    content = await file.read()
-                    tmp.write(content)
-                
-                text = pdf_extractor.extract_text(temp_file_path)
-                chunks_added = tier2_retriever.add_documents(session_id, file.filename, text)
-                total_chunks += chunks_added
+            content = await file.read()
+            text, metadata = pdf_sanitizer.extract_clean_text(content)
+            chunks_added = tier2_retriever.add_documents(session_id, file.filename, text)
+            total_chunks += chunks_added
 
-                # Persist document metadata in PostgreSQL / SQLite DocumentMemory
-                doc_id = f"doc_{session_id[:8]}_{file.filename}"
-                durable_memory.save_document_memory(
-                    doc_id=doc_id,
-                    session_id=session_id,
-                    filename=file.filename,
-                    file_size_bytes=len(content),
-                    chunk_count=chunks_added,
-                    metadata_json={"source": "batch_upload"}
-                )
+            # Persist document metadata in PostgreSQL / SQLite DocumentMemory
+            doc_id = f"doc_{session_id[:8]}_{file.filename}"
+            durable_memory.save_document_memory(
+                doc_id=doc_id,
+                session_id=session_id,
+                filename=file.filename,
+                file_size_bytes=len(content),
+                chunk_count=chunks_added,
+                metadata_json={"source": "batch_upload", "pages": metadata.get("total_pages")}
+            )
 
-                results.append({
-                    "filename": file.filename,
-                    "status": "ok",
-                    "chunks_added": chunks_added,
-                    "reason": None
-                })
-            finally:
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
+            results.append({
+                "filename": file.filename,
+                "status": "ok",
+                "chunks_added": chunks_added,
+                "reason": None
+            })
         except Exception as exc:
             results.append({
                 "filename": file.filename,

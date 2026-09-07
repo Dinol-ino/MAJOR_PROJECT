@@ -44,11 +44,24 @@ class HardwareDetector:
         # 1. CPU
         try:
             import psutil
-            cpu_cores = psutil.cpu_count(logical=False) or os.cpu_count() or 1
+            cpu_cores = psutil.cpu_count(logical=False) or psutil.cpu_count(logical=True) or os.cpu_count() or 1
         except Exception:
             cpu_cores = os.cpu_count() or 1
 
-        cpu_name = platform.processor() or platform.machine() or "Unknown CPU"
+        cpu_name = None
+        # On Windows, query winreg for human-readable brand name (e.g. AMD Ryzen 5 / Intel Core i7)
+        if sys.platform == "win32":
+            try:
+                import winreg
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+                val, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+                if val and val.strip():
+                    cpu_name = val.strip()
+            except Exception:
+                pass
+
+        if not cpu_name:
+            cpu_name = platform.processor() or os.environ.get("PROCESSOR_IDENTIFIER") or platform.machine() or "x86_64 Multi-Core Processor"
 
         # 2. RAM
         try:

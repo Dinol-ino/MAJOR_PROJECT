@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient } from '../api/client';
 import {
   CpuIcon,
@@ -20,125 +20,266 @@ export default function HardwareForm({
   setRecommendedModels,
   isFullView = false
 }) {
-  const [detectedHw, setDetectedHw] = useState(null);
-  const [recommendations, setRecommendations] = useState([]);
-  const [installedModels, setInstalledModels] = useState([]);
+  const [telemetry, setTelemetry] = useState(null);
+  const [streamStatus, setStreamStatus] = useState('connecting'); // 'live' | 'offline' | 'connecting'
+  const [sparklineData, setSparklineData] = useState([]);
+  const [catalogData, setCatalogData] = useState(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
   const [pullProgress, setPullProgress] = useState({});
-  const [manualOverride, setManualOverride] = useState(false);
-  const [ram, setRam] = useState(8);
-  const [vram, setVram] = useState(0);
-  const [loading, setLoading] = useState(false);
 
-  const fetchRecommendationsAndHealth = useCallback(async (manualRam = null, manualVram = null) => {
-    setLoading(true);
+  const pullControllers = useRef({});
+  const onModelRecommendedRef = useRef(onModelRecommended);
+  onModelRecommendedRef.current = onModelRecommended;
+
+  const selectedModelRef = useRef(selectedModel);
+  selectedModelRef.current = selectedModel;
+
+  const setRecommendedModelsRef = useRef(setRecommendedModels);
+  setRecommendedModelsRef.current = setRecommendedModels;
+
+  // Append sample to sparkline ring buffer (max 30 points)
+  const addSparklineSample = useCallback((val) => {
+    setSparklineData((prev) => {
+      const next = [...prev, val];
+      if (next.length > 30) return next.slice(next.length - 30);
+      return next;
+    });
+  }, []);
+
+  // 1. Fetch Dynamic Model Recommendations
+  const fetchModels = useCallback(async () => {
+    setModelsLoading(true);
     try {
-      const recData = await apiClient.recommend(manualRam, manualVram);
-      setRecommendations(recData.recommended || []);
-      setDetectedHw(recData.detected_hardware || null);
-
-      if (setRecommendedModels) {
-        setRecommendedModels(recData.recommended || []);
+      const res = await apiClient.getRecommendedModels();
+      setCatalogData(res);
+      if (setRecommendedModelsRef.current) {
+        setRecommendedModelsRef.current(res.recommended || []);
       }
-
-      if (recData.recommended && recData.recommended.length > 0 && onModelRecommended && !selectedModel) {
-        onModelRecommended(recData.recommended[0].model_id);
-      }
-
-      try {
-        const healthData = await apiClient.getHealth();
-        if (healthData.ollama && healthData.ollama.installed_models) {
-          setInstalledModels(healthData.ollama.installed_models);
+      if (!selectedModelRef.current && res.recommended && res.recommended.length > 0) {
+        const firstInstalled = res.recommended.find((m) => m.installed) || res.recommended[0];
+        if (onModelRecommendedRef.current) {
+          onModelRecommendedRef.current(firstInstalled.model_id);
         }
-      } catch (e) {
-        console.warn("Could not fetch installed models health:", e);
       }
-    } catch (err) {
-      console.error("Hardware detection error:", err);
+    } catch (e) {
+      console.error('Failed to load recommended models:', e);
     } finally {
-      setLoading(false);
+      setModelsLoading(false);
     }
-  }, [onModelRecommended, selectedModel, setRecommendedModels]);
+  }, []);
 
+  // 2. Persistent SSE Telemetry Stream + Initial Fast Hydration
   useEffect(() => {
-    fetchRecommendationsAndHealth();
-  }, [fetchRecommendationsAndHealth]);
+    let es = null;
+    let reconnectTimeout = null;
+    let active = true;
 
-  const handleManualSubmit = (e) => {
-    e.preventDefault();
-    fetchRecommendationsAndHealth(ram, vram);
-  };
-
-  const handleAutoPull = async (modelId) => {
-    try {
-      const response = await apiClient.pullModel(modelId);
-      const taskId = response.task_id;
-      setPullProgress((prev) => ({
-        ...prev,
-        [modelId]: { task_id: taskId, percent: 0, status: 'starting' },
-      }));
-
-      const interval = setInterval(async () => {
-        try {
-          const prog = await apiClient.getPullProgress(taskId);
-          setPullProgress((prev) => ({
-            ...prev,
-            [modelId]: {
-              task_id: taskId,
-              percent: Math.round(prog.percent || 0),
-              status: prog.status || 'downloading',
-            },
-          }));
-
-          if (prog.status === 'done' || prog.percent >= 100) {
-            clearInterval(interval);
-            const h = await apiClient.getHealth();
-            if (h.ollama && h.ollama.installed_models) {
-              setInstalledModels(h.ollama.installed_models);
-            }
-          }
-        } catch (err) {
-          console.error("Polling progress error:", err);
-          clearInterval(interval);
+    // Instant initial hydration via fast <50ms snapshot
+    apiClient.getTelemetrySample()
+      .then((data) => {
+        if (active && data) {
+          setTelemetry(data);
+          setStreamStatus('live');
+          addSparklineSample(data.cpu?.load_percent || 0);
         }
-      }, 1000);
-    } catch (err) {
-      console.error("Auto pull failed:", err);
-      alert(`Auto pull failed: ${err.message}`);
-    }
+      })
+      .catch(() => {
+        // Fallback silently if offline
+      });
+
+    fetchModels();
+
+    const connect = () => {
+      try {
+        const streamUrl = `${apiClient.BASE_URL || ''}/api/telemetry/stream`;
+        es = new EventSource(streamUrl);
+
+        es.onopen = () => {
+          if (active) setStreamStatus('live');
+        };
+
+        es.onmessage = (event) => {
+          if (!active) return;
+          try {
+            const data = JSON.parse(event.data);
+            if (data.cpu) {
+              setTelemetry(data);
+              setStreamStatus('live');
+              addSparklineSample(data.cpu.load_percent || 0);
+            }
+          } catch (e) {
+            console.debug('Telemetry chunk parse error:', e);
+          }
+        };
+
+        es.onerror = () => {
+          if (!active) return;
+          setStreamStatus('offline');
+          if (es) {
+            es.close();
+            es = null;
+          }
+          reconnectTimeout = setTimeout(connect, 3000);
+        };
+      } catch (err) {
+        setStreamStatus('offline');
+        reconnectTimeout = setTimeout(connect, 3000);
+      }
+    };
+
+    connect();
+
+    return () => {
+      active = false;
+      if (es) es.close();
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      // Abort any active pulls on unmount
+      Object.values(pullControllers.current).forEach((ctrl) => ctrl && ctrl.abort());
+    };
+  }, [addSparklineSample, fetchModels]);
+
+  // Handle Model Pull via SSE Stream
+  const handlePullModel = (modelId) => {
+    if (pullControllers.current[modelId]) return;
+
+    setPullProgress((prev) => ({
+      ...prev,
+      [modelId]: { percent: 0, status: 'starting', completed: 0, total: 0 }
+    }));
+
+    const controller = apiClient.pullModelStream(
+      modelId,
+      (progress) => {
+        setPullProgress((prev) => ({
+          ...prev,
+          [modelId]: {
+            percent: Math.min(100, Math.round(progress.percent || 0)),
+            status: progress.status || 'downloading',
+            completed: progress.completed || 0,
+            total: progress.total || 0,
+            digest: progress.digest
+          }
+        }));
+      },
+      () => {
+        delete pullControllers.current[modelId];
+        setPullProgress((prev) => ({
+          ...prev,
+          [modelId]: { percent: 100, status: 'done' }
+        }));
+        fetchModels();
+        if (setSelectedModel) setSelectedModel(modelId);
+        if (onModelRecommended) onModelRecommended(modelId);
+      },
+      (err) => {
+        delete pullControllers.current[modelId];
+        setPullProgress((prev) => ({
+          ...prev,
+          [modelId]: { status: 'error', error: err.message }
+        }));
+      }
+    );
+
+    pullControllers.current[modelId] = controller;
   };
 
-  const ramAvailable = detectedHw ? (detectedHw.ram_available_gb || detectedHw.ram_total_gb || 0) : ram;
-  const vramAvailable = detectedHw ? (detectedHw.gpu_vram_gb || 0) : vram;
-
-  let hwTier = 'TIER 0 (Lightweight)';
-  let tierColor = 'var(--accent-cyan)';
-  let uploadLimit = 'Up to 10 files';
-  if (vramAvailable >= 16 || ramAvailable >= 32) {
-    hwTier = 'TIER 2 (High Performance)';
-    tierColor = 'var(--defense-pass)';
-    uploadLimit = 'Up to 50 files';
-  } else if (vramAvailable >= 8 || ramAvailable >= 16) {
-    hwTier = 'TIER 1 (Standard Legal)';
-    tierColor = 'var(--accent-blue)';
-    uploadLimit = 'Up to 25 files';
-  }
+  const handleCancelPull = (modelId) => {
+    if (pullControllers.current[modelId]) {
+      pullControllers.current[modelId].abort();
+      delete pullControllers.current[modelId];
+    }
+    setPullProgress((prev) => {
+      const copy = { ...prev };
+      delete copy[modelId];
+      return copy;
+    });
+  };
 
   if (!isFullView && isOpen === false) return null;
 
+  // Derived telemetry presentation
+  const cpu = telemetry?.cpu || {
+    name: 'Multi-Core Processor',
+    load_percent: 0,
+    cores_physical: 4,
+    cores_logical: 8,
+    arch: 'x86_64'
+  };
+
+  const ram = telemetry?.ram || {
+    total_gb: 16.0,
+    available_gb: 8.0,
+    used_percent: 50
+  };
+
+  const gpu = telemetry?.gpu || {
+    detected: false,
+    name: 'No Dedicated GPU (CPU Only)',
+    vram_total_gb: 0.0,
+    vram_used_gb: 0.0,
+    util_percent: 0,
+    mode: 'cpu'
+  };
+
+  const disk = telemetry?.disk || {
+    free_gb: 100.0,
+    total_gb: 512.0
+  };
+
+  const tier = telemetry?.tier || {
+    tier_code: 'tier_0',
+    tier_label: 'Tier 0 (Lightweight)',
+    reason: 'Tier 0 — CPU mode active',
+    max_model: '3B (Q4)'
+  };
+
+  let tierColor = 'var(--accent-cyan)';
+  if (tier.tier_code === 'tier_1') tierColor = 'var(--accent-blue)';
+  else if (tier.tier_code === 'tier_2') tierColor = 'var(--defense-pass)';
+  else if (tier.tier_code === 'tier_3') tierColor = '#c084fc';
+
+  const modelsList = catalogData?.recommended || [];
+  const ollamaOnline = catalogData?.ollama_online ?? true;
+
   const content = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(0, 210, 180, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CpuIcon size={18} color="var(--accent-cyan)" />
+          <div
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 8,
+              background: 'rgba(0, 210, 180, 0.12)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <CpuIcon size={20} color="var(--accent-cyan)" />
           </div>
           <div>
-            <h2 style={{ fontFamily: 'var(--font-title)', fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              Hardware & AI Model Engine
-            </h2>
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              Live telemetry, hardware tier mapping, and local open-source LLM management.
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h2 style={{ fontFamily: 'var(--font-title)', fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                Hardware Engine & Model Manager
+              </h2>
+              <span
+                style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  borderRadius: '10px',
+                  background: streamStatus === 'live' ? 'rgba(46, 204, 113, 0.15)' : 'rgba(231, 76, 60, 0.15)',
+                  color: streamStatus === 'live' ? '#2ecc71' : '#e74c3c',
+                  border: `1px solid ${streamStatus === 'live' ? 'rgba(46, 204, 113, 0.3)' : 'rgba(231, 76, 60, 0.3)'}`
+                }}
+              >
+                {streamStatus === 'live' ? '● SSE Live' : '○ Telemetry Offline'}
+              </span>
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
+              Live telemetry via Server-Sent Events, deterministic hardware tiering, and real-time model streaming.
             </p>
           </div>
         </div>
@@ -146,19 +287,37 @@ export default function HardwareForm({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
             type="button"
-            onClick={() => fetchRecommendationsAndHealth()}
-            disabled={loading}
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '6px', padding: '6px 10px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem' }}
+            onClick={() => fetchModels()}
+            disabled={modelsLoading}
+            style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              color: 'var(--text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '0.75rem',
+              cursor: 'pointer'
+            }}
           >
-            <RefreshIcon size={12} className={loading ? 'pulse-text' : ''} />
-            <span>Refresh</span>
+            <RefreshIcon size={13} className={modelsLoading ? 'pulse-text' : ''} />
+            <span>Refresh Models</span>
           </button>
 
           {!isFullView && onClose && (
             <button
               type="button"
               onClick={onClose}
-              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.1rem', cursor: 'pointer' }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-muted)',
+                fontSize: '1.2rem',
+                cursor: 'pointer',
+                padding: '4px'
+              }}
             >
               ✕
             </button>
@@ -166,223 +325,314 @@ export default function HardwareForm({
         </div>
       </div>
 
-      {/* Mode Switcher: Auto Detect vs Manual Simulation */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-input)', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-        <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Detection Mode</span>
-        <div style={{ display: 'flex', gap: '4px' }}>
-          <button
-            type="button"
-            onClick={() => { setManualOverride(false); fetchRecommendationsAndHealth(); }}
-            style={{
-              padding: '4px 10px',
-              fontSize: '0.74rem',
-              fontWeight: 600,
-              borderRadius: '6px',
-              border: 'none',
-              background: !manualOverride ? 'var(--accent-cyan)' : 'transparent',
-              color: !manualOverride ? '#0d0f14' : 'var(--text-secondary)',
-            }}
-          >
-            Physical Auto
-          </button>
-          <button
-            type="button"
-            onClick={() => setManualOverride(true)}
-            style={{
-              padding: '4px 10px',
-              fontSize: '0.74rem',
-              fontWeight: 600,
-              borderRadius: '6px',
-              border: 'none',
-              background: manualOverride ? 'var(--accent-blue)' : 'transparent',
-              color: manualOverride ? 'white' : 'var(--text-secondary)',
-            }}
-          >
-            Manual Simulation
-          </button>
+      {/* Hardware Tier Banner & Deterministic Reason Tooltip */}
+      <div
+        style={{
+          background: 'rgba(255, 255, 255, 0.02)',
+          border: `1px solid ${tierColor}44`,
+          borderLeft: `4px solid ${tierColor}`,
+          borderRadius: '8px',
+          padding: '12px 16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}
+      >
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+              Evaluated Hardware Tier
+            </span>
+            <span
+              style={{
+                background: `${tierColor}22`,
+                color: tierColor,
+                border: `1px solid ${tierColor}66`,
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: '4px'
+              }}
+            >
+              {tier.tier_label}
+            </span>
+          </div>
+          <div style={{ fontSize: '0.82rem', color: 'var(--text-primary)', marginTop: '4px' }}>
+            {tier.reason}
+          </div>
+        </div>
+
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Max Model Ceiling</div>
+          <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
+            {tier.max_model}
+          </div>
         </div>
       </div>
 
-      {/* Live Telemetry Cards */}
+      {/* Live Telemetry Stat Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: isFullView ? 'repeat(4, 1fr)' : 'repeat(2, 1fr)', gap: '12px' }}>
+        {/* CPU Card */}
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>CPU Processor</div>
-          <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
-            {detectedHw ? `${detectedHw.cpu_cores} Physical Cores` : 'Detecting...'}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>CPU Processor</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-cyan)' }}>{cpu.load_percent}% Load</span>
           </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {detectedHw ? detectedHw.cpu_name : 'x86_64 / ARM'}
+          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cpu.name}>
+            {cpu.name}
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '2px' }}>
+            {cpu.cores_physical} Physical / {cpu.cores_logical} Logical Cores ({cpu.arch})
+          </div>
+
+          {/* Sparkline Graph */}
+          {sparklineData.length > 1 && (
+            <div style={{ marginTop: '10px', height: '24px', width: '100%', display: 'flex', alignItems: 'flex-end', gap: '2px' }}>
+              {sparklineData.map((val, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    flex: 1,
+                    height: `${Math.max(10, Math.min(100, val))}%`,
+                    background: 'var(--accent-cyan)',
+                    opacity: 0.3 + (idx / sparklineData.length) * 0.7,
+                    borderRadius: '1px'
+                  }}
+                  title={`${val}% load`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* System RAM Card */}
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>System RAM</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: ram.used_percent > 85 ? '#e74c3c' : 'var(--accent-cyan)' }}>
+              {ram.used_percent}% Used
+            </span>
+          </div>
+          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--accent-cyan)', marginTop: '4px' }}>
+            {ram.available_gb} GB Free / {ram.total_gb} GB
+          </div>
+          <div style={{ width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', height: '5px', marginTop: '6px', overflow: 'hidden' }}>
+            <div
+              style={{
+                width: `${ram.used_percent}%`,
+                height: '100%',
+                background: ram.used_percent > 85 ? '#e74c3c' : 'var(--accent-cyan)',
+                transition: 'width 0.4s ease'
+              }}
+            />
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '6px' }}>
+            {ram.available_gb < 3.0 ? '⚠️ High memory pressure — CPU offload limited' : 'Available for In-Memory Vectors & Model Weights'}
           </div>
         </div>
 
+        {/* GPU / VRAM Card */}
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>System RAM</div>
-          <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--accent-cyan)', marginTop: '2px' }}>
-            {detectedHw ? `${detectedHw.ram_available_gb} GB / ${detectedHw.ram_total_gb} GB` : `${ram} GB`}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>GPU Acceleration</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: gpu.detected ? 'var(--accent-blue)' : 'var(--text-muted)' }}>
+              {gpu.detected ? `${gpu.util_percent}% Utilized` : 'CPU Mode'}
+            </span>
           </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '2px' }}>
-            {detectedHw && detectedHw.ram_available_gb < 2 ? '⚠️ Low RAM - CPU Mode' : 'Available for Inference'}
+          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: gpu.detected ? 'var(--accent-blue)' : 'var(--text-secondary)', marginTop: '4px' }}>
+            {gpu.detected ? `${gpu.vram_used_gb || 0} / ${gpu.vram_total_gb || 0} GB VRAM` : 'No CUDA GPU'}
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={gpu.name}>
+            {gpu.detected ? gpu.name : 'Running in CPU-Only Mode (Tier 0 Qualified)'}
           </div>
         </div>
 
+        {/* Storage Card */}
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>GPU / VRAM</div>
-          <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--accent-blue)', marginTop: '2px' }}>
-            {detectedHw && detectedHw.gpu_available ? `${detectedHw.gpu_vram_gb} GB VRAM` : 'No CUDA GPU'}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Disk Storage</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Model Weights</span>
           </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {detectedHw ? (detectedHw.gpu_name || 'CPU GGML Offload') : 'CPU Mode'}
+          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '4px' }}>
+            {disk.free_gb} GB Free
           </div>
-        </div>
-
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Hardware Tier</div>
-          <div style={{ fontSize: '1.05rem', fontWeight: 700, color: tierColor, marginTop: '2px' }}>
-            {hwTier}
-          </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '2px' }}>
-            Batch Limit: {uploadLimit}
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '4px' }}>
+            Sufficient space for legal LLM downloads & ChromaDB vectors
           </div>
         </div>
       </div>
 
-      {/* Manual Override Form if enabled */}
-      {manualOverride && (
-        <form onSubmit={handleManualSubmit} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-            Simulate Hardware Specifications
+      {/* Recommended Models Section */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+              Hardware-Matched Model Catalog
+            </h3>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
+              Dynamically evaluated against your live hardware capacity and Ollama installations.
+            </p>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <div>
-              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>RAM (GB)</label>
-              <input
-                type="number"
-                min="2"
-                max="128"
-                value={ram}
-                onChange={(e) => setRam(Number(e.target.value))}
-                style={{ width: '100%', background: 'var(--bg-input)', border: '1px solid var(--border-medium)', color: 'white', padding: '6px 10px', borderRadius: '6px', fontSize: '0.85rem' }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>VRAM (GB)</label>
-              <input
-                type="number"
-                min="0"
-                max="96"
-                value={vram}
-                onChange={(e) => setVram(Number(e.target.value))}
-                style={{ width: '100%', background: 'var(--bg-input)', border: '1px solid var(--border-medium)', color: 'white', padding: '6px 10px', borderRadius: '6px', fontSize: '0.85rem' }}
-              />
-            </div>
-          </div>
-          <button
-            type="submit"
-            style={{ background: 'var(--accent-blue)', border: 'none', borderRadius: '6px', padding: '8px', color: 'white', fontWeight: 600, fontSize: '0.8rem' }}
-          >
-            Calculate Recommended Models
-          </button>
-        </form>
-      )}
 
-      {/* Model Catalog & Pull Manager */}
-      <div>
-        <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span>Recommended Local Models</span>
-          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Ollama Engine</span>
+          {!ollamaOnline && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(231, 76, 60, 0.12)', border: '1px solid rgba(231, 76, 60, 0.3)', borderRadius: '6px', color: '#e74c3c', fontSize: '0.72rem' }}>
+              <ShieldAlertIcon size={14} />
+              <span>Ollama unreachable at 127.0.0.1:11434</span>
+            </div>
+          )}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {recommendations.map((model) => {
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {modelsList.map((model) => {
             const mId = model.model_id;
             const isSelected = selectedModel === mId;
-            const isInstalled = installedModels.some((im) => im.toLowerCase().startsWith(mId.toLowerCase()));
             const progress = pullProgress[mId];
+            const isPulling = progress && progress.status !== 'done' && progress.status !== 'error';
 
             return (
               <div
                 key={mId}
                 style={{
-                  background: isSelected ? 'rgba(0, 210, 180, 0.08)' : 'var(--bg-card)',
-                  border: `1px solid ${isSelected ? 'var(--accent-cyan)' : 'var(--border-subtle)'}`,
-                  borderRadius: '10px',
-                  padding: '14px',
+                  background: isSelected ? 'rgba(0, 210, 180, 0.05)' : 'var(--bg-card)',
+                  border: isSelected ? '1px solid var(--accent-cyan)' : '1px solid var(--border-subtle)',
+                  borderRadius: '8px',
+                  padding: '14px 16px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '8px',
+                  gap: '10px',
+                  transition: 'all 0.2s ease'
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                        {model.display_name || mId}
+                      <span style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {model.display_name}
                       </span>
-                      {isSelected && (
-                        <span style={{ fontSize: '0.65rem', background: 'rgba(0, 210, 180, 0.15)', color: 'var(--accent-cyan)', padding: '1px 6px', borderRadius: '10px', fontWeight: 700 }}>
-                          ACTIVE
+                      {model.parameter_size && (
+                        <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '1px 6px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', color: 'var(--text-secondary)' }}>
+                          {model.parameter_size}
+                        </span>
+                      )}
+                      {model.quantization && (
+                        <span style={{ fontSize: '0.68rem', padding: '1px 6px', background: 'rgba(255, 255, 255, 0.04)', borderRadius: '4px', color: 'var(--text-dim)' }}>
+                          {model.quantization.toUpperCase()}
+                        </span>
+                      )}
+                      {model.recommended_for_tier && (
+                        <span style={{ fontSize: '0.68rem', fontWeight: 600, padding: '1px 6px', background: 'rgba(46, 204, 113, 0.12)', color: '#2ecc71', borderRadius: '4px' }}>
+                          Tier Matched
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                      Size: {model.size_gb} GB • Min RAM: {model.ram_required_gb} GB • {model.tier}
+
+                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '4px', display: 'flex', gap: '14px' }}>
+                      <span>Size: ~{model.size_gb} GB</span>
+                      <span>RAM Needed: {model.ram_required_gb} GB</span>
+                      {model.vram_required_gb && <span>VRAM Needed: {model.vram_required_gb} GB</span>}
+                      <span>Context: {model.context_window} tokens</span>
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {isInstalled ? (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedModel(mId)}
-                        style={{
-                          background: isSelected ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.06)',
-                          color: isSelected ? '#0d0f14' : 'var(--text-primary)',
-                          border: 'none',
-                          borderRadius: '6px',
-                          padding: '6px 12px',
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                        }}
-                      >
-                        {isSelected ? 'Selected' : 'Use Model'}
-                      </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {model.installed ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 600, color: '#2ecc71' }}>
+                          <CheckCircleIcon size={14} />
+                          <span>Installed</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (setSelectedModel) setSelectedModel(mId);
+                            if (onModelRecommended) onModelRecommended(mId);
+                            if (!isFullView && onClose) onClose();
+                          }}
+                          style={{
+                            background: isSelected ? 'var(--accent-cyan)' : 'var(--bg-input)',
+                            color: isSelected ? '#0d0f14' : 'var(--text-primary)',
+                            border: '1px solid var(--border-subtle)',
+                            borderRadius: '6px',
+                            padding: '6px 12px',
+                            fontSize: '0.74rem',
+                            fontWeight: 700,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {isSelected ? 'Active Model' : 'Select'}
+                        </button>
+                      </div>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleAutoPull(mId)}
-                        disabled={progress && progress.status !== 'error' && progress.status !== 'done'}
-                        style={{
-                          background: 'var(--accent-gradient)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          padding: '6px 12px',
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                        }}
-                      >
-                        <DownloadIcon size={12} />
-                        <span>{progress ? `${progress.percent}%` : 'Auto-Pull'}</span>
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {isPulling ? (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelPull(mId)}
+                            style={{
+                              background: 'rgba(231, 76, 60, 0.15)',
+                              color: '#e74c3c',
+                              border: '1px solid rgba(231, 76, 60, 0.3)',
+                              borderRadius: '6px',
+                              padding: '6px 10px',
+                              fontSize: '0.72rem',
+                              fontWeight: 600,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handlePullModel(mId)}
+                            style={{
+                              background: 'var(--accent-gradient)',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              padding: '6px 14px',
+                              fontSize: '0.74rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            <DownloadIcon size={13} />
+                            <span>{model.action_label}</span>
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
 
-                {/* Pull Progress Bar */}
-                {progress && progress.status !== 'done' && (
-                  <div style={{ width: '100%', background: 'var(--bg-input)', borderRadius: '4px', height: '6px', overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        width: `${progress.percent}%`,
-                        height: '100%',
-                        background: 'var(--accent-gradient)',
-                        transition: 'width 0.3s ease',
-                      }}
-                    />
+                {/* Pulling Progress Bar & Details */}
+                {isPulling && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                      <span>Status: {progress.status}</span>
+                      <span>{progress.percent}%</span>
+                    </div>
+                    <div style={{ width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', height: '6px', overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          width: `${progress.percent}%`,
+                          height: '100%',
+                          background: 'var(--accent-cyan)',
+                          transition: 'width 0.2s ease'
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {progress?.status === 'error' && (
+                  <div style={{ fontSize: '0.72rem', color: '#e74c3c', marginTop: '4px' }}>
+                    ⚠️ {progress.error || 'Failed to pull model'}
                   </div>
                 )}
               </div>
@@ -402,11 +652,11 @@ export default function HardwareForm({
           background: 'var(--bg-app)',
           padding: '32px 40px',
           boxSizing: 'border-box',
-          overflowY: 'auto',
+          overflowY: 'auto'
         }}
         className="view-container"
       >
-        <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+        <div style={{ maxWidth: '960px', margin: '0 auto' }}>
           {content}
         </div>
       </div>
@@ -419,7 +669,7 @@ export default function HardwareForm({
         position: 'fixed',
         top: 0,
         right: 0,
-        width: '400px',
+        width: '440px',
         height: '100vh',
         background: 'var(--bg-sidebar)',
         borderLeft: '1px solid var(--border-subtle)',
@@ -427,7 +677,7 @@ export default function HardwareForm({
         padding: '24px',
         zIndex: 1000,
         boxSizing: 'border-box',
-        overflowY: 'auto',
+        overflowY: 'auto'
       }}
       className="view-container"
     >

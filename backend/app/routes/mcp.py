@@ -10,6 +10,8 @@ from app.mcp.gateway import mcp_gateway, MCPResponse
 from app.db.engine import get_sync_session
 from app.db.models import MCPToolCall
 
+from app.mcp.server_manager import mcp_server_manager
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
@@ -35,31 +37,47 @@ class MCPStatusResponse(BaseModel):
 def get_mcp_status():
     """
     Returns real-time status of the MCP gateway, registered categories,
-    active servers, and schema-validated tool definitions.
+    active servers (with real subprocess/health monitoring), and schema-validated tool definitions.
     """
     categories = list(policy_engine._policy_data.get("categories", {}).keys())
-    servers_cfg = policy_engine._policy_data.get("servers", {})
-    
-    active_servers = []
-    for srv_name, srv_data in servers_cfg.items():
-        active_servers.append({
-            "name": srv_name,
-            "enabled": srv_data.get("enabled", True),
-            "policy": srv_data.get("default_policy", "allow"),
-            "allowed_tools": srv_data.get("allowed_tools", []),
-            "denied_tools": srv_data.get("denied_tools", [])
-        })
-
+    active_servers = mcp_server_manager.get_all_servers_status()
     all_tools = tool_registry.list_tools()
 
     return MCPStatusResponse(
         enabled=policy_engine._policy_data.get("global", {}).get("enabled", True),
-        current_network_mode=settings.network_mode.default_mode,
+        current_network_mode=settings.network.default_mode,
         categories=categories,
         active_servers=active_servers,
         total_registered_tools=len(all_tools),
         tools=all_tools
     )
+
+
+@router.post("/servers/{server_name}/reconnect")
+def reconnect_mcp_server(server_name: str):
+    """
+    Triggers re-connection and health check for a specific MCP server.
+    """
+    try:
+        updated = mcp_server_manager.reconnect_server(server_name)
+        return {"status": "ok", "server": updated}
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"MCP Server '{server_name}' not recognized")
+
+
+@router.post("/discover")
+def discover_mcp_tools():
+    """
+    Spec 04 §2.3: Auto-discovery across connected MCP servers.
+    Fetches tool schemas and normalizes them for prompt manifest injection.
+    """
+    discovered = mcp_server_manager.discover_tools()
+    return {
+        "status": "ok",
+        "total_discovered": len(discovered),
+        "tools": discovered
+    }
+
 
 
 @router.post("/tool-call", response_model=MCPResponse)

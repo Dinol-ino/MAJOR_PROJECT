@@ -86,7 +86,11 @@ class DurableMemoryManager:
         citations: Optional[List[Dict[str, Any]]] = None,
         user_id: str = "default_user",
         blocked_by: Optional[str] = None,
-        latency_ms: Optional[float] = None
+        latency_ms: Optional[float] = None,
+        model_used: Optional[str] = None,
+        runtime_used: Optional[str] = None,
+        reasoning_trace: Optional[str] = None,
+        grounding_score: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Write-through persistence: inserts message into DB on every turn.
@@ -101,6 +105,10 @@ class DurableMemoryManager:
             citations=citations,
             blocked_by=blocked_by,
             latency_ms=latency_ms,
+            model_used=model_used,
+            runtime_used=runtime_used,
+            reasoning_trace=reasoning_trace,
+            grounding_score=grounding_score,
             created_at=datetime.utcnow()
         )
         with self._get_session() as session:

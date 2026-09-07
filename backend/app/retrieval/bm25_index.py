@@ -1,10 +1,10 @@
 import os
 import re
-import json
 import pickle
 import logging
 import threading
 from typing import List, Dict, Any, Optional, Callable
+# pyrefly: ignore [missing-import]
 from rank_bm25 import BM25Plus
 
 from app.config import settings
@@ -12,13 +12,24 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+STOP_WORDS = {
+    "the", "a", "an", "and", "or", "but", "if", "then", "else", "when",
+    "at", "by", "for", "with", "about", "against", "between", "into",
+    "through", "during", "before", "after", "above", "below", "to",
+    "from", "up", "down", "in", "out", "on", "off", "over", "under",
+    "again", "further", "then", "once", "here", "there", "is", "am",
+    "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "having", "do", "does", "did", "doing", "would", "should", "could",
+    "ought", "i", "you", "he", "she", "it", "we", "they", "this", "that",
+    "yes", "no", "hello", "hi", "hey", "can", "please", "help", "thank", "thanks", "what", "which", "who", "whom"
+}
+
 def default_tokenizer(text: str) -> List[str]:
-    """Tokenizes and normalizes input text for BM25 indexing."""
+    """Tokenizes and normalizes input text for BM25 indexing with stop words removed."""
     if not text:
         return []
-    # Lowercase and split on non-alphanumeric words
-    tokens = re.findall(r"\b\w+\b", text.lower())
-    return tokens
+    tokens = re.findall(r"\b[a-zA-Z0-9_]+\b", text.lower())
+    return [t for t in tokens if len(t) > 1 and t not in STOP_WORDS]
 
 
 class PersistentBM25Index:
