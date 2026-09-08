@@ -59,7 +59,7 @@ class MCPGateway:
         Synchronously executes a tool call through all defensive gates.
         """
         start_time = time.time()
-        mode = (network_mode or settings.network_mode.default_mode).upper()
+        mode = (network_mode or settings.network.default_mode).upper()
 
         # Step 1: Policy Engine Evaluation
         decision: PolicyDecision = policy_engine.evaluate(
@@ -168,6 +168,23 @@ class MCPGateway:
             latency_ms=latency,
             session_id=session_id
         )
+
+        # Emit MCPToolInvoked event (Module 9 §9.2 Event 3)
+        try:
+            from app.events import MCPToolInvoked, emit_mcp_tool_invoked
+            emit_mcp_tool_invoked(MCPToolInvoked(
+                tool_name=tool_name,
+                category=decision.category,
+                network_mode=mode,
+                is_allowed=True,
+                arguments=arguments,
+                output_preview=str(final_data)[:200],
+                latency_ms=latency,
+                session_id=session_id,
+                precedents_found=final_data.get("cases", []) if isinstance(final_data, dict) else []
+            ))
+        except Exception as event_err:
+            logger.warning(f"Error emitting MCPToolInvoked event: {event_err}")
 
         return MCPResponse(
             success=True,

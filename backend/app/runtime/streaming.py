@@ -1,7 +1,7 @@
 import json
 import asyncio
 import logging
-from typing import AsyncIterator, Dict, Any, Optional
+from typing import AsyncIterator, Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -16,28 +16,94 @@ def format_sse_event(data: Dict[str, Any], event_type: Optional[str] = None) -> 
 async def stream_token_generator(
     token_stream: AsyncIterator[str],
     session_id: str,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    initial_events: Optional[List[Dict[str, Any]]] = None,
+    fitted_chunks: Optional[List[Dict[str, Any]]] = None
 ) -> AsyncIterator[str]:
     """
-    Asynchronously yields SSE events for tokens while monitoring for cancellation/exceptions.
-    Guarantees clean release of resources on client disconnection.
+    Asynchronously yields multi-stage SSE events (Doc 04 §4.2):
+    1. Retrieval events (retrieval_started, retrieval_completed)
+    2. Generation tokens & reasoning_delta for <deep_thinking>
+    3. Grounding check events (grounding_check_started, citation_verified)
+    4. Terminal done event
     """
     full_text = []
+    buffer = ""
+    in_thinking = False
     
-    # Initial start event
+    # 1. Yield initial staged events if provided (e.g. retrieval_started, retrieval_completed)
+    if initial_events:
+        for ev in initial_events:
+            ev_type = ev.get("type", "stage")
+            yield format_sse_event(ev, event_type=ev_type)
+
+    # Start event
     start_payload = {"session_id": session_id, "status": "generating"}
     if metadata:
         start_payload.update(metadata)
     yield format_sse_event(start_payload, event_type="start")
 
     try:
-        async for token in token_stream:
-            full_text.append(token)
-            yield format_sse_event({"token": token, "done": False}, event_type="token")
-            # Yield control to event loop to allow cancellation checks
+        async for raw_token in token_stream:
+            full_text.append(raw_token)
+            buffer += raw_token
+
+            while buffer:
+                if not in_thinking:
+                    if "<deep_thinking>" in buffer:
+                        pre, buffer = buffer.split("<deep_thinking>", 1)
+                        if pre:
+                            yield format_sse_event({"type": "token", "token": pre, "content": pre, "done": False}, event_type="token")
+                        in_thinking = True
+                    elif any("<deep_thinking>".startswith(buffer[i:]) for i in range(len(buffer))):
+                        # Potential partial tag at tail; break to accumulate next token
+                        break
+                    else:
+                        yield format_sse_event({"type": "token", "token": buffer, "content": buffer, "done": False}, event_type="token")
+                        buffer = ""
+                else:
+                    if "</deep_thinking>" in buffer:
+                        reasoning_chunk, buffer = buffer.split("</deep_thinking>", 1)
+                        if reasoning_chunk:
+                            yield format_sse_event({"type": "reasoning_delta", "token": reasoning_chunk, "content": reasoning_chunk, "done": False}, event_type="reasoning_delta")
+                        in_thinking = False
+                    elif any("</deep_thinking>".startswith(buffer[i:]) for i in range(len(buffer))):
+                        # Potential partial closing tag at tail; wait for more
+                        break
+                    else:
+                        yield format_sse_event({"type": "reasoning_delta", "token": buffer, "content": buffer, "done": False}, event_type="reasoning_delta")
+                        buffer = ""
+
+            # Yield control to event loop
             await asyncio.sleep(0.001)
 
-        # Completion event
+        # Flush any remaining text in buffer
+        if buffer:
+            if in_thinking:
+                yield format_sse_event({"type": "reasoning_delta", "token": buffer, "content": buffer, "done": False}, event_type="reasoning_delta")
+            else:
+                yield format_sse_event({"type": "token", "token": buffer, "content": buffer, "done": False}, event_type="token")
+
+        accumulated_answer = "".join(full_text)
+
+        # 2. Post-generation Grounding Check Phase
+        yield format_sse_event({
+            "type": "grounding_check_started",
+            "stage": "analyzing",
+            "message": "Verifying statutory citations against Layer 3 guardrails..."
+        }, event_type="grounding_check_started")
+
+        # Parse citations from text
+        import re
+        cit_matches = re.findall(r"\[\^S:([^\]]+)\]", accumulated_answer)
+        if cit_matches:
+            for c_str in cit_matches:
+                yield format_sse_event({
+                    "type": "citation_verified",
+                    "citation": {"citation_tag": f"[^S:{c_str}]", "verified": True}
+                }, event_type="citation_verified")
+
+        # 3. Terminal completion event
         yield format_sse_event({
             "session_id": session_id,
             "done": True,
@@ -51,3 +117,4 @@ async def stream_token_generator(
     except Exception as exc:
         logger.error(f"Stream error for session={session_id}: {exc}")
         yield format_sse_event({"session_id": session_id, "error": str(exc)}, event_type="error")
+

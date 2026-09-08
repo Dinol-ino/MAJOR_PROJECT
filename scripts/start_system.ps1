@@ -29,7 +29,7 @@ if (-not (Test-Path $VENV_PYTHON)) {
 Write-Host "`n[1/4] Checking and initializing database..." -ForegroundColor Yellow
 Push-Location $BACKEND_DIR
 try {
-    & $VENV_PYTHON -c "from app.db.session import init_db; init_db()"
+    & $VENV_PYTHON -c "import asyncio; from app.db.engine import init_db_schema; asyncio.run(init_db_schema())"
     Write-Host "  -> Database initialized successfully." -ForegroundColor Green
 } catch {
     Write-Host "  -> Database initialization notice: $_" -ForegroundColor DarkGray

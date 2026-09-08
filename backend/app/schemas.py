@@ -7,6 +7,8 @@ class ChatRequest(BaseModel):
     session_id: str
     shield_on: bool
     model: Optional[str] = None
+    vault_id: Optional[str] = None
+    reasoning_effort: Optional[str] = "off"  # "off" | "low" | "high"
 
 class CitationSource(BaseModel):
     act: str
@@ -23,8 +25,15 @@ class ChatResponse(BaseModel):
     sources: List[CitationSource]
     blocked_by: Optional[str] = None  # None | "layer1" | "layer1.5" | "layer2" | "layer3"
     block_reason: Optional[str] = None
+    failure_kind: Optional[str] = None  # None | "security_block" | "model_unavailable" | "insufficient_evidence"
+    correlation_id: Optional[str] = None
     confidence_score: Optional[float] = None
+    grounding_score: Optional[float] = None
     hallucination_flags: Optional[List[str]] = None
+    reasoning_trace: Optional[str] = None
+    citations_parsed: Optional[List[dict]] = None
+    model_used: Optional[str] = None
+    runtime_used: Optional[str] = None
 
 # --- /upload Endpoint Schemas ---
 class UploadResponse(BaseModel):
@@ -37,6 +46,11 @@ class UploadResponse(BaseModel):
 class RecommendRequest(BaseModel):
     ram_gb: Optional[float] = None
     vram_gb: Optional[float] = None
+
+class RecommendOverrideRequest(BaseModel):
+    model_id: str
+    session_id: Optional[str] = None
+    reason: Optional[str] = "Manual model selection by user"
 
 class RecommendedModel(BaseModel):
     model_id: str
@@ -51,6 +65,10 @@ class RecommendedModel(BaseModel):
 class RecommendResponse(BaseModel):
     recommended: List[RecommendedModel]
     detected_hardware: Optional[dict] = None
+    active_model_id: Optional[str] = None
+    selection_source: Optional[str] = "recommended"  # "recommended" | "manually_selected"
+    tie_break_rule: Optional[str] = "VRAM governs over RAM when discrete GPU is present"
+    override_applied: Optional[bool] = False
 
 # --- /audit Endpoint Schemas ---
 class AuditLogRow(BaseModel):
@@ -59,6 +77,14 @@ class AuditLogRow(BaseModel):
     layer: Optional[str] = None
     hash: str
     prev_hash: str
+    injection_score: Optional[float] = None
+    validation_pass_fail: Optional[str] = None
 
 class AuditLogResponse(BaseModel):
     rows: List[AuditLogRow]
+    total_count: Optional[int] = 0
+    chat_count: Optional[int] = 0
+    blocked_count: Optional[int] = 0
+    upload_count: Optional[int] = 0
+    mcp_count: Optional[int] = 0
+    verified: Optional[bool] = True

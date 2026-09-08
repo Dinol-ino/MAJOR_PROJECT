@@ -142,3 +142,85 @@ class ModelRouter:
 
 
 model_router = ModelRouter()
+
+
+from dataclasses import dataclass
+from app.runtime.circuit_breaker import circuit_breaker, FailureKind, CircuitBreakerState
+from app.config.api_vault import api_vault
+
+
+@dataclass
+class RoutingDecision:
+    use_cloud: bool
+    provider: Optional[str] = None          # "grok" | "zai"
+    model: str = ""                         # target model name
+    reason: str = ""
+    runtime_switched_event: Optional[Dict[str, Any]] = None
+
+
+class FallbackRouter:
+    """
+    Spec 02 — Circuit-breaker Runtime Router with Cloud Fallback promotion.
+    Automatically resolves whether to dispatch to local Ollama or promote to CloudRuntime
+    (Grok API / Z.ai API only).
+    """
+
+    def classify_failure(self, exc: Exception) -> FailureKind:
+        msg = str(exc).lower()
+        if any(w in msg for w in ("connect", "unreachable", "refused", "connection refused", "not found")):
+            return FailureKind.CONNECT_ERROR
+        if any(w in msg for w in ("oom", "out of memory", "cuda", "timeout", "timed out", "alloc")):
+            return FailureKind.OOM_TIMEOUT
+        if "empty" in msg or "whitespace" in msg:
+            return FailureKind.EMPTY_GENERATION
+        return FailureKind.MALFORMED_OUTPUT
+
+    def resolve_cloud_provider(self) -> Optional[str]:
+        """Resolves which cloud provider has an available API key (active provider preferred)."""
+        active = settings.cloud_fallback.active_provider.lower()
+        if api_vault.is_configured(active):
+            return active
+        other = "zai" if active == "grok" else "grok"
+        if api_vault.is_configured(other):
+            return other
+        return None
+
+    def route_request(self, target_model: Optional[str] = None) -> RoutingDecision:
+        """
+        Determines whether the request can proceed locally or must promote to cloud.
+        """
+        model_name = target_model or settings.model.default_model
+        breaker_state = circuit_breaker.get_state(model_name)
+
+        if breaker_state == CircuitBreakerState.OPEN:
+            if settings.cloud_fallback.enabled and settings.cloud_fallback.auto_fallback:
+                cloud_prov = self.resolve_cloud_provider()
+                if cloud_prov:
+                    cloud_model = (
+                        settings.cloud_fallback.grok_model
+                        if cloud_prov == "grok"
+                        else settings.cloud_fallback.zai_model
+                    )
+                    return RoutingDecision(
+                        use_cloud=True,
+                        provider=cloud_prov,
+                        model=cloud_model,
+                        reason=f"Circuit breaker for local model '{model_name}' is OPEN. Promoted to Cloud ({cloud_prov.title()}).",
+                        runtime_switched_event={
+                            "from": "local",
+                            "to": "cloud",
+                            "provider": cloud_prov,
+                            "model": cloud_model,
+                            "reason": f"Circuit breaker OPEN for {model_name}"
+                        }
+                    )
+
+        return RoutingDecision(
+            use_cloud=False,
+            provider=None,
+            model=model_name,
+            reason=f"Local execution with {model_name} (Circuit state: {breaker_state.value})."
+        )
+
+
+fallback_router = FallbackRouter()

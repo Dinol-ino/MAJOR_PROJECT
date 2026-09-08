@@ -26,7 +26,7 @@ class TestStateMachine(unittest.IsolatedAsyncioTestCase):
 
     async def test_end_to_end_research_execution(self):
         res: OrchestrationResult = await self.orchestrator.execute(
-            query="What is the punishment for culpable homicide not amounting to murder?",
+            query="What is the punishment for computer related offences under Section 66 of the Information Technology Act?",
             session_id="test_sm_session",
             shield_on=True
         )
@@ -34,6 +34,16 @@ class TestStateMachine(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(res.answer)
         self.assertGreater(len(res.steps_trace), 3)
         self.assertIn("steps_taken", res.budget_snapshot)
+
+    async def test_insufficient_evidence_for_unseeded_law(self):
+        res: OrchestrationResult = await self.orchestrator.execute(
+            query="What are the maritime salvage licensing rules under the Indian Ports Act 1908?",
+            session_id="test_sm_session",
+            shield_on=True
+        )
+        self.assertEqual(res.final_state, AgentState.INSUFFICIENT_EVIDENCE)
+        self.assertEqual(res.failure_kind, "insufficient_evidence")
+        self.assertIn("Insufficient Grounded Evidence", res.answer)
 
     async def test_injection_query_blocked_at_security_check(self):
         res: OrchestrationResult = await self.orchestrator.execute(
@@ -65,12 +75,12 @@ class TestStateMachine(unittest.IsolatedAsyncioTestCase):
 
         # Query that plans a tool call
         res: OrchestrationResult = await self.orchestrator.execute(
-            query="What is the live status and amendment of Indian Penal Code Section 302?",
+            query="What is the live status and amendment of Information Technology Act Section 66?",
             session_id="test_sm_session",
             shield_on=True
         )
         # Should gracefully complete or succeed by falling back to retrieval
-        self.assertIn(res.final_state, [AgentState.COMPLETED, AgentState.FAILED])
+        self.assertIn(res.final_state, [AgentState.COMPLETED, AgentState.INSUFFICIENT_EVIDENCE, AgentState.FAILED])
         # Find the tool step in trace
         tool_traces = [t for t in res.steps_trace if t.state == AgentState.TOOL_CALL.value]
         if tool_traces:

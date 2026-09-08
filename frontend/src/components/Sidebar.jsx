@@ -13,7 +13,10 @@ import {
   SparklesIcon,
   TrashIcon,
   LogOutIcon,
-  CheckShieldIcon
+  CheckShieldIcon,
+  FolderIcon,
+  EditIcon,
+  CheckIcon
 } from './Icons';
 
 export default function Sidebar({
@@ -26,10 +29,26 @@ export default function Sidebar({
   onLogout,
   activeView,
   setActiveView,
-  shieldOn
+  shieldOn,
+  activeVaultId,
+  onSelectVault
 }) {
   const [sessions, setSessions] = useState([]);
+  const [vaults, setVaults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [isCreatingVault, setIsCreatingVault] = useState(false);
+  const [newVaultName, setNewVaultName] = useState('');
+  const [editingChatId, setEditingChatId] = useState(null);
+  const [editingChatTitle, setEditingChatTitle] = useState('');
+
+  const fetchVaults = async () => {
+    try {
+      const data = await apiClient.getVaults();
+      setVaults(data.vaults || []);
+    } catch (e) {
+      console.warn("Failed to load vaults:", e);
+    }
+  };
 
   const fetchSessions = async () => {
     setLoading(true);
@@ -45,6 +64,7 @@ export default function Sidebar({
 
   useEffect(() => {
     fetchSessions();
+    fetchVaults();
   }, [activeSessionId]);
 
   const handleDelete = async (e, sid) => {
@@ -60,6 +80,56 @@ export default function Sidebar({
     }
   };
 
+  const handleCreateVault = async (e) => {
+    e.preventDefault();
+    if (!newVaultName.trim()) return;
+    try {
+      const v = await apiClient.createVault(newVaultName.trim());
+      setNewVaultName('');
+      setIsCreatingVault(false);
+      fetchVaults();
+      if (onSelectVault) onSelectVault(v.id);
+    } catch (err) {
+      console.error("Failed to create vault:", err);
+    }
+  };
+
+  const handleDeleteVault = async (e, vid) => {
+    e.stopPropagation();
+    if (!window.confirm("Delete this Project Vault and its indexed document vectors?")) return;
+    try {
+      await apiClient.deleteVault(vid);
+      fetchVaults();
+      if (activeVaultId === vid && onSelectVault) {
+        onSelectVault(null);
+      }
+    } catch (err) {
+      console.error("Failed to delete vault:", err);
+    }
+  };
+
+  const handleStartRename = (e, session) => {
+    e.stopPropagation();
+    setEditingChatId(session.session_id);
+    setEditingChatTitle(session.title);
+  };
+
+  const handleSaveRename = async (e, sid) => {
+    e.stopPropagation();
+    if (!editingChatTitle.trim()) {
+      setEditingChatId(null);
+      return;
+    }
+    try {
+      await apiClient.renameConversation(sid, editingChatTitle.trim());
+      setEditingChatId(null);
+      fetchSessions();
+    } catch (err) {
+      console.error("Failed to rename conversation:", err);
+      setEditingChatId(null);
+    }
+  };
+
   const navItems = [
     { key: 'chat', label: 'Legal Copilot', icon: SparklesIcon, color: 'var(--accent-indigo)' },
     { key: 'graph', label: 'Citation Graph', icon: GraphIcon, color: 'var(--accent-cyan)', badge: 'BETA' },
@@ -70,6 +140,7 @@ export default function Sidebar({
   const toolItems = [
     { key: 'hardware', label: 'Hardware Engine', icon: CpuIcon, color: 'var(--accent-cyan)' },
     { key: 'mcp', label: 'API & MCP Tools', icon: CodeIcon, color: 'var(--accent-blue)' },
+    { key: 'settings', label: 'Settings', icon: EditIcon, color: 'var(--accent)' },
   ];
 
   if (collapsed) {
@@ -283,29 +354,126 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Task History Section */}
+      {/* Project Vaults Section (Spec 01) */}
+      <div style={{ marginBottom: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', padding: '0 8px' }}>
+          <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Project Vaults
+          </span>
+          <button
+            type="button"
+            onClick={() => setIsCreatingVault(!isCreatingVault)}
+            style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '2px' }}
+            title="Create new matter vault"
+          >
+            <PlusIcon size={12} />
+            <span>New</span>
+          </button>
+        </div>
+
+        {isCreatingVault && (
+          <form onSubmit={handleCreateVault} style={{ padding: '4px 8px', marginBottom: '8px' }}>
+            <input
+              type="text"
+              placeholder="Matter name (e.g. Tata Arbitration)..."
+              value={newVaultName}
+              onChange={(e) => setNewVaultName(e.target.value)}
+              autoFocus
+              style={{
+                width: '100%',
+                padding: '5px 8px',
+                fontSize: '0.76rem',
+                borderRadius: '6px',
+                border: '1px solid var(--accent-cyan)',
+                background: 'var(--bg-card)',
+                color: 'var(--text-primary)',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setIsCreatingVault(false);
+              }}
+            />
+          </form>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '140px', overflowY: 'auto' }}>
+          {vaults.map((v) => {
+            const isSelected = activeVaultId === v.id;
+            return (
+              <div
+                key={v.id}
+                onClick={() => {
+                  if (onSelectVault) {
+                    onSelectVault(isSelected ? null : v.id);
+                  }
+                }}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  fontSize: '0.78rem',
+                  color: isSelected ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+                  background: isSelected ? 'rgba(0, 210, 180, 0.12)' : 'transparent',
+                  border: isSelected ? '1px solid rgba(0, 210, 180, 0.3)' : '1px solid transparent',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+                title={v.description || v.vault_name}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', flex: 1 }}>
+                  <FolderIcon size={14} color={isSelected ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {v.vault_name}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '0.65rem', background: 'rgba(255, 255, 255, 0.06)', padding: '1px 5px', borderRadius: '4px', color: 'var(--text-dim)' }}>
+                    {v.document_count || 0} doc
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => handleDeleteVault(e, v.id)}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-dim)', opacity: 0.5, cursor: 'pointer', padding: 1 }}
+                    title="Delete Project Vault"
+                  >
+                    <TrashIcon size={11} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Task History Section (Persistent Chats & Renaming) */}
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: '80px' }}>
         <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px', paddingLeft: '8px' }}>
-          History
+          Conversations
         </div>
 
         {sessions.length === 0 ? (
           <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', padding: '8px 10px' }}>
-            No task history.
+            No conversations yet — start by asking a question
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
             {sessions.map((s) => {
               const isActive = s.session_id === activeSessionId && activeView === 'chat';
+              const isEditing = editingChatId === s.session_id;
+
               return (
                 <div
                   key={s.session_id}
                   onClick={() => {
-                    onSelectSession(s.session_id);
-                    setActiveView('chat');
+                    if (!isEditing) {
+                      onSelectSession(s.session_id);
+                      setActiveView('chat');
+                    }
                   }}
                   style={{
-                    padding: '7px 10px',
+                    padding: '6px 8px',
                     borderRadius: '6px',
                     fontSize: '0.8rem',
                     color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
@@ -314,19 +482,69 @@ export default function Sidebar({
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
+                    gap: '4px',
                   }}
                 >
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                    {s.title}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(e) => handleDelete(e, s.session_id)}
-                    style={{ background: 'none', border: 'none', color: 'var(--text-dim)', opacity: 0.6, cursor: 'pointer', padding: 2 }}
-                    title="Delete task"
-                  >
-                    <TrashIcon size={12} />
-                  </button>
+                  {isEditing ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }} onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        value={editingChatTitle}
+                        onChange={(e) => setEditingChatTitle(e.target.value)}
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveRename(e, s.session_id);
+                          if (e.key === 'Escape') setEditingChatId(null);
+                        }}
+                        style={{
+                          width: '100%',
+                          fontSize: '0.78rem',
+                          background: 'var(--bg-card)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--accent-cyan)',
+                          borderRadius: '4px',
+                          padding: '2px 6px',
+                          outline: 'none',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => handleSaveRename(e, s.session_id)}
+                        style={{ background: 'none', border: 'none', color: 'var(--defense-pass)', cursor: 'pointer' }}
+                        title="Save rename"
+                      >
+                        <CheckIcon size={13} />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span
+                        onDoubleClick={(e) => handleStartRename(e, s)}
+                        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}
+                        title="Double-click to rename"
+                      >
+                        {s.title}
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <button
+                          type="button"
+                          onClick={(e) => handleStartRename(e, s)}
+                          style={{ background: 'none', border: 'none', color: 'var(--text-dim)', opacity: 0.5, cursor: 'pointer', padding: 2 }}
+                          title="Rename chat"
+                        >
+                          <EditIcon size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDelete(e, s.session_id)}
+                          style={{ background: 'none', border: 'none', color: 'var(--text-dim)', opacity: 0.5, cursor: 'pointer', padding: 2 }}
+                          title="Delete chat"
+                        >
+                          <TrashIcon size={12} />
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               );
             })}

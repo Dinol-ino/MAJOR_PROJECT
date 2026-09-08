@@ -9,7 +9,7 @@ import logging
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import chat, upload, recommend, audit, models, memory, cache, runtime, mcp, research, diagnostics
+from app.routes import chat, upload, recommend, audit, models, memory, cache, runtime, mcp, research, diagnostics, statutes, auth, vaults, conversations, settings as settings_routes, hardware
 from app.observability.correlation import CorrelationMiddleware
 from app.config import settings
 from app.system.hardware_detector import HardwareDetector
@@ -73,6 +73,12 @@ app.include_router(runtime.router)
 app.include_router(mcp.router)
 app.include_router(research.router)
 app.include_router(diagnostics.router)
+app.include_router(statutes.router)
+app.include_router(auth.router)
+app.include_router(vaults.router)
+app.include_router(conversations.router)
+app.include_router(settings_routes.router)
+app.include_router(hardware.router)
 
 @app.get("/")
 def read_root():
@@ -112,3 +118,4 @@ async def health_check():
 @app.get("/health/db")
 async def db_health_check():
     return await check_db_health()
+

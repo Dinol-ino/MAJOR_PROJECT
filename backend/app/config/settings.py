@@ -31,9 +31,11 @@ class SecurityConfig(BaseModel):
 
 
 
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 class RetrievalConfig(BaseModel):
-    chroma_persist_dir: str = Field(default_factory=lambda: os.getenv("CHROMA_PERSIST_DIR", "./chroma_db"))
-    bm25_index_dir: str = Field(default_factory=lambda: os.getenv("BM25_INDEX_DIR", "./bm25_index"))
+    chroma_persist_dir: str = Field(default_factory=lambda: os.getenv("CHROMA_PERSIST_DIR", os.path.join(_BASE_DIR, "chroma_db")))
+    bm25_index_dir: str = Field(default_factory=lambda: os.getenv("BM25_INDEX_DIR", os.path.join(_BASE_DIR, "bm25_index")))
     max_file_size_mb: int = Field(default_factory=lambda: int(os.getenv("MAX_FILE_SIZE_MB", "10")))
     max_file_pages: int = Field(default_factory=lambda: int(os.getenv("MAX_FILE_PAGES", "100")))
     retrieval_embeddings: str = Field(default_factory=lambda: os.getenv("RETRIEVAL_EMBEDDINGS", "local"))  # local | model
@@ -45,13 +47,14 @@ class RetrievalConfig(BaseModel):
     pageindex_routing_heuristic: bool = True
     dedup_similarity_threshold: float = 0.85
     exclude_superseded: bool = True
+    vault_max_files: int = Field(default_factory=lambda: int(os.getenv("VAULT_MAX_FILES", "10")))
 
 
 class MemoryConfig(BaseModel):
     sqlite_db_path: str = Field(default_factory=lambda: os.getenv("SQLITE_DB_PATH", "./audit_log.db"))
     transcript_db_path: str = Field(default_factory=lambda: os.getenv("TRANSCRIPT_DB_PATH", "./transcript_memory.db"))
-    postgres_url: str = Field(default_factory=lambda: os.getenv("DATABASE_URL", "postgresql+psycopg://postgres:dinolino77@127.0.0.1:5432/dfrag"))
-    redis_url: str = Field(default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    postgres_url: str = Field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
+    redis_url: str = Field(default_factory=lambda: os.getenv("REDIS_URL", ""))
 
     session_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("SESSION_TTL_SECONDS", "7200")))
     user_profile_cache_ttl: int = Field(default_factory=lambda: int(os.getenv("USER_PROFILE_CACHE_TTL", "86400")))
@@ -64,7 +67,7 @@ class MemoryConfig(BaseModel):
 
 class MCPConfig(BaseModel):
     permissions_config_path: str = os.path.join(os.path.dirname(__file__), "mcp_permissions.yaml")
-    enabled_servers: List[str] = ["StitchMCP", "code-review-graph", "firebase-mcp-server"]
+    enabled_servers: List[str] = ["local-statute-server", "indian-legal-gateway"]
     timeout_seconds: float = 30.0
 
 
@@ -90,7 +93,7 @@ class OrchestratorConfig(BaseModel):
     enabled: bool = Field(default_factory=lambda: os.getenv("ORCHESTRATOR_ENABLED", "true").lower() == "true")
     max_steps: int = Field(default_factory=lambda: int(os.getenv("MAX_STEPS_PER_REQUEST", "8")))
     max_tool_calls: int = Field(default_factory=lambda: int(os.getenv("MAX_TOOL_CALLS_PER_REQUEST", "5")))
-    max_tokens: int = Field(default_factory=lambda: int(os.getenv("MAX_TOKENS_PER_REQUEST", "4096")))
+    max_tokens: int = Field(default_factory=lambda: int(os.getenv("MAX_TOKENS_PER_REQUEST", "8192")))
     max_execution_time_seconds: float = Field(default_factory=lambda: float(os.getenv("MAX_EXECUTION_TIME_SECONDS", "60.0")))
     max_retrieved_docs: int = Field(default_factory=lambda: int(os.getenv("MAX_RETRIEVED_DOCS_PER_REQUEST", "15")))
     max_network_requests: int = Field(default_factory=lambda: int(os.getenv("MAX_NETWORK_REQUESTS_PER_REQUEST", "5")))
@@ -107,6 +110,24 @@ class ObservabilityConfig(BaseModel):
     max_memory_buffer_records: int = Field(default_factory=lambda: int(os.getenv("METRICS_BUFFER_SIZE", "1000")))
 
 
+class CloudFallbackConfig(BaseModel):
+    enabled: bool = Field(default_factory=lambda: os.getenv("CLOUD_FALLBACK_ENABLED", "true").lower() == "true")
+    auto_fallback: bool = Field(default_factory=lambda: os.getenv("CLOUD_AUTO_FALLBACK", "true").lower() == "true")
+    active_provider: str = Field(default_factory=lambda: os.getenv("CLOUD_PROVIDER", "grok").lower())  # grok | zai
+    grok_api_base: str = Field(default_factory=lambda: os.getenv("GROK_API_BASE", "https://api.x.ai/v1"))
+    grok_model: str = Field(default_factory=lambda: os.getenv("GROK_MODEL", "grok-2"))
+    zai_api_base: str = Field(default_factory=lambda: os.getenv("ZAI_API_BASE", "https://api.z.ai/v1"))
+    zai_model: str = Field(default_factory=lambda: os.getenv("ZAI_MODEL", "z.ai-chat"))
+
+
+class GraphConfig(BaseModel):
+    backend: str = Field(default_factory=lambda: os.getenv("GRAPH_BACKEND", "auto"))  # auto | memgraph | in_process
+    memgraph_uri: str = Field(default_factory=lambda: os.getenv("MEMGRAPH_URI", "bolt://127.0.0.1:7687"))
+    memgraph_user: str = Field(default_factory=lambda: os.getenv("MEMGRAPH_USER", ""))
+    memgraph_password: str = Field(default_factory=lambda: os.getenv("MEMGRAPH_PASSWORD", ""))
+    cypher_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("CYPHER_TIMEOUT_SECONDS", "5.0")))
+
+
 class Settings(BaseModel):
     """
     Centralized, typed configuration registry for DFrag.
@@ -121,6 +142,8 @@ class Settings(BaseModel):
     network: NetworkModeConfig = Field(default_factory=NetworkModeConfig)
     orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
+    cloud_fallback: CloudFallbackConfig = Field(default_factory=CloudFallbackConfig)
+    graph: GraphConfig = Field(default_factory=GraphConfig)
 
     # Flat backward-compatible aliases
     @property
@@ -230,6 +253,14 @@ class Settings(BaseModel):
     @property
     def ALLOWED_ORIGINS(self) -> List[str]:
         return self.security.allowed_origins
+
+    @property
+    def network_mode(self) -> NetworkModeConfig:
+        return self.network
+
+    @property
+    def SECRET_KEY(self) -> str:
+        return os.getenv("SECRET_KEY", "dfrag-vault-default-secret-key-32bytes-min!")
 
 
 settings = Settings()

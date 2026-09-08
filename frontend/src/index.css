@@ -1,46 +1,13 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
+/* Self-Hosted Offline Fonts via @fontsource (Zero External Network Requests) */
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
 
-:root {
-  /* Consensus Dark Theme Palette */
-  --bg-app: #0d0f14;
-  --bg-sidebar: #111319;
-  --bg-card: #151821;
-  --bg-card-hover: #1b1f2b;
-  --bg-input: #171b26;
-  --bg-modal: #13161f;
-  
-  /* Borders */
-  --border-subtle: rgba(255, 255, 255, 0.07);
-  --border-medium: #222634;
-  --border-active: #32384a;
-  
-  /* Typography */
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --text-dim: #475569;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-title: 'Outfit', var(--font-sans);
-  
-  /* Brand & Accents */
-  --accent-cyan: #00d2b4;         /* Consensus Turquoise */
-  --accent-blue: #38bdf8;         /* Sky / Primary highlight */
-  --accent-indigo: #6366f1;       /* AI Copilot Indigo */
-  --accent-gradient: linear-gradient(135deg, #00d2b4 0%, #38bdf8 50%, #6366f1 100%);
-  
-  /* Defense Status Colors */
-  --defense-pass: #10b981;        /* Shield Active (Emerald) */
-  --defense-review: #f59e0b;      /* Review Needed (Amber) */
-  --defense-block: #ef4444;       /* Shield Quarantined (Rose) */
-  --defense-glow: 0 0 16px rgba(16, 185, 129, 0.25);
-  
-  /* Shadows & Glows */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
-  --glow-cyan: 0 0 20px rgba(0, 210, 180, 0.2);
-  --glow-indigo: 0 0 20px rgba(99, 102, 241, 0.2);
-}
+/* Design Tokens System (Spec 06) */
+@import "./styles/tokens.css";
 
 * {
   box-sizing: border-box;
@@ -70,25 +37,21 @@ html, body, #root {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--border-medium);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.24);
+  background: var(--border-active);
 }
 
-/* Utility Classes */
-.font-title {
-  font-family: var(--font-title);
-}
-
+/* Base Card Styles */
 .glass-card {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  transition: all 0.2s ease;
+  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
 }
 
 .glass-card:hover {
@@ -96,47 +59,24 @@ html, body, #root {
   box-shadow: var(--shadow-md);
 }
 
-.glow-pill {
-  position: relative;
-  overflow: hidden;
+/* Interactive Buttons */
+button {
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 0.14s ease-out, border-color 0.14s ease-out, color 0.14s ease-out;
 }
 
-.glow-pill::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-  transition: all 0.5s ease;
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  filter: none;
 }
 
-.glow-pill:hover::before {
-  left: 100%;
-}
-
-/* Pulse animation for active generating state */
-@keyframes pulse-subtle {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.7;
-    transform: scale(0.99);
-  }
-}
-
-.pulse-text {
-  animation: pulse-subtle 2s infinite ease-in-out;
-}
-
-/* Subtle fade in for views */
+/* Clean view animation */
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(2px);
   }
   to {
     opacity: 1;
@@ -145,31 +85,49 @@ html, body, #root {
 }
 
 .view-container {
-  animation: fadeIn 0.25s ease-out forwards;
+  animation: fadeIn 0.16s ease-out forwards;
 }
 
-/* Interactive Buttons */
-button {
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.15s ease-in-out;
+/* Shimmer Skeleton Animation */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 
-button:hover {
-  filter: brightness(1.08);
+.shimmer-line {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s infinite ease-in-out;
+  border-radius: 4px;
 }
 
-button:active {
-  transform: scale(0.98);
+body.light-theme .shimmer-line {
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.04) 25%,
+    rgba(0, 0, 0, 0.09) 50%,
+    rgba(0, 0, 0, 0.04) 75%
+  );
 }
 
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-  filter: none;
-  transform: none;
-}
-
+/* Form Elements */
 input, textarea, select {
   font-family: inherit;
+  color: var(--text-primary);
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
 }

@@ -49,6 +49,24 @@ class SemanticMemoryValidationGate:
         if not is_clean:
             return False, f"Security rejection: proposed memory value flagged for injection risk ({reason})"
 
+        # Doc 04 §4.4: Invariant enforcement — reject legal-fact-shaped writes at the validation gate
+        import re
+        combined_text = f"{key} {value}"
+        legal_fact_patterns = [
+            r"(?i)\bsection\s+\d+[a-z]*\b.*?\b(?:means|defines|punishes|provides|prescribes|imposes|states|penalizes)\b",
+            r"(?i)\b(?:ipc|crpc|bns|bnss|bsa|it\s+act|companies\s+act)\b.*?\b(?:section|sec\.?)\s*\d+",
+            r"(?i)\bpunishment\s+for\b.*?\b(?:is|shall\s+be|imprisonment)\b",
+            r"(?i)\bunder\s+section\s+\d+[a-z]*\b.*?\b(?:imprisonment|fine|bailable|cognizable|punishable)\b",
+            r"(?i)\bstatutory\s+definition\s+of\b",
+            r"(?i)\bpenal\s+code\b.*?\bsection\b",
+        ]
+        for pat in legal_fact_patterns:
+            if re.search(pat, combined_text):
+                return False, (
+                    "Statutory legal claims, definitions, and provisions cannot be stored in user semantic memory. "
+                    "Legal facts must reside exclusively in the authoritative retrieval corpus."
+                )
+
         return True, None
 
 

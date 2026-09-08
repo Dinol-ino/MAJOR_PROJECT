@@ -71,9 +71,81 @@ def get_sync_engine():
         # Ensure schema tables exist
         try:
             Base.metadata.create_all(bind=_sync_engine)
+            _auto_migrate_schema(_sync_engine)
         except Exception as e:
             logger.debug(f"Schema verification deferred: {e}")
     return _sync_engine
+
+
+def _auto_migrate_schema(engine):
+    """Ensures columns added in Phase 01 exist even if the SQLite database was already initialized."""
+    with engine.connect() as conn:
+        try:
+            # Check conversations table
+            res = conn.execute(text("PRAGMA table_info(conversations)")).fetchall()
+            conv_cols = {row[1] for row in res}
+            if conv_cols and "project_vault_id" not in conv_cols:
+                conn.execute(text("ALTER TABLE conversations ADD COLUMN project_vault_id VARCHAR(64)"))
+                conn.commit()
+
+            # Check messages table
+            res = conn.execute(text("PRAGMA table_info(messages)")).fetchall()
+            msg_cols = {row[1] for row in res}
+            if msg_cols:
+                if "citations_json" not in msg_cols:
+                    conn.execute(text("ALTER TABLE messages ADD COLUMN citations_json JSON"))
+                if "reasoning_trace" not in msg_cols:
+                    conn.execute(text("ALTER TABLE messages ADD COLUMN reasoning_trace TEXT"))
+                if "model_used" not in msg_cols:
+                    conn.execute(text("ALTER TABLE messages ADD COLUMN model_used VARCHAR(64)"))
+                if "runtime_used" not in msg_cols:
+                    conn.execute(text("ALTER TABLE messages ADD COLUMN runtime_used VARCHAR(16)"))
+                if "token_count" not in msg_cols:
+                    conn.execute(text("ALTER TABLE messages ADD COLUMN token_count INTEGER"))
+                if "grounding_score" not in msg_cols:
+                    conn.execute(text("ALTER TABLE messages ADD COLUMN grounding_score FLOAT"))
+                conn.commit()
+
+            # Check project_vaults table
+            res = conn.execute(text("PRAGMA table_info(project_vaults)")).fetchall()
+            vault_cols = {row[1] for row in res}
+            if vault_cols and "deleted_at" not in vault_cols:
+                conn.execute(text("ALTER TABLE project_vaults ADD COLUMN deleted_at DATETIME"))
+                conn.commit()
+
+            # Check document_memory table
+            res = conn.execute(text("PRAGMA table_info(document_memory)")).fetchall()
+            doc_cols = {row[1] for row in res}
+            if doc_cols:
+                if "project_vault_id" not in doc_cols:
+                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN project_vault_id VARCHAR(64)"))
+                if "file_hash" not in doc_cols:
+                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN file_hash VARCHAR(64)"))
+                if "vector_ns" not in doc_cols:
+                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN vector_ns VARCHAR(128)"))
+                if "ingest_status" not in doc_cols:
+                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN ingest_status VARCHAR(32) DEFAULT 'ready'"))
+                if "ingest_error" not in doc_cols:
+                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN ingest_error TEXT"))
+                if "ingest_progress" not in doc_cols:
+                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN ingest_progress INTEGER DEFAULT 100"))
+                conn.commit()
+
+            # Check citation_edges table
+            res = conn.execute(text("PRAGMA table_info(citation_edges)")).fetchall()
+            edge_cols = {row[1] for row in res}
+            if edge_cols and "derivation_method" not in edge_cols:
+                conn.execute(text("ALTER TABLE citation_edges ADD COLUMN derivation_method VARCHAR(64) DEFAULT 'curated_legal_relationship'"))
+                conn.commit()
+
+            # Check statute_sections table
+            res = conn.execute(text("PRAGMA table_info(statute_sections)")).fetchall()
+            sec_cols = {row[1] for row in res}
+            if sec_cols and "cited_in_conversations" not in sec_cols:
+                conn.execute(text("ALTER TABLE statute_sections ADD COLUMN cited_in_conversations INTEGER DEFAULT 0"))
+                conn.commit()
+        except Exception as e:
+            logger.debug(f"Auto-migration check non-fatal notice: {e}")
 
 
 def get_sync_sessionmaker():

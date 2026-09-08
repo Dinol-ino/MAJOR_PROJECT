@@ -3,41 +3,74 @@ import { apiClient } from '../api/client';
 import { CheckShieldIcon, GlobeIcon } from './Icons';
 
 export default function ModeIndicator() {
-  const [networkMode, setNetworkMode] = useState('OFFLINE');
-  const [loading, setLoading] = useState(false);
+  const [runtimeMode, setRuntimeMode] = useState('OFFLINE');
 
   useEffect(() => {
     let isMounted = true;
-    async function fetchMode() {
+
+    // Check runtime status on mount
+    async function checkStatus() {
       try {
-        const response = await fetch('/api/research/mode');
-        if (response.ok) {
-          const data = await response.json();
-          if (isMounted && data.mode) {
-            setNetworkMode(data.mode.toUpperCase());
+        const res = await fetch('/api/runtime/status');
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) {
+            if (data.runtime_engine === 'cloud') {
+              const prov = data.cloud_fallback?.active_provider === 'zai' ? 'Z.ai' : 'Grok';
+              setRuntimeMode(`CLOUD (${prov})`);
+            } else {
+              setRuntimeMode('OFFLINE');
+            }
           }
         }
       } catch (err) {
-        // Default to OFFLINE mode on fallback
-        if (isMounted) setNetworkMode('OFFLINE');
+        if (isMounted) setRuntimeMode('OFFLINE');
       }
     }
-    fetchMode();
+
+    checkStatus();
+
+    // Listen to live runtime_switched events from SSE stream or fallback events
+    const handleRuntimeSwitched = (e) => {
+      const detail = e.detail || {};
+      if (detail.to === 'cloud') {
+        const prov = (detail.provider || '').toLowerCase() === 'zai' ? 'Z.ai' : 'Grok';
+        setRuntimeMode(`CLOUD (${prov})`);
+      } else {
+        setRuntimeMode('OFFLINE');
+      }
+    };
+
+    window.addEventListener('runtime_switched', handleRuntimeSwitched);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('runtime_switched', handleRuntimeSwitched);
     };
   }, []);
 
-  const isOffline = networkMode === 'OFFLINE';
+  const isCloud = runtimeMode.startsWith('CLOUD');
+  const isOffline = !isCloud;
+
+  const bg = isCloud
+    ? 'rgba(245, 158, 11, 0.12)'
+    : 'rgba(16, 185, 129, 0.1)';
+  const border = isCloud
+    ? '1px solid rgba(245, 158, 11, 0.35)'
+    : '1px solid rgba(16, 185, 129, 0.3)';
+  const color = isCloud ? '#f59e0b' : 'var(--defense-pass)';
+  const glow = isCloud
+    ? '0 0 10px rgba(245, 158, 11, 0.2)'
+    : '0 0 10px rgba(16, 185, 129, 0.15)';
 
   return (
     <div
       style={{
-        background: isOffline ? 'rgba(16, 185, 129, 0.1)' : 'rgba(56, 189, 248, 0.1)',
-        border: `1px solid ${isOffline ? 'rgba(16, 185, 129, 0.3)' : 'rgba(56, 189, 248, 0.3)'}`,
+        background: bg,
+        border: border,
         borderRadius: '16px',
         padding: '5px 12px',
-        color: isOffline ? 'var(--defense-pass)' : 'var(--accent-cyan)',
+        color: color,
         fontSize: '0.78rem',
         fontWeight: 700,
         display: 'flex',
@@ -45,20 +78,22 @@ export default function ModeIndicator() {
         gap: '6px',
         cursor: 'default',
         userSelect: 'none',
-        boxShadow: isOffline ? '0 0 10px rgba(16, 185, 129, 0.15)' : '0 0 10px rgba(56, 189, 248, 0.15)',
+        boxShadow: glow,
+        transition: 'all 0.3s ease',
       }}
       title={
-        isOffline
-          ? 'Network Mode: OFFLINE (Strict local air-gapped execution — zero outbound network requests guaranteed)'
-          : 'Network Mode: ONLINE (SSRF-protected outbound retrieval restricted strictly to allowlisted legal domains)'
+        isCloud
+          ? `Runtime Mode: ${runtimeMode} — Seamless fallback active (Local hardware limits bypassed)`
+          : 'Runtime Mode: OFFLINE (Strict local execution via Ollama — zero outbound inference data)'
       }
     >
-      {isOffline ? (
-        <CheckShieldIcon size={14} color="var(--defense-pass)" />
+      {isCloud ? (
+        <GlobeIcon size={14} color="#f59e0b" />
       ) : (
-        <GlobeIcon size={14} color="var(--accent-cyan)" />
+        <CheckShieldIcon size={14} color="var(--defense-pass)" />
       )}
-      <span>Mode: <strong>{networkMode}</strong></span>
+      <span>Mode: <strong>{runtimeMode}</strong></span>
     </div>
   );
 }
+

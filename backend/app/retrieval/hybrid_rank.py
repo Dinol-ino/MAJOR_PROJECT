@@ -25,11 +25,17 @@ def fuse_bm25_dense(
         if key not in chunks_map:
             chunks_map[key] = doc
             
-    # Process Dense results (filter out negative/zero similarity if present)
+    has_bm25_hits = len(bm25_results) > 0
+    bm25_acts = {b.get("act") for b in bm25_results if b.get("act")}
+
+    # Process Dense results (filter out weak or unrelated chunks)
     for rank, doc in enumerate(dense_results):
         dense_score = doc.get("score", 1.0)
-        # If dense score is very low (< 0.2) and not in BM25, skip irrelevant chunk
-        if dense_score < 0.20 and doc.get("act") not in [b.get("act") for b in bm25_results]:
+        # If no BM25 keyword hits exist, require positive relevance (>= 0.10) to prevent hallucinated retrieval on greetings/conversational inputs
+        if not has_bm25_hits and dense_score < 0.10:
+            continue
+        # If BM25 hits exist, skip weakly related chunks from unrepresented acts
+        if has_bm25_hits and dense_score < 0.10 and doc.get("act") not in bm25_acts:
             continue
         key = (doc.get("act", "General"), doc.get("section", "General"), doc.get("text", "")[:50])
         rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (k + rank)

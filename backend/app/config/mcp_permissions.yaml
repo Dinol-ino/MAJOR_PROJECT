@@ -92,7 +92,9 @@ servers:
       - "local_statute_search"
       - "local_provision_lookup"
       - "user_document_search"
-    denied_tools: []
+    denied_tools:
+      - "delete_project"
+      - "firebase_deploy"
 
   indian-legal-gateway:
     enabled: false

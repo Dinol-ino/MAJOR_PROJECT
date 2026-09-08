@@ -10,8 +10,10 @@ import {
   AuditIcon,
   CodeIcon,
   ClearIcon,
-  CheckShieldIcon
+  CheckShieldIcon,
+  SettingsIcon
 } from './Icons';
+import CloudFallbackModal from './CloudFallbackModal';
 
 export default function ManusHeader({
   selectedModel,
@@ -24,6 +26,7 @@ export default function ManusHeader({
   onClearThread
 }) {
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [fallbackModalOpen, setFallbackModalOpen] = useState(false);
 
   const viewTitles = {
     chat: { title: 'Legal Copilot', icon: SparklesIcon, color: 'var(--accent-indigo)', badge: null },
@@ -200,9 +203,37 @@ export default function ManusHeader({
           <span>Hardware Specs</span>
         </button>
 
+        <button
+          type="button"
+          onClick={() => setFallbackModalOpen(true)}
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '8px',
+            padding: '6px 12px',
+            color: 'var(--text-secondary)',
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            cursor: 'pointer',
+          }}
+          title="Configure Cloud Fallback (Grok API & Z.ai)"
+        >
+          <SettingsIcon size={14} color="#f59e0b" />
+          <span>Cloud Fallback</span>
+        </button>
+
         <ModeIndicator />
         <ShieldToggle shieldOn={shieldOn} onToggle={setShieldOn} />
       </div>
+
+      <CloudFallbackModal
+        isOpen={fallbackModalOpen}
+        onClose={() => setFallbackModalOpen(false)}
+      />
     </header>
   );
 }
+

@@ -1,14 +1,11 @@
 import os
 import logging
 from typing import List, Dict, Any, Optional
-import chromadb
-from chromadb.utils import embedding_functions
 
 from app.retrieval.client import get_shared_chroma_client
 from app.retrieval.hybrid_rank import fuse_bm25_dense
 from app.retrieval.bm25_index import PersistentBM25Index
 from app.retrieval.fusion_router import deduplicate_chunks
-from app.ingestion.chunker import SectionAwareChunker
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -48,6 +45,7 @@ class Tier2UserRetrieval:
         Chunks the extracted PDF text and adds it to ChromaDB and BM25,
         associating it with the given session_id.
         """
+        from app.ingestion.chunker import SectionAwareChunker
         chunker = SectionAwareChunker(default_act_name=filename)
         chunks = chunker.chunk_document(text)
         
