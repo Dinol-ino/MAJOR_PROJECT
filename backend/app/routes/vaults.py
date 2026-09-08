@@ -2,7 +2,7 @@ import os
 import uuid
 import logging
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.db.engine import get_sync_session
@@ -46,11 +46,11 @@ def create_vault(req: CreateVaultRequest):
 
 @router.get("")
 def list_vaults(user_id: str = "default_user"):
-    """Lists all Project Vaults for the user with document and conversation counts."""
+    """Lists all active Project Vaults for the user with document and conversation counts."""
     with get_sync_session() as session:
         vaults = (
             session.query(ProjectVault)
-            .filter(ProjectVault.user_id == user_id)
+            .filter(ProjectVault.user_id == user_id, ProjectVault.deleted_at.is_(None))
             .order_by(ProjectVault.updated_at.desc())
             .all()
         )
@@ -62,7 +62,7 @@ def list_vaults(user_id: str = "default_user"):
 def get_vault_details(vault_id: str):
     """Retrieves vault details, associated conversations, and indexed documents."""
     with get_sync_session() as session:
-        vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id).first()
+        vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id, ProjectVault.deleted_at.is_(None)).first()
         if not vault:
             raise HTTPException(status_code=404, detail="Project vault not found.")
 
@@ -75,11 +75,43 @@ def get_vault_details(vault_id: str):
     return base_dict
 
 
+@router.get("/{vault_id}/conversations")
+def list_vault_conversations(
+    vault_id: str,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, ge=1, le=100)
+):
+    """Paginated list of conversations in a specific Project Vault."""
+    with get_sync_session() as session:
+        vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id, ProjectVault.deleted_at.is_(None)).first()
+        if not vault:
+            raise HTTPException(status_code=404, detail="Project vault not found.")
+
+        query = session.query(Conversation).filter(Conversation.project_vault_id == vault_id)
+        total_count = query.count()
+        offset = (page - 1) * limit
+        convs = query.order_by(Conversation.updated_at.desc()).offset(offset).limit(limit).all()
+
+        data = []
+        for c in convs:
+            d = c.to_dict()
+            d["message_count"] = len(c.messages)
+            data.append(d)
+
+        return {
+            "vault_id": vault_id,
+            "conversations": data,
+            "total_count": total_count,
+            "page": page,
+            "limit": limit
+        }
+
+
 @router.patch("/{vault_id}")
 def update_vault(vault_id: str, req: UpdateVaultRequest):
     """Renames vault or updates description."""
     with get_sync_session() as session:
-        vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id).first()
+        vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id, ProjectVault.deleted_at.is_(None)).first()
         if not vault:
             raise HTTPException(status_code=404, detail="Project vault not found.")
 
@@ -96,19 +128,23 @@ def update_vault(vault_id: str, req: UpdateVaultRequest):
 
 
 @router.delete("/{vault_id}")
-def delete_vault(vault_id: str):
-    """Cascades delete for vault, conversations, documents, and purges vector namespace."""
+def delete_vault(vault_id: str, soft_delete: bool = True):
+    """Soft deletes vault (with 30-day grace retention) or purges cascade."""
+    from datetime import datetime
     with get_sync_session() as session:
         vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id).first()
         if not vault:
             raise HTTPException(status_code=404, detail="Project vault not found.")
 
-        session.delete(vault)
+        if soft_delete:
+            vault.deleted_at = datetime.utcnow()
+        else:
+            session.delete(vault)
 
     # Purge Chroma collection for this vault
     ingest_service.delete_vault_collection(vault_id)
     audit_logger.log(action=f"vault_deleted:{vault_id}", layer="persistence")
-    return {"status": "deleted", "vault_id": vault_id}
+    return {"status": "deleted", "vault_id": vault_id, "soft_deleted": soft_delete}
 
 
 @router.post("/{vault_id}/documents", status_code=202)
@@ -119,8 +155,11 @@ async def upload_vault_document(
 ):
     """
     Uploads a case PDF to a specific Project Vault.
+    Enforces per-vault file quota (RetrievalConfig.vault_max_files).
     Returns document_id immediately with pending state; background worker processes ingestion.
     """
+    from app.config import settings
+
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF legal documents are supported.")
 
@@ -131,9 +170,16 @@ async def upload_vault_document(
     f_hash = compute_file_hash(content)
 
     with get_sync_session() as session:
-        vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id).first()
+        vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id, ProjectVault.deleted_at.is_(None)).first()
         if not vault:
             raise HTTPException(status_code=404, detail="Project vault not found.")
+
+        # Enforce per-vault file cap (Task 2.3.2)
+        if len(vault.documents) >= settings.retrieval.vault_max_files:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Vault file quota reached: maximum {settings.retrieval.vault_max_files} files allowed per project vault."
+            )
 
         # Check deduplication within vault
         existing = (

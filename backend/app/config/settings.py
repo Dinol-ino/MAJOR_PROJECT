@@ -47,13 +47,14 @@ class RetrievalConfig(BaseModel):
     pageindex_routing_heuristic: bool = True
     dedup_similarity_threshold: float = 0.85
     exclude_superseded: bool = True
+    vault_max_files: int = Field(default_factory=lambda: int(os.getenv("VAULT_MAX_FILES", "10")))
 
 
 class MemoryConfig(BaseModel):
     sqlite_db_path: str = Field(default_factory=lambda: os.getenv("SQLITE_DB_PATH", "./audit_log.db"))
     transcript_db_path: str = Field(default_factory=lambda: os.getenv("TRANSCRIPT_DB_PATH", "./transcript_memory.db"))
-    postgres_url: str = Field(default_factory=lambda: os.getenv("DATABASE_URL", "postgresql+psycopg://postgres:@127.0.0.1:5432/dfrag"))
-    redis_url: str = Field(default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    postgres_url: str = Field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
+    redis_url: str = Field(default_factory=lambda: os.getenv("REDIS_URL", ""))
 
     session_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("SESSION_TTL_SECONDS", "7200")))
     user_profile_cache_ttl: int = Field(default_factory=lambda: int(os.getenv("USER_PROFILE_CACHE_TTL", "86400")))
@@ -119,6 +120,14 @@ class CloudFallbackConfig(BaseModel):
     zai_model: str = Field(default_factory=lambda: os.getenv("ZAI_MODEL", "z.ai-chat"))
 
 
+class GraphConfig(BaseModel):
+    backend: str = Field(default_factory=lambda: os.getenv("GRAPH_BACKEND", "auto"))  # auto | memgraph | in_process
+    memgraph_uri: str = Field(default_factory=lambda: os.getenv("MEMGRAPH_URI", "bolt://127.0.0.1:7687"))
+    memgraph_user: str = Field(default_factory=lambda: os.getenv("MEMGRAPH_USER", ""))
+    memgraph_password: str = Field(default_factory=lambda: os.getenv("MEMGRAPH_PASSWORD", ""))
+    cypher_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("CYPHER_TIMEOUT_SECONDS", "5.0")))
+
+
 class Settings(BaseModel):
     """
     Centralized, typed configuration registry for DFrag.
@@ -134,6 +143,7 @@ class Settings(BaseModel):
     orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     cloud_fallback: CloudFallbackConfig = Field(default_factory=CloudFallbackConfig)
+    graph: GraphConfig = Field(default_factory=GraphConfig)
 
     # Flat backward-compatible aliases
     @property

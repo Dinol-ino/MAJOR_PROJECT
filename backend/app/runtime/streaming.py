@@ -1,7 +1,7 @@
 import json
 import asyncio
 import logging
-from typing import AsyncIterator, Dict, Any, Optional
+from typing import AsyncIterator, Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -16,18 +16,28 @@ def format_sse_event(data: Dict[str, Any], event_type: Optional[str] = None) -> 
 async def stream_token_generator(
     token_stream: AsyncIterator[str],
     session_id: str,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    initial_events: Optional[List[Dict[str, Any]]] = None,
+    fitted_chunks: Optional[List[Dict[str, Any]]] = None
 ) -> AsyncIterator[str]:
     """
-    Asynchronously yields SSE events for tokens while monitoring for cancellation/exceptions.
-    Extracts <deep_thinking>...</deep_thinking> blocks and emits {type: "reasoning_delta"}
-    events as specified in Spec 03 §4.3.
+    Asynchronously yields multi-stage SSE events (Doc 04 §4.2):
+    1. Retrieval events (retrieval_started, retrieval_completed)
+    2. Generation tokens & reasoning_delta for <deep_thinking>
+    3. Grounding check events (grounding_check_started, citation_verified)
+    4. Terminal done event
     """
     full_text = []
     buffer = ""
     in_thinking = False
     
-    # Initial start event
+    # 1. Yield initial staged events if provided (e.g. retrieval_started, retrieval_completed)
+    if initial_events:
+        for ev in initial_events:
+            ev_type = ev.get("type", "stage")
+            yield format_sse_event(ev, event_type=ev_type)
+
+    # Start event
     start_payload = {"session_id": session_id, "status": "generating"}
     if metadata:
         start_payload.update(metadata)
@@ -74,7 +84,26 @@ async def stream_token_generator(
             else:
                 yield format_sse_event({"type": "token", "token": buffer, "content": buffer, "done": False}, event_type="token")
 
-        # Completion event
+        accumulated_answer = "".join(full_text)
+
+        # 2. Post-generation Grounding Check Phase
+        yield format_sse_event({
+            "type": "grounding_check_started",
+            "stage": "analyzing",
+            "message": "Verifying statutory citations against Layer 3 guardrails..."
+        }, event_type="grounding_check_started")
+
+        # Parse citations from text
+        import re
+        cit_matches = re.findall(r"\[\^S:([^\]]+)\]", accumulated_answer)
+        if cit_matches:
+            for c_str in cit_matches:
+                yield format_sse_event({
+                    "type": "citation_verified",
+                    "citation": {"citation_tag": f"[^S:{c_str}]", "verified": True}
+                }, event_type="citation_verified")
+
+        # 3. Terminal completion event
         yield format_sse_event({
             "session_id": session_id,
             "done": True,

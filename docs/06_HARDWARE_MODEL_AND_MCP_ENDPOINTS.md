@@ -46,3 +46,10 @@ This is the highest-priority item in this module given your explicit uncertainty
 - [ ] Each of the 5 named MCP tools has a documented, verified real implementation (or is explicitly relabeled as not-yet-implemented in the UI until it is).
 - [ ] Any ONLINE-mode MCP call visibly flips the mode badge for its duration; OFFLINE badge is never shown while outbound traffic is in flight.
 - [ ] `MockRuntime` cannot be selected outside test environments, enforced in code.
+
+---
+
+## 6.6 Future Evaluation (Documentation Only — Do Not Implement)
+
+- **ChromaDB → LanceDB**: evaluate for Tier 0 hardware if RAM pressure from Module 1/3 remains a problem after the grounding fixes land — LanceDB is embedded (no server process) and generally lower-memory.
+- **Rank-BM25 (pure Python) → Tantivy-py**: evaluate only if corpus size (per Module 1 Task 1.3.1's real chunk count) grows large enough that sparse-retrieval latency becomes measurable — Tantivy is Rust-backed and still embeddable, no new service to run.

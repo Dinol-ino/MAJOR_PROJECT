@@ -455,7 +455,7 @@ export default function Sidebar({
 
         {sessions.length === 0 ? (
           <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', padding: '8px 10px' }}>
-            No conversations yet.
+            No conversations yet — start by asking a question
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>

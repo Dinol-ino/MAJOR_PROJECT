@@ -41,7 +41,10 @@ class HardwareDetector:
 
     @classmethod
     def _perform_detection(cls) -> HardwareProfile:
-        # 1. CPU
+        t_start = time.perf_counter()
+
+        # 1. CPU Probe (winreg on Windows / /proc/cpuinfo on Linux)
+        t_cpu0 = time.perf_counter()
         try:
             import psutil
             cpu_cores = psutil.cpu_count(logical=False) or psutil.cpu_count(logical=True) or os.cpu_count() or 1
@@ -57,13 +60,16 @@ class HardwareDetector:
                 val, _ = winreg.QueryValueEx(key, "ProcessorNameString")
                 if val and val.strip():
                     cpu_name = val.strip()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"winreg CPU probe notice: {exc}")
 
         if not cpu_name:
             cpu_name = platform.processor() or os.environ.get("PROCESSOR_IDENTIFIER") or platform.machine() or "x86_64 Multi-Core Processor"
+        t_cpu_ms = (time.perf_counter() - t_cpu0) * 1000
 
-        # 2. RAM
+        # 2. RAM Probe (Total Physical RAM vs Instantly Available Usable RAM)
+        # Note: 11.69 GB is Total Physical RAM; 8.0 GB / 1.05 GB represents Available RAM under OS load.
+        t_ram0 = time.perf_counter()
         try:
             import psutil
             mem = psutil.virtual_memory()
@@ -72,8 +78,10 @@ class HardwareDetector:
         except Exception:
             ram_total_gb = 8.0
             ram_available_gb = 4.0
+        t_ram_ms = (time.perf_counter() - t_ram0) * 1000
 
-        # 3. GPU / VRAM / Backend
+        # 3. GPU / VRAM / Backend Probe
+        t_gpu0 = time.perf_counter()
         gpu_available = False
         gpu_name = None
         gpu_vram_gb = None
@@ -116,8 +124,9 @@ class HardwareDetector:
                         gpu_backend = "cuda"
             except Exception as e:
                 logger.debug(f"nvidia-smi detection bypassed: {e}")
+        t_gpu_ms = (time.perf_counter() - t_gpu0) * 1000
 
-        # 4. Storage Free
+        # 4. Storage Free Probe
         try:
             target_path = os.getcwd()
             total, used, free = shutil.disk_usage(target_path)
@@ -128,6 +137,13 @@ class HardwareDetector:
         # 5. OS & AVX2
         platform_name = platform.system().lower()
         supports_avx2 = True  # Modern x86_64 / arm64 default assumption
+        t_total_ms = (time.perf_counter() - t_start) * 1000
+
+        logger.info(
+            f"Hardware telemetry sample: CPU='{cpu_name}' ({cpu_cores} cores, {t_cpu_ms:.1f}ms), "
+            f"RAM={ram_available_gb}GB free / {ram_total_gb}GB total ({t_ram_ms:.1f}ms), "
+            f"GPU='{gpu_name or 'None'}' ({gpu_vram_gb or 0}GB VRAM, {t_gpu_ms:.1f}ms) | Total: {t_total_ms:.1f}ms"
+        )
 
         return HardwareProfile(
             cpu_cores=cpu_cores,

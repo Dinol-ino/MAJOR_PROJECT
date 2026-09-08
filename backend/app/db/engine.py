@@ -106,6 +106,13 @@ def _auto_migrate_schema(engine):
                     conn.execute(text("ALTER TABLE messages ADD COLUMN grounding_score FLOAT"))
                 conn.commit()
 
+            # Check project_vaults table
+            res = conn.execute(text("PRAGMA table_info(project_vaults)")).fetchall()
+            vault_cols = {row[1] for row in res}
+            if vault_cols and "deleted_at" not in vault_cols:
+                conn.execute(text("ALTER TABLE project_vaults ADD COLUMN deleted_at DATETIME"))
+                conn.commit()
+
             # Check document_memory table
             res = conn.execute(text("PRAGMA table_info(document_memory)")).fetchall()
             doc_cols = {row[1] for row in res}
@@ -122,6 +129,20 @@ def _auto_migrate_schema(engine):
                     conn.execute(text("ALTER TABLE document_memory ADD COLUMN ingest_error TEXT"))
                 if "ingest_progress" not in doc_cols:
                     conn.execute(text("ALTER TABLE document_memory ADD COLUMN ingest_progress INTEGER DEFAULT 100"))
+                conn.commit()
+
+            # Check citation_edges table
+            res = conn.execute(text("PRAGMA table_info(citation_edges)")).fetchall()
+            edge_cols = {row[1] for row in res}
+            if edge_cols and "derivation_method" not in edge_cols:
+                conn.execute(text("ALTER TABLE citation_edges ADD COLUMN derivation_method VARCHAR(64) DEFAULT 'curated_legal_relationship'"))
+                conn.commit()
+
+            # Check statute_sections table
+            res = conn.execute(text("PRAGMA table_info(statute_sections)")).fetchall()
+            sec_cols = {row[1] for row in res}
+            if sec_cols and "cited_in_conversations" not in sec_cols:
+                conn.execute(text("ALTER TABLE statute_sections ADD COLUMN cited_in_conversations INTEGER DEFAULT 0"))
                 conn.commit()
         except Exception as e:
             logger.debug(f"Auto-migration check non-fatal notice: {e}")

@@ -12,11 +12,12 @@ class MemoryPolicy:
 
     ALLOWED_SEMANTIC_CATEGORIES = {
         "preference",
-        "fact",
-        "legal_facts",
-        "entity",
         "jurisdiction",
         "practice_area",
+        "user_profile",
+        "citation_format",
+        "fact",
+        "entity",
     }
 
 

@@ -54,8 +54,10 @@ def create_conversation(req: CreateConversationRequest):
 def list_conversations(
     vault_id: Optional[str] = Query(None, description="Filter chats by Project Vault ID"),
     user_id: str = Query("default_user", description="Filter by user ID"),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, ge=1, le=100)
 ):
-    """Lists conversations, ordered by updated_at desc."""
+    """Lists conversations, ordered by updated_at desc, with server-side pagination."""
     with get_sync_session() as session:
         query = session.query(Conversation).filter(Conversation.user_id == user_id)
         if vault_id is not None:
@@ -64,14 +66,22 @@ def list_conversations(
             else:
                 query = query.filter(Conversation.project_vault_id == vault_id)
 
-        convs = query.order_by(Conversation.updated_at.desc()).all()
+        total_count = query.count()
+        offset = (page - 1) * limit
+        convs = query.order_by(Conversation.updated_at.desc()).offset(offset).limit(limit).all()
         data = []
         for c in convs:
             d = c.to_dict()
             d["message_count"] = len(c.messages)
             data.append(d)
 
-    return {"conversations": data, "count": len(data)}
+    return {
+        "conversations": data,
+        "count": len(data),
+        "total_count": total_count,
+        "page": page,
+        "limit": limit
+    }
 
 
 @router.get("/{conversation_id}")

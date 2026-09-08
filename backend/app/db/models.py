@@ -49,6 +49,7 @@ class ProjectVault(Base):
     description = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     conversations = relationship("Conversation", back_populates="vault", cascade="all, delete-orphan")
     documents = relationship("DocumentMemory", back_populates="vault", cascade="all, delete-orphan")
@@ -62,6 +63,7 @@ class ProjectVault(Base):
             "description": self.description,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
             "conversation_count": len(self.conversations) if self.conversations else 0,
             "document_count": len(self.documents) if self.documents else 0,
         }
@@ -446,6 +448,14 @@ class Statute(Base):
     sections = relationship("StatuteSection", back_populates="statute", cascade="all, delete-orphan", order_by="StatuteSection.number")
 
     def to_dict(self, include_sections: bool = False) -> Dict[str, Any]:
+        indexed_count = len(self.sections) if self.sections else 0
+        nominal_count = self.section_count or indexed_count
+        coverage_display = (
+            f"{indexed_count} of {nominal_count} sections indexed"
+            if nominal_count > 0 and indexed_count != nominal_count
+            else f"{nominal_count} sections indexed"
+        )
+
         data = {
             "id": self.id,
             "slug": self.slug,
@@ -455,7 +465,10 @@ class Statute(Base):
             "domain": self.domain,
             "category": self.domain.title(),
             "source": self.source,
-            "section_count": self.section_count or (len(self.sections) if self.sections else 0),
+            "section_count": nominal_count,
+            "nominal_sections_count": nominal_count,
+            "indexed_sections_count": indexed_count,
+            "coverage_display": coverage_display,
             "currency_checked_at": self.currency_checked_at.isoformat() if self.currency_checked_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -477,6 +490,7 @@ class StatuteSection(Base):
     raw_text = Column(Text, nullable=True)
     page_ref = Column(Integer, nullable=True)
     embedding_ready = Column(Boolean, default=False)
+    cited_in_conversations = Column(Integer, default=0, nullable=False)
 
     statute = relationship("Statute", back_populates="sections")
 
@@ -492,23 +506,33 @@ class StatuteSection(Base):
             "raw_text": self.raw_text,
             "page_ref": self.page_ref,
             "embedding_ready": self.embedding_ready,
+            "cited_in_conversations": self.cited_in_conversations or 0,
         }
 
 
 class CitationEdge(Base):
     """
-    Spec 04 — Persistent Citation Relationship Edge.
-    Connects statutes, sections, precedents, and user documents based on LLM citations and MCP relationships.
+    Spec 04 & 05 — Persistent Citation Relationship Edge.
+    Connects statutes, sections, precedents, and user documents based on LLM citations,
+    deterministic text extraction, and MCP relationships with explicit derivation_method provenance.
     """
     __tablename__ = "citation_edges"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     src_type = Column(String(32), nullable=False)   # section, precedent, vault_doc, case, statute
     src_key = Column(String(128), nullable=False, index=True)
-    dst_type = Column(String(32), nullable=False)   # section, precedent, vault_doc, case, statute
+    dst_type = Column(String(32), nullable=False)   # section, precedent, vault_doc, case, statute, penalty
     dst_key = Column(String(128), nullable=False, index=True)
-    relation = Column(String(64), nullable=False)   # cites, interprets, cross_applies, referred_in, supersedes, contains
+    relation = Column(String(64), nullable=False)   # cites, interprets, cross_applies, referred_in, supersedes, contains, penalizes_with, judicially_construed_in
     origin = Column(String(32), nullable=False)     # llm_citation, mcp_relation, vault_doc, user_pin
+    derivation_method = Column(String(64), nullable=False, default="curated_legal_relationship")
+    # Allowed derivation methods:
+    # - corpus_structure
+    # - text_extraction
+    # - curated_legal_relationship
+    # - mcp_case_law_lookup
+    # - llm_suggested_unverified
+    # - user_document_reference
     conversation_id = Column(String(64), nullable=True, index=True)
     message_id = Column(String(64), nullable=True, index=True)
     confidence = Column(Float, nullable=True, default=1.0)
@@ -523,6 +547,7 @@ class CitationEdge(Base):
             "dst_key": self.dst_key,
             "relation": self.relation,
             "origin": self.origin,
+            "derivation_method": self.derivation_method or "curated_legal_relationship",
             "conversation_id": self.conversation_id,
             "message_id": self.message_id,
             "confidence": self.confidence,

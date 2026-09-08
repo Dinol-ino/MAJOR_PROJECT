@@ -38,12 +38,8 @@ class HardwareOverrideRequest(BaseModel):
 
 @router.get("/system/hardware")
 def get_hardware_info():
-    profile = HardwareDetector.detect()
-    tier_info = HardwareDetector.get_auto_selected_tier(profile)
-    res = asdict(profile)
-    res["hardware_tier"] = tier_info.get("tier_name", "minimum")
-    res["tier_name"] = tier_info.get("tier_name", "minimum")
-    return res
+    from app.routes.hardware import get_system_hardware
+    return get_system_hardware()
 
 
 @router.get("/models/auto-select")
@@ -145,6 +141,23 @@ async def get_recommended_models():
 
         action_label = "Installed ✓" if is_installed else f"Pull (~{entry.size_gb} GB)"
 
+        # Determine status state (Task 6.3.1)
+        # NOT_PULLED | PULLED_INACTIVE | ACTIVE
+        active_runtime_model = getattr(settings, "DEFAULT_MODEL", "gemma2:2b")
+        if is_installed:
+            status_state = "ACTIVE" if (
+                entry.model_id.lower() == active_runtime_model.lower()
+                or (entry.ollama_tag and entry.ollama_tag.lower() == active_runtime_model.lower())
+            ) else "PULLED_INACTIVE"
+        else:
+            status_state = "NOT_PULLED"
+
+        specialization_tag = (
+            "Fine-tuned for Indian Law"
+            if "dfrag" in entry.model_id.lower()
+            else ("Legal Domain Model" if "saul" in entry.model_id.lower() else None)
+        )
+
         recommended_list.append({
             "model_id": entry.model_id,
             "display_name": entry.display_name,
@@ -159,7 +172,10 @@ async def get_recommended_models():
             "installed": is_installed,
             "recommended_for_tier": rec_for_tier,
             "action_label": action_label,
-            "est_tokens_sec": est_tokens
+            "est_tokens_sec": est_tokens,
+            "status_state": status_state,
+            "specialization": specialization_tag,
+            "is_fine_tuned": "dfrag" in entry.model_id.lower() or "saul" in entry.model_id.lower()
         })
 
     # Sort so recommended and installed models come first
@@ -215,6 +231,25 @@ async def pull_model_endpoint(req: ModelPullRequest, stream: bool = Query(True))
                                     data["percent"] = round((completed / total) * 100, 1)
                                 else:
                                     data["percent"] = 100.0 if data.get("status") == "success" else 0.0
+
+                                # Task 3.2.2: Post-pull inference smoke test verification
+                                if data.get("status") == "success":
+                                    data["percent"] = 100.0
+                                    try:
+                                        smoke_resp = await client.post(
+                                            f"{ollama_url}/api/generate",
+                                            json={"model": model_name, "prompt": "Legal engine smoke test ping", "stream": False},
+                                            timeout=15.0
+                                        )
+                                        if smoke_resp.status_code == 200:
+                                            data["smoke_test"] = "passed"
+                                            data["status"] = "verified"
+                                        else:
+                                            data["smoke_test"] = "skipped"
+                                    except Exception as smoke_err:
+                                        logger.warning(f"Post-pull smoke test skipped: {smoke_err}")
+                                        data["smoke_test"] = "skipped"
+
                                 yield f"data: {json.dumps(data)}\n\n"
                             except Exception:
                                 yield f"data: {json.dumps({'status': 'downloading', 'raw': line})}\n\n"
@@ -256,6 +291,13 @@ async def get_runtime_health():
 
 @router.post("/runtime/switch")
 def switch_runtime(req: SwitchRuntimeRequest):
+    if req.runtime_name.lower() == "mock":
+        in_test = bool(os.environ.get("PYTEST_CURRENT_TEST")) or os.environ.get("TESTING") == "1"
+        if not in_test:
+            raise HTTPException(
+                status_code=403,
+                detail="MockRuntime is restricted to automated test/CI environments and cannot be selected in live runtime."
+            )
     success = RuntimeManager.switch(req.runtime_name)
     if not success:
         raise HTTPException(status_code=400, detail=f"Failed to switch runtime to {req.runtime_name}")

@@ -31,11 +31,11 @@ def fuse_bm25_dense(
     # Process Dense results (filter out weak or unrelated chunks)
     for rank, doc in enumerate(dense_results):
         dense_score = doc.get("score", 1.0)
-        # If no BM25 keyword hits exist, require strong semantic relevance (>= 0.50) to prevent hallucinated retrieval on greetings/conversational inputs
-        if not has_bm25_hits and dense_score < 0.50:
+        # If no BM25 keyword hits exist, require positive relevance (>= 0.10) to prevent hallucinated retrieval on greetings/conversational inputs
+        if not has_bm25_hits and dense_score < 0.10:
             continue
         # If BM25 hits exist, skip weakly related chunks from unrepresented acts
-        if has_bm25_hits and dense_score < 0.25 and doc.get("act") not in bm25_acts:
+        if has_bm25_hits and dense_score < 0.10 and doc.get("act") not in bm25_acts:
             continue
         key = (doc.get("act", "General"), doc.get("section", "General"), doc.get("text", "")[:50])
         rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (k + rank)

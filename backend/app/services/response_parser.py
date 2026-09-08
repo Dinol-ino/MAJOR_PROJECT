@@ -143,15 +143,16 @@ class ResponseParser:
                 for chunk in evidence:
                     chunk_act = self._normalize_str(chunk.get("act", "") or chunk.get("act_name", ""))
                     chunk_sec = self._normalize_str(chunk.get("section", "") or chunk.get("section_no", ""))
-                    if norm_sec and norm_sec == chunk_sec:
-                        resolved = True
-                        matched_chunk_id = chunk.get("id") or chunk.get("chunk_id")
-                        matched_doc_id = chunk.get("doc_id") or chunk.get("document_id")
-                        matched_quote = chunk.get("text") or chunk.get("content")
-                        if chunk.get("act"):
-                            act_display = chunk.get("act")
-                        break
-                    elif norm_act and norm_act in chunk_act:
+                    if norm_sec and chunk_sec:
+                        if norm_sec == chunk_sec:
+                            resolved = True
+                            matched_chunk_id = chunk.get("id") or chunk.get("chunk_id")
+                            matched_doc_id = chunk.get("doc_id") or chunk.get("document_id")
+                            matched_quote = chunk.get("text") or chunk.get("content")
+                            if chunk.get("act"):
+                                act_display = chunk.get("act")
+                            break
+                    elif not norm_sec and norm_act and (norm_act in chunk_act or chunk_act in norm_act):
                         resolved = True
                         matched_chunk_id = chunk.get("id") or chunk.get("chunk_id")
                         matched_doc_id = chunk.get("doc_id") or chunk.get("document_id")

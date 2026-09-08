@@ -378,13 +378,15 @@ export default function HardwareForm({
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>CPU Processor</span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-cyan)' }}>{cpu.load_percent}% Load</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+              {!telemetry ? <span className="pulse-text">Sampling…</span> : `${cpu.load_percent}% Load`}
+            </span>
           </div>
           <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cpu.name}>
-            {cpu.name}
+            {!telemetry ? <span style={{ opacity: 0.5 }}>Probing CPU architecture…</span> : cpu.name}
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '2px' }}>
-            {cpu.cores_physical} Physical / {cpu.cores_logical} Logical Cores ({cpu.arch})
+            {!telemetry ? 'Hardware detection in progress' : `${cpu.cores_physical} Physical / ${cpu.cores_logical} Logical Cores (${cpu.arch})`}
           </div>
 
           {/* Sparkline Graph */}
@@ -412,24 +414,25 @@ export default function HardwareForm({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>System RAM</span>
             <span style={{ fontSize: '0.75rem', fontWeight: 700, color: ram.used_percent > 85 ? '#e74c3c' : 'var(--accent-cyan)' }}>
-              {ram.used_percent}% Used
+              {!telemetry ? <span className="pulse-text">Measuring…</span> : `${ram.used_percent}% Used`}
             </span>
           </div>
           <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--accent-cyan)', marginTop: '4px' }}>
-            {ram.available_gb} GB Free / {ram.total_gb} GB
+            {!telemetry ? <span style={{ opacity: 0.5 }}>Reading virtual memory…</span> : `${ram.available_gb} GB Free / ${ram.total_gb} GB Total`}
           </div>
           <div style={{ width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', height: '5px', marginTop: '6px', overflow: 'hidden' }}>
             <div
               style={{
-                width: `${ram.used_percent}%`,
+                width: !telemetry ? '40%' : `${ram.used_percent}%`,
                 height: '100%',
                 background: ram.used_percent > 85 ? '#e74c3c' : 'var(--accent-cyan)',
                 transition: 'width 0.4s ease'
               }}
+              className={!telemetry ? 'pulse-text' : ''}
             />
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '6px' }}>
-            {ram.available_gb < 3.0 ? '⚠️ High memory pressure — CPU offload limited' : 'Available for In-Memory Vectors & Model Weights'}
+            {!telemetry ? 'Checking OS memory buffers' : (ram.available_gb < 3.0 ? '⚠️ High memory pressure — CPU offload limited' : 'Available for In-Memory Vectors & Model Weights')}
           </div>
         </div>
 
@@ -438,14 +441,14 @@ export default function HardwareForm({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>GPU Acceleration</span>
             <span style={{ fontSize: '0.75rem', fontWeight: 700, color: gpu.detected ? 'var(--accent-blue)' : 'var(--text-muted)' }}>
-              {gpu.detected ? `${gpu.util_percent}% Utilized` : 'CPU Mode'}
+              {!telemetry ? <span className="pulse-text">Scanning…</span> : (gpu.detected ? `${gpu.util_percent}% Utilized` : 'CPU Mode')}
             </span>
           </div>
           <div style={{ fontSize: '1.02rem', fontWeight: 700, color: gpu.detected ? 'var(--accent-blue)' : 'var(--text-secondary)', marginTop: '4px' }}>
-            {gpu.detected ? `${gpu.vram_used_gb || 0} / ${gpu.vram_total_gb || 0} GB VRAM` : 'No CUDA GPU'}
+            {!telemetry ? <span style={{ opacity: 0.5 }}>Checking CUDA / NVML…</span> : (gpu.detected ? `${gpu.vram_used_gb || 0} / ${gpu.vram_total_gb || 0} GB VRAM` : 'No CUDA GPU')}
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={gpu.name}>
-            {gpu.detected ? gpu.name : 'Running in CPU-Only Mode (Tier 0 Qualified)'}
+            {!telemetry ? 'Evaluating GPU acceleration' : (gpu.detected ? gpu.name : 'Running in CPU-Only Mode (Tier 0 Qualified)')}
           </div>
         </div>
 
@@ -456,7 +459,7 @@ export default function HardwareForm({
             <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Model Weights</span>
           </div>
           <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '4px' }}>
-            {disk.free_gb} GB Free
+            {!telemetry ? <span style={{ opacity: 0.5 }}>Measuring disk…</span> : `${disk.free_gb} GB Free`}
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '4px' }}>
             Sufficient space for legal LLM downloads & ChromaDB vectors

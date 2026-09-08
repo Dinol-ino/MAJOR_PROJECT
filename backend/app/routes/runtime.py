@@ -115,10 +115,26 @@ async def chat_stream_endpoint(request: ChatRequest):
         )
         model_routed = runtime_manager.get_routed_model_for_task("legal_reasoning")
 
+    initial_stage_events = [
+        {
+            "type": "retrieval_started",
+            "stage": "retrieving",
+            "message": "Searching authoritative Indian legal corpus & vault..."
+        },
+        {
+            "type": "retrieval_completed",
+            "stage": "retrieving",
+            "chunk_count": len(fitted_chunks),
+            "message": f"Found {len(fitted_chunks)} relevant statutory evidence chunks"
+        }
+    ]
+
     sse_generator = stream_token_generator(
         token_stream=token_stream,
         session_id=request.session_id,
-        metadata={"model_routing": model_routed}
+        metadata={"model_routing": model_routed},
+        initial_events=initial_stage_events,
+        fitted_chunks=fitted_chunks
     )
 
     return StreamingResponse(

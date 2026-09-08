@@ -9,6 +9,8 @@ from app.memory.durable_memory import DurableMemoryManager
 from app.security.pdf_sanitizer import pdf_sanitizer
 from app.retrieval.tier2_user import Tier2UserRetrieval
 
+from app.events import DocumentIngested, emit_document_ingested
+
 router = APIRouter(tags=["upload"])
 audit_logger = AuditLogger()
 durable_memory = DurableMemoryManager()
@@ -43,6 +45,16 @@ async def upload_endpoint(file: UploadFile = File(...), session_id: str = Form(.
             chunk_count=chunks_added,
             metadata_json={"source": "single_upload", "pages": metadata.get("total_pages")}
         )
+
+        # Emit DocumentIngested event (Module 9 §9.2 Event 2)
+        emit_document_ingested(DocumentIngested(
+            doc_id=doc_id,
+            session_id=session_id,
+            filename=file.filename,
+            file_size_bytes=len(content),
+            chunk_count=chunks_added,
+            pages_count=metadata.get("total_pages", 1)
+        ))
 
         return UploadResponse(
             status="ok",
@@ -94,6 +106,16 @@ async def upload_batch_endpoint(files: List[UploadFile] = File(...), session_id:
                 chunk_count=chunks_added,
                 metadata_json={"source": "batch_upload", "pages": metadata.get("total_pages")}
             )
+
+            # Emit DocumentIngested event (Module 9 §9.2 Event 2)
+            emit_document_ingested(DocumentIngested(
+                doc_id=doc_id,
+                session_id=session_id,
+                filename=file.filename,
+                file_size_bytes=len(content),
+                chunk_count=chunks_added,
+                pages_count=metadata.get("total_pages", 1)
+            ))
 
             results.append({
                 "filename": file.filename,

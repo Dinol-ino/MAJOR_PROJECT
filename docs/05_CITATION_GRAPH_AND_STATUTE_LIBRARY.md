@@ -14,6 +14,11 @@ The `+ IT Act Sec 66`, `+ Shreya Singhal` pills in Img 1 are a fine UX pattern *
 
 ## 5.2 `GET /statutes/graph` — the graph must be derived, not authored
 
+**Graph Storage Backend — Memgraph Community Edition**:
+Replace the current graph storage assumption (implicit Postgres/JSON-backed traversal) with **Memgraph Community Edition** as the backend for `GET /statutes/graph`.
+- *Reasoning*: The citation graph is a genuine multi-hop graph-traversal problem (Section → Penalty → Precedent → cross-referenced Section chains), which is poorly served by relational joins or in-memory JSON reconstruction on every request. Memgraph provides real Cypher querying, in-memory performance, and native support for typed, directed edges — which maps directly onto the `derivation_method` tagging scheme defined below (`corpus_structure`, `text_extraction`, `curated_legal_relationship`, `mcp_case_law_lookup`, `llm_suggested_unverified`). Store `derivation_method` and `cited_in_conversations` as edge/node properties natively in Memgraph rather than maintaining them in a separate relational side table.
+- *Non-goal (Graphiti/Zep)*: Do NOT integrate Graphiti into Module 5. Graphiti is unsuitable for the citation graph because it is designed for temporal, LLM-extracted conversational memory (continuously evolving episodic facts), not the mostly-stable, corpus-derived structure this module needs — using it here would add unnecessary LLM-extraction latency and cost to a task that should be deterministic. (Flag Graphiti as a possible future candidate for Module 2's L3/L5 memory layers in `02_PROJECT_VAULT_AND_MEMORY.md` instead; explicitly out of scope for this pass).
+
 **Task 5.2.1**: Define exactly where each edge type comes from, since "hardcoded vs dynamic" is really a question of provenance per edge:
 - `Contains` (Act → Section): mechanical, derived directly from corpus structure at ingestion time. Always real once ingestion is real (Module 1 §1.3).
 - `Penalizes With` (Section → Penalty): extracted at ingestion time from the section's own text (e.g. §66's penalty clause) via a deterministic parser, not invented. If extraction fails for a given section, no edge is created — do not fabricate a penalty relationship to keep the graph looking populated.
@@ -22,6 +27,8 @@ The `+ IT Act Sec 66`, `+ Shreya Singhal` pills in Img 1 are a fine UX pattern *
 - `Sanctions With`, `Governs Indemnity In`, `Validates Corporate Governance` (seen in the Companies Act portion of the earlier graph screenshot): same rule as above — mechanical relationships (defined by statute text) vs. interpretive ones (a legal judgment) must be visually distinguished.
 
 **Task 5.2.2**: Add a `derivation_method` field to every graph edge (`corpus_structure`, `text_extraction`, `curated_legal_relationship`, `mcp_case_law_lookup`, `llm_suggested_unverified`) and render it in the node inspector's existing "Connected Statutory Relationships" panel (Img 1) as a small provenance tag next to each relationship — this reuses the same "Show Provenance Details" pattern already built for chat citations (Img 7), applied consistently to the graph.
+
+**Task 5.2.3 (Hardware Tiering & Fallback)**: Memgraph runs as an additional service and has a non-trivial RAM footprint — cross-check against Module 3/6's hardware tiering. Recommend Memgraph only for Tier 1+ hardware (8GB+ RAM); on Tier 0 hardware, keep the existing lightweight in-process graph representation as a fallback, selected automatically based on the same hardware probe used for model tiering (`GET /system/hardware`).
 
 ## 5.3 Graph growth from chat activity (interconnection with Module 4)
 
@@ -36,6 +43,7 @@ The `+ IT Act Sec 66`, `+ Shreya Singhal` pills in Img 1 are a fine UX pattern *
 **Task 5.4.2**: "Research with AI Copilot" button (Img 2) should deep-link into `/chat` pre-seeded with the specific section as context — verify this actually passes the section's real chunk ID into the chat context rather than just pre-filling the text box with a section number and letting retrieval re-find it (small distinction, but the former guarantees the exact provision the user was reading is what gets analyzed; the latter risks retrieval pulling a different, similarly-worded chunk).
 
 ## Acceptance criteria for Module 5
+- [ ] Graph backend is Memgraph on Tier 1+ hardware, verified via a real Cypher query against `/statutes/graph`; Tier 0 fallback verified separately.
 - [ ] Every graph edge has a `derivation_method`, and interpretive/unverified edges are visually distinct from mechanical ones.
 - [ ] Graph node/edge count is shown to scale with real corpus ingestion (test: ingest one new Act, confirm new Contains edges appear without a code deploy).
 - [ ] A chat citation for a previously-absent section provably creates a new graph node within one request cycle.

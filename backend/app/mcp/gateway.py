@@ -169,6 +169,23 @@ class MCPGateway:
             session_id=session_id
         )
 
+        # Emit MCPToolInvoked event (Module 9 §9.2 Event 3)
+        try:
+            from app.events import MCPToolInvoked, emit_mcp_tool_invoked
+            emit_mcp_tool_invoked(MCPToolInvoked(
+                tool_name=tool_name,
+                category=decision.category,
+                network_mode=mode,
+                is_allowed=True,
+                arguments=arguments,
+                output_preview=str(final_data)[:200],
+                latency_ms=latency,
+                session_id=session_id,
+                precedents_found=final_data.get("cases", []) if isinstance(final_data, dict) else []
+            ))
+        except Exception as event_err:
+            logger.warning(f"Error emitting MCPToolInvoked event: {event_err}")
+
         return MCPResponse(
             success=True,
             tool_name=tool_name,

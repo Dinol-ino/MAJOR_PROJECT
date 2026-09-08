@@ -368,39 +368,50 @@ class StatuteSyncService:
         }
 
     def _seed_cross_statute_edges(self, session):
-        """Populates baseline statutory cross-reference edges in citation_edges table."""
+        """Populates baseline statutory cross-reference and precedent edges with explicit derivation_method tags."""
         canonical_edges = [
             # IPC 420 <-> BNS 318 cross-walk
-            ("section:ipc_1860_legacy:420", "section:bns_2023:318", "superseded_by", "mcp_relation"),
-            ("section:bns_2023:318", "section:ipc_1860_legacy:420", "supersedes", "mcp_relation"),
+            ("section:ipc_1860_legacy:420", "section", "section:bns_2023:318", "section", "superseded_by", "mcp_relation", "curated_legal_relationship"),
+            ("section:bns_2023:318", "section", "section:ipc_1860_legacy:420", "section", "supersedes", "mcp_relation", "curated_legal_relationship"),
             # IPC 302 <-> BNS 103 cross-walk
-            ("section:ipc_1860_legacy:302", "section:bns_2023:103", "superseded_by", "mcp_relation"),
-            # IT Act 66 <-> IT Act 43
-            ("section:it_act_2000:66", "section:it_act_2000:43", "requires_violation_of", "mcp_relation"),
+            ("section:ipc_1860_legacy:302", "section", "section:bns_2023:103", "section", "superseded_by", "mcp_relation", "curated_legal_relationship"),
+            # IT Act 66 <-> IT Act 43 (mechanical statutory requirement)
+            ("section:it_act_2000:66", "section", "section:it_act_2000:43", "section", "requires_violation_of", "mcp_relation", "curated_legal_relationship"),
             # IT Act 66 <-> BNS 318 (Cyber fraud cross-application)
-            ("section:it_act_2000:66", "section:bns_2023:318", "cross_applies", "mcp_relation"),
+            ("section:it_act_2000:66", "section", "section:bns_2023:318", "section", "cross_applies", "mcp_relation", "curated_legal_relationship"),
             # BNSS 173 <-> BNS 318 (FIR procedure)
-            ("section:bnss_2023:173", "section:bns_2023:318", "procedure_for_fir", "mcp_relation"),
+            ("section:bnss_2023:173", "section", "section:bns_2023:318", "section", "procedure_for_fir", "mcp_relation", "curated_legal_relationship"),
             # DPDPA 33 <-> IT Act 43
-            ("section:dpdpa_2023:33", "section:it_act_2000:43", "cross_applies", "mcp_relation"),
+            ("section:dpdpa_2023:33", "section", "section:it_act_2000:43", "section", "cross_applies", "mcp_relation", "curated_legal_relationship"),
             # CGST 16 <-> Contract Act 73
-            ("section:cgst_act_2017:16", "section:contract_act_1872:73", "interprets", "mcp_relation")
+            ("section:cgst_act_2017:16", "section", "section:contract_act_1872:73", "section", "interprets", "mcp_relation", "curated_legal_relationship"),
+            # IT Act 66 / 66A <-> Landmark Precedent (Shreya Singhal v. UOI 2015)
+            ("section:it_act_2000:66", "section", "precedent:shreya_singhal_v_uoi_2015", "precedent", "judicially_construed_in", "mcp_relation", "mcp_case_law_lookup"),
+            # Companies Act 166 <-> Landmark Precedent (Tata Consultancy Services v. Cyrus Investments 2021)
+            ("section:companies_act_2013:166", "section", "precedent:tata_v_cyrus_investments_2021", "precedent", "judicially_construed_in", "mcp_relation", "mcp_case_law_lookup"),
+            # Contract Act 73 <-> Landmark Precedent (Hadley v Baxendale / ONGC v Saw Pipes 2003)
+            ("section:contract_act_1872:73", "section", "precedent:ongc_v_saw_pipes_2003", "precedent", "judicially_construed_in", "mcp_relation", "mcp_case_law_lookup")
         ]
 
-        for src_key, dst_key, rel, origin in canonical_edges:
+        for src_key, src_type, dst_key, dst_type, rel, origin, deriv_method in canonical_edges:
             edge = session.query(CitationEdge).filter_by(src_key=src_key, dst_key=dst_key, relation=rel).first()
             if not edge:
                 session.add(CitationEdge(
                     id=str(uuid.uuid4()),
-                    src_type="section",
+                    src_type=src_type,
                     src_key=src_key,
-                    dst_type="section",
+                    dst_type=dst_type,
                     dst_key=dst_key,
                     relation=rel,
                     origin=origin,
+                    derivation_method=deriv_method,
                     confidence=1.0,
                     created_at=datetime.utcnow()
                 ))
+            else:
+                edge.derivation_method = deriv_method
+                edge.src_type = src_type
+                edge.dst_type = dst_type
 
     def auto_seed_if_empty(self) -> bool:
         """Runs sync if the statutes table is currently empty."""

@@ -105,6 +105,8 @@ export default function App() {
         sources: response.sources || [],
         blocked_by: response.blocked_by || null,
         block_reason: response.block_reason || null,
+        failure_kind: response.failure_kind || null,
+        correlation_id: response.correlation_id || sessionId,
         confidence_score: response.confidence_score || null,
         grounding_score: response.grounding_score,
         reasoning_trace: response.reasoning_trace,
@@ -114,14 +116,19 @@ export default function App() {
       };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {
-      console.error(err);
+      console.error("Chat invocation error:", err);
+      const isNetwork = err.message?.toLowerCase().includes('fetch') || err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('failed');
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          content: 'Error: Failed to fetch response from backend inference engine.',
-          blocked_by: 'system',
+          content: isNetwork
+            ? 'The backend inference engine or Ollama daemon is temporarily unavailable. Please verify the local AI model service is active.'
+            : `An unexpected processing error occurred: ${err.message}`,
+          failure_kind: 'model_unavailable',
+          blocked_by: null,
           block_reason: err.message,
+          correlation_id: sessionId,
         },
       ]);
     } finally {

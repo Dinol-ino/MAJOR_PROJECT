@@ -6,6 +6,8 @@ import MessageContent from './MessageContent';
 import StagedLoadingIndicator from './StagedLoadingIndicator';
 import {
   ShieldAlertIcon,
+  AlertTriangleIcon,
+  InfoIcon,
   UserIcon,
   BotIcon,
   Volume2Icon,
@@ -208,11 +210,48 @@ export default function ChatWindow({
                   />
                 )}
 
-                {/* Blocked Shield Warning */}
+                {/* 1. Security Shield Block Warning */}
                 {msg.blocked_by && (
-                  <div style={{ marginTop: '12px', padding: '10px 14px', background: 'rgba(248, 81, 73, 0.08)', border: '1px solid var(--defense-block)', borderRadius: 'var(--radius-sm)', color: 'var(--defense-block)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <ShieldAlertIcon size={16} />
-                    <span>Blocked by <strong>{msg.blocked_by.toUpperCase()} Guard</strong>: {msg.block_reason}</span>
+                  <div style={{ marginTop: '12px', padding: '10px 14px', background: 'rgba(248, 81, 73, 0.08)', border: '1px solid var(--defense-block)', borderRadius: 'var(--radius-sm)', color: 'var(--defense-block)', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <ShieldAlertIcon size={16} />
+                      <span>Blocked by <strong>{msg.blocked_by.toUpperCase()} Guard</strong>: {msg.block_reason}</span>
+                    </div>
+                    {msg.correlation_id && (
+                      <span style={{ fontSize: '0.68rem', opacity: 0.8, fontFamily: 'var(--font-mono, monospace)', marginLeft: '24px' }}>
+                        Trace ID: {msg.correlation_id}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* 2. Model Unavailable / Transport Alert */}
+                {!msg.blocked_by && msg.failure_kind === 'model_unavailable' && (
+                  <div style={{ marginTop: '12px', padding: '10px 14px', background: 'rgba(217, 119, 6, 0.1)', border: '1px solid rgba(217, 119, 6, 0.4)', borderRadius: 'var(--radius-sm)', color: '#d97706', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <AlertTriangleIcon size={16} color="#d97706" />
+                      <span><strong>Model Engine Notice</strong>: {msg.block_reason || 'Local model engine or Ollama daemon is unreachable. Verify service status or auto-pull recommended model.'}</span>
+                    </div>
+                    {msg.correlation_id && (
+                      <span style={{ fontSize: '0.68rem', opacity: 0.85, fontFamily: 'var(--font-mono, monospace)', marginLeft: '24px' }}>
+                        Trace ID: {msg.correlation_id}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. Insufficient Evidence Notice */}
+                {!msg.blocked_by && msg.failure_kind === 'insufficient_evidence' && (
+                  <div style={{ marginTop: '10px', padding: '8px 12px', background: 'rgba(56, 189, 248, 0.07)', border: '1px solid rgba(56, 189, 248, 0.25)', borderRadius: 'var(--radius-sm)', color: 'var(--accent-cyan)', fontSize: '0.78rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <InfoIcon size={15} color="var(--accent-cyan)" />
+                      <span>Statutory Corpus Refusal: Insufficient grounded evidence in local legal database.</span>
+                    </div>
+                    {msg.correlation_id && (
+                      <span style={{ fontSize: '0.68rem', opacity: 0.75, fontFamily: 'var(--font-mono, monospace)' }}>
+                        Trace: {msg.correlation_id.substring(0, 8)}
+                      </span>
+                    )}
                   </div>
                 )}
 

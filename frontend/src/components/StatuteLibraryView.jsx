@@ -266,7 +266,7 @@ export default function StatuteLibraryView({ onAskCopilot, onViewInGraph }) {
                         {statute.domain}
                       </span>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                        {statute.section_count || (statute.sections ? statute.sections.length : 0)} Sections
+                        {statute.coverage_display || (statute.indexed_sections_count != null && statute.nominal_sections_count ? `${statute.indexed_sections_count} of ${statute.nominal_sections_count} indexed` : `${statute.section_count || (statute.sections ? statute.sections.length : 0)} Sections`)}
                       </span>
                     </div>
                   </div>
@@ -342,9 +342,14 @@ export default function StatuteLibraryView({ onAskCopilot, onViewInGraph }) {
                 <span style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>§ {selectedSection.number || selectedSection.section}</span>
               </div>
 
-              {/* Spec 04 §3.4: Verified Current Chip */}
-              <div style={{ fontSize: '0.72rem', color: 'var(--defense-pass, #10b981)', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>
-                ✓ Verified current as of {selectedStatute.currency_checked_at ? new Date(selectedStatute.currency_checked_at).toLocaleDateString() : '2026'}
+              {/* Spec 04 §3.4 & Spec 05 §5.4: Verified Current & Coverage Honesty */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-subtle)', padding: '2px 8px', borderRadius: '12px' }}>
+                  {selectedStatute.coverage_display || `${selectedStatute.sections ? selectedStatute.sections.length : 0} of ${selectedStatute.section_count || 0} indexed`}
+                </span>
+                <div style={{ fontSize: '0.72rem', color: 'var(--defense-pass, #10b981)', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>
+                  ✓ Verified current ({selectedStatute.currency_checked_at ? new Date(selectedStatute.currency_checked_at).toLocaleDateString() : '2026'})
+                </div>
               </div>
             </div>
 
@@ -412,7 +417,11 @@ export default function StatuteLibraryView({ onAskCopilot, onViewInGraph }) {
               {onAskCopilot && (
                 <button
                   type="button"
-                  onClick={() => onAskCopilot(`Explain the statutory requirements, procedural scope, and legal consequences of Section ${selectedSection.number || selectedSection.section} under the ${selectedStatute.title}.`)}
+                  onClick={() => {
+                    const secText = selectedSection.raw_text || selectedSection.text || '';
+                    const prompt = `Provide a rigorous legal analysis of Section ${selectedSection.number || selectedSection.section} (${selectedSection.heading || ''}) under the ${selectedStatute.title}.\n\nStatutory Text Context:\n"""\n${secText}\n"""`;
+                    onAskCopilot(prompt);
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
