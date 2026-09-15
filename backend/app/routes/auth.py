@@ -13,7 +13,9 @@ from app.db.engine import get_sync_session
 from app.db.models import User
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(tags=["auth", "settings"])
+from .settings import router as settings_router
+router.include_router(settings_router)
 
 # Token storage in memory (bounded cache for active sessions)
 _ACTIVE_TOKENS: Dict[str, Dict[str, Any]] = {}
@@ -70,7 +72,7 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, A
     }
 
 
-@router.post("/register", response_model=AuthResponse)
+@router.post("/auth/register", response_model=AuthResponse)
 def register(req: RegisterRequest):
     """Registers a new legal practitioner account in PostgreSQL/SQLite."""
     if len(req.username.strip()) < 3:
@@ -105,7 +107,7 @@ def register(req: RegisterRequest):
         return AuthResponse(token=token, user=user_dict)
 
 
-@router.post("/login", response_model=AuthResponse)
+@router.post("/auth/login", response_model=AuthResponse)
 def login(req: LoginRequest):
     """Authenticates legal practitioner and returns session token."""
     with get_sync_session() as session:
@@ -123,7 +125,7 @@ def login(req: LoginRequest):
         return AuthResponse(token=token, user=user_dict)
 
 
-@router.get("/me")
+@router.get("/auth/me")
 def get_me(user: Dict[str, Any] = Depends(get_current_user)):
     """Returns currently authenticated user profile."""
     return user

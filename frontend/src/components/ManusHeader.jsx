@@ -29,12 +29,12 @@ export default function ManusHeader({
   const [fallbackModalOpen, setFallbackModalOpen] = useState(false);
 
   const viewTitles = {
-    chat: { title: 'Legal Copilot', icon: SparklesIcon, color: 'var(--accent-indigo)', badge: null },
-    graph: { title: 'Citation Graph', icon: GraphIcon, color: 'var(--accent-cyan)', badge: 'BETA' },
+    chat: { title: 'Legal Copilot', icon: SparklesIcon, color: 'var(--accent-blue)', badge: null },
+    graph: { title: 'Citation Graph', icon: GraphIcon, color: 'var(--accent-pink)', badge: 'BETA' },
     statutes: { title: 'Statute Knowledge', icon: LibraryIcon, color: 'var(--accent-blue)', badge: null },
-    audit: { title: 'Cryptographic Audit', icon: AuditIcon, color: 'var(--defense-pass)', badge: null },
-    hardware: { title: 'Hardware Engine', icon: CpuIcon, color: 'var(--accent-cyan)', badge: null },
-    mcp: { title: 'API & MCP Tools', icon: CodeIcon, color: 'var(--accent-blue)', badge: null },
+    audit: { title: 'Cryptographic Audit', icon: AuditIcon, color: 'var(--accent-pink)', badge: null },
+    hardware: { title: 'Hardware Engine', icon: CpuIcon, color: 'var(--accent-blue)', badge: null },
+    mcp: { title: 'API & MCP Tools', icon: CodeIcon, color: 'var(--accent-pink)', badge: null },
   };
 
   const currentView = viewTitles[activeView] || viewTitles.chat;
@@ -75,7 +75,7 @@ export default function ManusHeader({
           {currentView.title}
         </span>
         {currentView.badge && (
-          <span style={{ fontSize: '0.62rem', background: 'rgba(0, 210, 180, 0.15)', color: 'var(--accent-cyan)', padding: '1px 6px', borderRadius: '10px', fontWeight: 700 }}>
+          <span style={{ fontSize: '0.62rem', background: 'rgba(255, 0, 127, 0.15)', color: 'var(--accent-pink)', border: '1px solid rgba(255, 0, 127, 0.35)', padding: '1px 6px', borderRadius: '10px', fontWeight: 700 }}>
             {currentView.badge}
           </span>
         )}
@@ -100,7 +100,7 @@ export default function ManusHeader({
             boxShadow: 'var(--shadow-sm)',
           }}
         >
-          <span style={{ color: 'var(--accent-cyan)', fontSize: '0.75rem' }}>MODEL:</span>
+          <span style={{ color: 'var(--accent-blue)', fontSize: '0.75rem', fontWeight: 700 }}>MODEL:</span>
           <span>{selectedModel ? selectedModel.toUpperCase() : 'GEMMA2:2B'}</span>
           <ChevronDownIcon size={13} color="var(--text-muted)" />
         </button>
@@ -137,8 +137,8 @@ export default function ManusHeader({
                   style={{
                     padding: '9px 14px',
                     fontSize: '0.83rem',
-                    color: isSelected ? 'var(--accent-cyan)' : 'var(--text-primary)',
-                    background: isSelected ? 'rgba(0, 210, 180, 0.1)' : 'transparent',
+                    color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)',
+                    background: isSelected ? 'rgba(0, 132, 255, 0.12)' : 'transparent',
                     cursor: 'pointer',
                     display: 'flex',
                     justifyContent: 'space-between',

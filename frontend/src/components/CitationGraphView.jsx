@@ -143,7 +143,7 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
       case 'text_extraction':
         return { label: 'Text Extraction (Penalty)', bg: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b' };
       case 'curated_legal_relationship':
-        return { label: 'Curated Legal Relation', bg: 'rgba(0, 210, 180, 0.12)', color: '#00d2b4' };
+        return { label: 'Curated Legal Relation', bg: 'rgba(0, 132, 255, 0.12)', color: 'var(--accent-blue)' };
       case 'mcp_case_law_lookup':
         return { label: 'MCP Precedent Lookup', bg: 'rgba(168, 85, 247, 0.12)', color: '#a855f7' };
       case 'llm_suggested_unverified':
@@ -193,7 +193,7 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <GraphIcon style={{ color: 'var(--accent-cyan)', width: '20px', height: '20px' }} />
+              <GraphIcon style={{ color: 'var(--accent-blue)', width: '20px', height: '20px' }} />
               <h1 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
                 Citation Graph
               </h1>
@@ -201,9 +201,9 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
               <span
                 style={{
                   fontSize: '0.66rem',
-                  background: backendInfo.backend === 'memgraph' ? 'rgba(0, 210, 180, 0.12)' : 'rgba(56, 189, 248, 0.12)',
-                  color: backendInfo.backend === 'memgraph' ? '#00d2b4' : '#38bdf8',
-                  border: `1px solid ${backendInfo.backend === 'memgraph' ? 'rgba(0, 210, 180, 0.3)' : 'rgba(56, 189, 248, 0.3)'}`,
+                  background: backendInfo.backend === 'memgraph' ? 'rgba(0, 132, 255, 0.15)' : 'rgba(255, 0, 127, 0.15)',
+                  color: backendInfo.backend === 'memgraph' ? 'var(--accent-blue)' : 'var(--accent-pink)',
+                  border: `1px solid ${backendInfo.backend === 'memgraph' ? 'rgba(0, 132, 255, 0.4)' : 'rgba(255, 0, 127, 0.4)'}`,
                   padding: '2px 7px',
                   borderRadius: '12px',
                   fontWeight: 600
@@ -555,11 +555,11 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
           <>
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--accent-blue)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   {selectedNode.category || selectedNode.type || 'Legal Entity'}
                 </div>
                 {selectedNode.cited_in_conversations > 0 && (
-                  <span style={{ fontSize: '0.68rem', background: 'rgba(0, 210, 180, 0.12)', color: 'var(--accent-cyan)', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                  <span style={{ fontSize: '0.68rem', background: 'rgba(0, 132, 255, 0.15)', color: 'var(--accent-blue)', border: '1px solid rgba(0, 132, 255, 0.3)', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
                     Cited {selectedNode.cited_in_conversations}× in Chat
                   </span>
                 )}

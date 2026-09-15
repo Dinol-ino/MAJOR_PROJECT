@@ -646,5 +646,121 @@ export const apiClient = {
 
     return controller;
   },
+
+  /**
+   * POST /api/models/provision - Triggers idempotent one-click model provisioning
+   */
+  async startProvisioning(modelId = null, auto = true) {
+    const response = await fetch(`${BASE_URL}/api/models/provision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_id: modelId, auto }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(err.detail || `Provisioning failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * GET /api/models/provision/active - Returns currently running or recent provisioning job
+   */
+  async getActiveProvisioningJob() {
+    const response = await fetch(`${BASE_URL}/api/models/provision/active`);
+    if (!response.ok) return null;
+    return response.json();
+  },
+
+  /**
+   * GET /api/models/provision/{job_id} - Polls job metrics
+   */
+  async getProvisioningStatus(jobId) {
+    const response = await fetch(`${BASE_URL}/api/models/provision/${jobId}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch job status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * GET /api/models/provision/{job_id}/stream - SSE live progress stream
+   */
+  streamProvisioningProgress(jobId, onProgress, onComplete, onError) {
+    const controller = new AbortController();
+    fetch(`${BASE_URL}/api/models/provision/${jobId}/stream`, {
+      signal: controller.signal,
+      headers: { Accept: 'text/event-stream' },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`SSE request failed: ${response.status}`);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
+
+          for (const block of lines) {
+            const trimmed = block.trim();
+            if (trimmed.startsWith('data:')) {
+              try {
+                const parsed = JSON.parse(trimmed.replace(/^data:\s*/, ''));
+                if (onProgress) onProgress(parsed);
+                if (parsed.status === 'ready' || parsed.percent >= 100) {
+                  if (onComplete) onComplete(parsed);
+                  return;
+                }
+                if (parsed.status === 'failed' || parsed.status === 'cancelled') {
+                  if (onError) onError(new Error(parsed.error || parsed.message || 'Provisioning stopped'));
+                  return;
+                }
+              } catch (e) {
+                // Ignore parse errors
+              }
+            }
+          }
+        }
+        if (onComplete) onComplete({ status: 'ready', percent: 100 });
+      })
+      .catch((err) => {
+        if (err.name === 'AbortError') {
+          if (onError) onError(new Error('Stream closed'));
+        } else {
+          if (onError) onError(err);
+        }
+      });
+
+    return controller;
+  },
+
+  /**
+   * POST /api/models/provision/{job_id}/cancel
+   */
+  async cancelProvisioningJob(jobId) {
+    const response = await fetch(`${BASE_URL}/api/models/provision/${jobId}/cancel`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to cancel job: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * GET /api/models/hf/search
+   */
+  async searchHfModels(query = 'legal gguf') {
+    const response = await fetch(`${BASE_URL}/api/models/hf/search?query=${encodeURIComponent(query)}`);
+    if (!response.ok) return [];
+    return response.json();
+  },
 };
 

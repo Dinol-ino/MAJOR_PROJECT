@@ -1,6 +1,6 @@
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from app.db.engine import get_sync_session
 from app.db.models import ResearchSession, ResearchSource
@@ -91,8 +91,34 @@ class ResearchMemoryManager:
             session.flush()
             return rs.to_dict()
 
+    def cleanup_stale_active_sessions(self, max_age_seconds: int = 3600) -> int:
+        """
+        TTL cleanup job for ResearchSession.status == 'active' older than max_age_seconds (default 1 hour).
+        Marks abandoned/crashed Deep Thinking sessions as 'failed' to prevent orphan active sessions.
+        """
+        cutoff = datetime.utcnow() - timedelta(seconds=max_age_seconds)
+        try:
+            with get_sync_session() as session:
+                stale = session.query(ResearchSession).filter(
+                    ResearchSession.status == "active",
+                    ResearchSession.created_at < cutoff
+                ).all()
+                count = len(stale)
+                for rs in stale:
+                    rs.status = "failed"
+                    if not rs.findings:
+                        rs.findings = "Research session timed out after exceeding 1 hour TTL without completion."
+                session.flush()
+                if count > 0:
+                    logger.info(f"Cleaned up {count} stale active research session(s).")
+                return count
+        except Exception as exc:
+            logger.warning(f"Error during stale research session cleanup: {exc}")
+            return 0
+
     def get_research_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Retrieves a research session including its synthesized findings and sources."""
+        self.cleanup_stale_active_sessions()
         with get_sync_session() as session:
             rs = session.query(ResearchSession).filter_by(session_id=session_id).first()
             if not rs:

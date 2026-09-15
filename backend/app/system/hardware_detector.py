@@ -58,17 +58,29 @@ class HardwareDetector:
                 import winreg
                 key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
                 val, _ = winreg.QueryValueEx(key, "ProcessorNameString")
-                if val and val.strip():
-                    cpu_name = val.strip()
+                if val and str(val).strip():
+                    cpu_name = " ".join(str(val).split()).strip()
             except Exception as exc:
                 logger.debug(f"winreg CPU probe notice: {exc}")
+        elif sys.platform.startswith("linux"):
+            try:
+                if os.path.exists("/proc/cpuinfo"):
+                    with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
+                        for line in f:
+                            if line.startswith("model name"):
+                                parts = line.split(":", 1)
+                                if len(parts) > 1:
+                                    cpu_name = " ".join(parts[1].split()).strip()
+                                    break
+            except Exception as exc:
+                logger.debug(f"/proc/cpuinfo CPU probe notice: {exc}")
 
         if not cpu_name:
             cpu_name = platform.processor() or os.environ.get("PROCESSOR_IDENTIFIER") or platform.machine() or "x86_64 Multi-Core Processor"
         t_cpu_ms = (time.perf_counter() - t_cpu0) * 1000
 
         # 2. RAM Probe (Total Physical RAM vs Instantly Available Usable RAM)
-        # Note: 11.69 GB is Total Physical RAM; 8.0 GB / 1.05 GB represents Available RAM under OS load.
+        # Note: 11.69 GB is Total Physical RAM; available represents free under current OS load.
         t_ram0 = time.perf_counter()
         try:
             import psutil
@@ -80,14 +92,14 @@ class HardwareDetector:
             ram_available_gb = 4.0
         t_ram_ms = (time.perf_counter() - t_ram0) * 1000
 
-        # 3. GPU / VRAM / Backend Probe
+        # 3. GPU / VRAM / Backend Probe (Multi-Tier Robust Probe)
         t_gpu0 = time.perf_counter()
         gpu_available = False
         gpu_name = None
         gpu_vram_gb = None
         gpu_backend = None
 
-        # Try torch first
+        # Probe 1: Torch CUDA / Metal
         try:
             import torch
             if torch.cuda.is_available():
@@ -104,26 +116,56 @@ class HardwareDetector:
         except Exception as e:
             logger.debug(f"Torch GPU detection bypassed: {e}")
 
-        # Fallback to nvidia-smi if torch didn't detect CUDA
+        # Probe 2: nvidia-smi (PATH or standard install directories)
         if not gpu_available:
+            nvsmi_binaries = ["nvidia-smi"]
+            if sys.platform == "win32":
+                nvsmi_binaries.extend([
+                    r"C:\Windows\System32\nvidia-smi.exe",
+                    r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+                ])
+            for nvsmi_cmd in nvsmi_binaries:
+                try:
+                    import subprocess
+                    res = subprocess.run(
+                        [nvsmi_cmd, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                        capture_output=True,
+                        text=True,
+                        timeout=3
+                    )
+                    if res.returncode == 0 and res.stdout.strip():
+                        line = res.stdout.strip().split("\n")[0]
+                        parts = line.split(",")
+                        if len(parts) >= 2:
+                            gpu_name = parts[0].strip()
+                            gpu_vram_gb = round(float(parts[1].strip()) / 1024.0, 2)
+                            gpu_available = True
+                            gpu_backend = "cuda"
+                            break
+                except Exception as e:
+                    logger.debug(f"nvidia-smi probe ({nvsmi_cmd}) notice: {e}")
+
+        # Probe 3: Windows WMI Win32_VideoController fallback
+        if not gpu_available and sys.platform == "win32":
             try:
-                import subprocess
+                import subprocess, json
+                cmd = "Get-CimInstance Win32_VideoController | Where-Object { $_.Name -like '*NVIDIA*' -or $_.Name -like '*Radeon*' } | Select-Object -First 1 Name, AdapterRAM | ConvertTo-Json"
                 res = subprocess.run(
-                    ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                    ["powershell", "-NoProfile", "-Command", cmd],
                     capture_output=True,
                     text=True,
                     timeout=3
                 )
                 if res.returncode == 0 and res.stdout.strip():
-                    line = res.stdout.strip().split("\n")[0]
-                    parts = line.split(",")
-                    if len(parts) >= 2:
-                        gpu_name = parts[0].strip()
-                        gpu_vram_gb = round(float(parts[1].strip()) / 1024.0, 2)
-                        gpu_available = True
-                        gpu_backend = "cuda"
-            except Exception as e:
-                logger.debug(f"nvidia-smi detection bypassed: {e}")
+                    wmi_data = json.loads(res.stdout.strip())
+                    gpu_name = wmi_data.get("Name")
+                    raw_ram = wmi_data.get("AdapterRAM", 0)
+                    gpu_vram_gb = round(raw_ram / (1024 ** 3), 2) if raw_ram else 4.0
+                    gpu_available = True
+                    gpu_backend = "cuda" if "nvidia" in (gpu_name or "").lower() else "directx"
+            except Exception as exc:
+                logger.debug(f"WMI GPU fallback notice: {exc}")
+
         t_gpu_ms = (time.perf_counter() - t_gpu0) * 1000
 
         # 4. Storage Free Probe
@@ -134,13 +176,33 @@ class HardwareDetector:
         except Exception:
             storage_free_gb = 10.0
 
-        # 5. OS & AVX2
+        # 5. OS & Real AVX2 Instruction Detection (Bug H1 fix)
         platform_name = platform.system().lower()
-        supports_avx2 = True  # Modern x86_64 / arm64 default assumption
+        supports_avx2 = False
+        try:
+            if sys.platform == "win32":
+                import ctypes
+                # PF_AVX2_INSTRUCTIONS_AVAILABLE = 40
+                supports_avx2 = bool(ctypes.windll.kernel32.IsProcessorFeaturePresent(40))
+            elif sys.platform.startswith("linux"):
+                if os.path.exists("/proc/cpuinfo"):
+                    with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
+                        for line in f:
+                            if line.startswith("flags"):
+                                supports_avx2 = "avx2" in line.split()
+                                break
+            elif sys.platform == "darwin":
+                import subprocess
+                res = subprocess.run(["sysctl", "-n", "hw.optional.avx2_0"], capture_output=True, text=True, timeout=1)
+                supports_avx2 = res.stdout.strip() == "1"
+        except Exception as e:
+            logger.debug(f"AVX2 instruction detection notice: {e}")
+            supports_avx2 = False
+
         t_total_ms = (time.perf_counter() - t_start) * 1000
 
         logger.info(
-            f"Hardware telemetry sample: CPU='{cpu_name}' ({cpu_cores} cores, {t_cpu_ms:.1f}ms), "
+            f"Hardware telemetry sample: CPU='{cpu_name}' ({cpu_cores} cores, AVX2={supports_avx2}, {t_cpu_ms:.1f}ms), "
             f"RAM={ram_available_gb}GB free / {ram_total_gb}GB total ({t_ram_ms:.1f}ms), "
             f"GPU='{gpu_name or 'None'}' ({gpu_vram_gb or 0}GB VRAM, {t_gpu_ms:.1f}ms) | Total: {t_total_ms:.1f}ms"
         )
@@ -205,16 +267,15 @@ class HardwareDetector:
 
         # Determine if GPU offload should be disabled (force CPU mode)
         force_cpu = False
-        if p.gpu_available and p.gpu_vram_gb and p.gpu_vram_gb < 6.0:
-            # GPU exists but is too small for any model — force CPU-only
+        if not p.gpu_available or (p.gpu_vram_gb and p.gpu_vram_gb < 2.0):
             force_cpu = True
 
-        if usable_memory >= 16.0:
+        if (p.gpu_available and p.gpu_vram_gb and p.gpu_vram_gb >= 12.0) or usable_memory >= 16.0:
             tier = 2
             tier_name = "Tier 2 (High Performance)"
             default_model = cls._resolve_tier_model(2, "qwen2.5:14b")
             upgrade_opt_in = True
-        elif usable_memory >= 8.0:
+        elif (p.gpu_available and p.gpu_vram_gb and p.gpu_vram_gb >= 6.0) or usable_memory >= 8.0:
             tier = 1
             tier_name = "Tier 1 (Standard Legal)"
             default_model = cls._resolve_tier_model(1, "qwen2.5:7b")

@@ -7,17 +7,17 @@ export default function ShieldToggle({ shieldOn, onToggle }) {
       type="button"
       onClick={() => onToggle(!shieldOn)}
       style={{
-        background: shieldOn ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-        border: `1px solid ${shieldOn ? 'var(--defense-pass)' : 'var(--defense-block)'}`,
+        background: shieldOn ? 'rgba(255, 0, 127, 0.12)' : 'var(--bg-raised)',
+        border: `1px solid ${shieldOn ? 'var(--accent-pink)' : 'var(--border-medium)'}`,
         borderRadius: '16px',
         padding: '5px 12px',
-        color: shieldOn ? 'var(--defense-pass)' : 'var(--defense-block)',
+        color: shieldOn ? 'var(--accent-pink)' : 'var(--text-muted)',
         fontSize: '0.78rem',
         fontWeight: 700,
         display: 'flex',
         alignItems: 'center',
         gap: '6px',
-        boxShadow: shieldOn ? '0 0 10px rgba(16, 185, 129, 0.2)' : 'none',
+        boxShadow: 'var(--shadow-sm)',
       }}
       title={
         shieldOn
@@ -26,9 +26,9 @@ export default function ShieldToggle({ shieldOn, onToggle }) {
       }
     >
       {shieldOn ? (
-        <CheckShieldIcon size={14} color="var(--defense-pass)" />
+        <CheckShieldIcon size={14} color="var(--accent-pink)" />
       ) : (
-        <ShieldAlertIcon size={14} color="var(--defense-block)" />
+        <ShieldAlertIcon size={14} color="var(--text-muted)" />
       )}
       <span>Shield: {shieldOn ? 'ON' : 'OFF'}</span>
     </button>

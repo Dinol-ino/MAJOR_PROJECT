@@ -22,6 +22,7 @@ categories:
     allowed_tools:
       - "local_statute_search"
       - "local_provision_lookup"
+      - "legal_corpus_query"
 
   DOCUMENT_SEARCH:
     description: "Search and retrieval across user-uploaded documents (Tier 2 Chroma collection)."
@@ -33,37 +34,7 @@ categories:
       - "user_document_search"
       - "document_metadata_lookup"
 
-  LEGAL_SEARCH:
-    description: "Read-only legal corpus search across registered statutes and offline precedents."
-    required_mode: "OFFLINE"
-    max_calls_per_request: 8
-    timeout_sec: 8.0
-    rate_limit_per_min: 60
-    allowed_tools:
-      - "legal_corpus_query"
-      - "case_law_indexer"
-
   CURRENT_LAW:
-    description: "Live lookup of gazette notifications and recent legislative amendments."
-    required_mode: "ONLINE"
-    max_calls_per_request: 5
-    timeout_sec: 15.0
-    rate_limit_per_min: 30
-    allowed_tools:
-      - "gazette_amendment_fetcher"
-      - "live_statute_checker"
-
-  CASE_LAW_SEARCH:
-    description: "Live search across Indian Kanoon and Supreme Court judgments."
-    required_mode: "ONLINE"
-    max_calls_per_request: 5
-    timeout_sec: 15.0
-    rate_limit_per_min: 30
-    allowed_tools:
-      - "kanoon_case_search"
-      - "sc_judgment_fetcher"
-
-  GOVERNMENT_SOURCE:
     description: "Official government portals (IndiaCode, Law Commission Reports)."
     required_mode: "ONLINE"
     max_calls_per_request: 3
@@ -72,16 +43,8 @@ categories:
     allowed_tools:
       - "indiacode_fetcher"
       - "law_commission_report_query"
-
-  DEEP_RESEARCH:
-    description: "Multi-step composite research combining local and allowlisted external sources."
-    required_mode: "OFFLINE"
-    max_calls_per_request: 15
-    timeout_sec: 30.0
-    rate_limit_per_min: 20
-    allowed_tools:
-      - "composite_precedent_synthesizer"
-      - "cross_statute_analyzer"
+      - "live_statute_checker"
+      - "kanoon_case_search"
 
 # External MCP Server Permissions (Legal sources and local microservices only)
 servers:
@@ -94,15 +57,12 @@ servers:
       - "user_document_search"
     denied_tools:
       - "delete_project"
-      - "firebase_deploy"
 
   indian-legal-gateway:
     enabled: false
-    status: "PLANNED"
+    status: "DISABLED_IN_OFFLINE"
     default_policy: "read_only"
     allowed_tools:
       - "indiacode_fetcher"
-      - "kanoon_case_search"
-      - "live_statute_checker"
     denied_tools: []
 

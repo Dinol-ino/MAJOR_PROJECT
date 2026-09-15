@@ -162,15 +162,15 @@ export default function CommandInput({
                 gap: '5px',
                 background:
                   reasoningEffort === 'high'
-                    ? 'rgba(79, 140, 255, 0.15)'
+                    ? 'rgba(255, 0, 127, 0.15)'
                     : reasoningEffort === 'low'
-                    ? 'rgba(0, 210, 180, 0.12)'
+                    ? 'rgba(0, 132, 255, 0.15)'
                     : 'var(--bg-raised)',
                 border: `1px solid ${
                   reasoningEffort === 'high'
-                    ? 'var(--accent)'
+                    ? 'var(--accent-pink)'
                     : reasoningEffort === 'low'
-                    ? 'var(--accent-cyan)'
+                    ? 'var(--accent-blue)'
                     : 'var(--border-subtle)'
                 }`,
                 borderRadius: '16px',
@@ -179,9 +179,9 @@ export default function CommandInput({
                 fontWeight: 600,
                 color:
                   reasoningEffort === 'high'
-                    ? 'var(--accent)'
+                    ? 'var(--accent-pink)'
                     : reasoningEffort === 'low'
-                    ? 'var(--accent-cyan)'
+                    ? 'var(--accent-blue)'
                     : 'var(--text-secondary)',
                 cursor: 'pointer'
               }}
@@ -191,9 +191,9 @@ export default function CommandInput({
                 size={12}
                 color={
                   reasoningEffort === 'high'
-                    ? 'var(--accent)'
+                    ? 'var(--accent-pink)'
                     : reasoningEffort === 'low'
-                    ? 'var(--accent-cyan)'
+                    ? 'var(--accent-blue)'
                     : 'currentColor'
                 }
               />
@@ -263,7 +263,7 @@ export default function CommandInput({
             gap: '6px'
           }}
         >
-          <BookIcon size={13} color="var(--accent-cyan)" /> Analyze Section 66
+          <BookIcon size={13} color="var(--accent-blue)" /> Analyze Section 66
         </button>
 
         <button
@@ -281,7 +281,7 @@ export default function CommandInput({
             gap: '6px'
           }}
         >
-          <ScaleIcon size={13} color="var(--accent-blue)" /> Research Companies Act
+          <ScaleIcon size={13} color="var(--accent-pink)" /> Research Companies Act
         </button>
 
         <button
@@ -299,7 +299,7 @@ export default function CommandInput({
             gap: '6px'
           }}
         >
-          <SparklesIcon size={13} color="var(--accent)" /> Draft Legal Notice
+          <SparklesIcon size={13} color="var(--accent-blue)" /> Draft Legal Notice
         </button>
 
         <button
@@ -317,7 +317,7 @@ export default function CommandInput({
             gap: '6px'
           }}
         >
-          <FolderIcon size={13} color="var(--status-green)" /> BNS 2023 Cheating
+          <FolderIcon size={13} color="var(--accent-pink)" /> BNS 2023 Cheating
         </button>
       </div>
     </div>

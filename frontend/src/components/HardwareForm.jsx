@@ -26,8 +26,10 @@ export default function HardwareForm({
   const [catalogData, setCatalogData] = useState(null);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [pullProgress, setPullProgress] = useState({});
+  const [provisioningJob, setProvisioningJob] = useState(null);
 
   const pullControllers = useRef({});
+  const provisioningControllerRef = useRef(null);
   const onModelRecommendedRef = useRef(onModelRecommended);
   onModelRecommendedRef.current = onModelRecommended;
 
@@ -195,6 +197,119 @@ export default function HardwareForm({
     });
   };
 
+  // One-Click Model Provisioning Workflow
+  const handleStartProvisioning = async (targetModelId = null) => {
+    try {
+      setProvisioningJob({
+        status: 'checking',
+        percent: 5,
+        message: 'Initializing local AI provisioning engine...',
+        model_id: targetModelId || ''
+      });
+
+      const res = await apiClient.startProvisioning(targetModelId, !targetModelId);
+      const jobId = res.job_id;
+
+      if (provisioningControllerRef.current) {
+        provisioningControllerRef.current.abort();
+      }
+
+      const controller = apiClient.streamProvisioningProgress(
+        jobId,
+        (progress) => {
+          setProvisioningJob((prev) => ({
+            ...prev,
+            ...progress,
+            job_id: jobId
+          }));
+        },
+        (doneData) => {
+          setProvisioningJob((prev) => ({
+            ...prev,
+            ...doneData,
+            status: 'ready',
+            percent: 100,
+            message: doneData?.message || 'Model verified and ready for legal inference.'
+          }));
+          fetchModels();
+          const finalId = doneData?.model_id || targetModelId;
+          if (finalId) {
+            if (setSelectedModel) setSelectedModel(finalId);
+            if (onModelRecommended) onModelRecommended(finalId);
+          }
+        },
+        (err) => {
+          setProvisioningJob((prev) => ({
+            ...prev,
+            status: 'failed',
+            error: err.message,
+            message: `Provisioning failed: ${err.message}`
+          }));
+        }
+      );
+
+      provisioningControllerRef.current = controller;
+    } catch (err) {
+      setProvisioningJob({
+        status: 'failed',
+        error: err.message,
+        message: `Failed to initiate provisioning: ${err.message}`
+      });
+    }
+  };
+
+  const handleCancelProvisioning = async () => {
+    if (!provisioningJob?.job_id) return;
+    try {
+      await apiClient.cancelProvisioningJob(provisioningJob.job_id);
+    } catch (e) {
+      console.debug('Cancel error:', e);
+    }
+    if (provisioningControllerRef.current) {
+      provisioningControllerRef.current.abort();
+      provisioningControllerRef.current = null;
+    }
+    setProvisioningJob((prev) => ({
+      ...prev,
+      status: 'cancelled',
+      message: 'Provisioning cancelled by user'
+    }));
+  };
+
+  // Hydrate active provisioning job on mount
+  useEffect(() => {
+    let unmounted = false;
+    apiClient.getActiveProvisioningJob().then((job) => {
+      if (unmounted || !job || !job.job_id) return;
+      if (['checking', 'compatibility_check', 'runtime_missing', 'downloading', 'verifying', 'starting_model', 'health_check'].includes(job.status)) {
+        setProvisioningJob(job);
+        const ctrl = apiClient.streamProvisioningProgress(
+          job.job_id,
+          (p) => setProvisioningJob((prev) => ({ ...prev, ...p })),
+          (d) => {
+            setProvisioningJob((prev) => ({ ...prev, ...d, status: 'ready', percent: 100 }));
+            fetchModels();
+            if (job.model_id) {
+              if (setSelectedModel) setSelectedModel(job.model_id);
+              if (onModelRecommended) onModelRecommended(job.model_id);
+            }
+          },
+          (e) => setProvisioningJob((prev) => ({ ...prev, status: 'failed', error: e.message }))
+        );
+        provisioningControllerRef.current = ctrl;
+      } else if (job.status === 'ready') {
+        setProvisioningJob(job);
+      }
+    }).catch(() => {});
+
+    return () => {
+      unmounted = true;
+      if (provisioningControllerRef.current) {
+        provisioningControllerRef.current.abort();
+      }
+    };
+  }, [fetchModels, setSelectedModel, onModelRecommended]);
+
   if (!isFullView && isOpen === false) return null;
 
   // Derived telemetry presentation
@@ -233,10 +348,10 @@ export default function HardwareForm({
     max_model: '3B (Q4)'
   };
 
-  let tierColor = 'var(--accent-cyan)';
+  let tierColor = 'var(--accent-blue)';
   if (tier.tier_code === 'tier_1') tierColor = 'var(--accent-blue)';
-  else if (tier.tier_code === 'tier_2') tierColor = 'var(--defense-pass)';
-  else if (tier.tier_code === 'tier_3') tierColor = '#c084fc';
+  else if (tier.tier_code === 'tier_2') tierColor = 'var(--accent-pink)';
+  else if (tier.tier_code === 'tier_3') tierColor = 'var(--accent-pink)';
 
   const modelsList = catalogData?.recommended || [];
   const ollamaOnline = catalogData?.ollama_online ?? true;
@@ -251,13 +366,14 @@ export default function HardwareForm({
               width: 34,
               height: 34,
               borderRadius: 8,
-              background: 'rgba(0, 210, 180, 0.12)',
+              background: 'rgba(0, 132, 255, 0.12)',
+              border: '1px solid rgba(0, 132, 255, 0.3)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center'
             }}
           >
-            <CpuIcon size={20} color="var(--accent-cyan)" />
+            <CpuIcon size={20} color="var(--accent-blue)" />
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -270,9 +386,9 @@ export default function HardwareForm({
                   fontWeight: 600,
                   padding: '2px 8px',
                   borderRadius: '10px',
-                  background: streamStatus === 'live' ? 'rgba(46, 204, 113, 0.15)' : 'rgba(231, 76, 60, 0.15)',
-                  color: streamStatus === 'live' ? '#2ecc71' : '#e74c3c',
-                  border: `1px solid ${streamStatus === 'live' ? 'rgba(46, 204, 113, 0.3)' : 'rgba(231, 76, 60, 0.3)'}`
+                  background: streamStatus === 'live' ? 'rgba(0, 132, 255, 0.15)' : 'rgba(255, 0, 127, 0.15)',
+                  color: streamStatus === 'live' ? 'var(--accent-blue)' : 'var(--accent-pink)',
+                  border: `1px solid ${streamStatus === 'live' ? 'rgba(0, 132, 255, 0.4)' : 'rgba(255, 0, 127, 0.4)'}`
                 }}
               >
                 {streamStatus === 'live' ? '● SSE Live' : '○ Telemetry Offline'}
@@ -378,7 +494,7 @@ export default function HardwareForm({
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>CPU Processor</span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-blue)' }}>
               {!telemetry ? <span className="pulse-text">Sampling…</span> : `${cpu.load_percent}% Load`}
             </span>
           </div>
@@ -398,7 +514,7 @@ export default function HardwareForm({
                   style={{
                     flex: 1,
                     height: `${Math.max(10, Math.min(100, val))}%`,
-                    background: 'var(--accent-cyan)',
+                    background: 'var(--accent-blue)',
                     opacity: 0.3 + (idx / sparklineData.length) * 0.7,
                     borderRadius: '1px'
                   }}
@@ -413,11 +529,11 @@ export default function HardwareForm({
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>System RAM</span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: ram.used_percent > 85 ? '#e74c3c' : 'var(--accent-cyan)' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: ram.used_percent > 85 ? 'var(--accent-pink)' : 'var(--accent-blue)' }}>
               {!telemetry ? <span className="pulse-text">Measuring…</span> : `${ram.used_percent}% Used`}
             </span>
           </div>
-          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--accent-cyan)', marginTop: '4px' }}>
+          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--accent-blue)', marginTop: '4px' }}>
             {!telemetry ? <span style={{ opacity: 0.5 }}>Reading virtual memory…</span> : `${ram.available_gb} GB Free / ${ram.total_gb} GB Total`}
           </div>
           <div style={{ width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', height: '5px', marginTop: '6px', overflow: 'hidden' }}>
@@ -425,7 +541,7 @@ export default function HardwareForm({
               style={{
                 width: !telemetry ? '40%' : `${ram.used_percent}%`,
                 height: '100%',
-                background: ram.used_percent > 85 ? '#e74c3c' : 'var(--accent-cyan)',
+                background: ram.used_percent > 85 ? 'var(--accent-pink)' : 'var(--accent-blue)',
                 transition: 'width 0.4s ease'
               }}
               className={!telemetry ? 'pulse-text' : ''}
@@ -440,11 +556,11 @@ export default function HardwareForm({
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>GPU Acceleration</span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: gpu.detected ? 'var(--accent-blue)' : 'var(--text-muted)' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: gpu.detected ? 'var(--accent-pink)' : 'var(--text-muted)' }}>
               {!telemetry ? <span className="pulse-text">Scanning…</span> : (gpu.detected ? `${gpu.util_percent}% Utilized` : 'CPU Mode')}
             </span>
           </div>
-          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: gpu.detected ? 'var(--accent-blue)' : 'var(--text-secondary)', marginTop: '4px' }}>
+          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: gpu.detected ? 'var(--accent-pink)' : 'var(--text-secondary)', marginTop: '4px' }}>
             {!telemetry ? <span style={{ opacity: 0.5 }}>Checking CUDA / NVML…</span> : (gpu.detected ? `${gpu.vram_used_gb || 0} / ${gpu.vram_total_gb || 0} GB VRAM` : 'No CUDA GPU')}
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={gpu.name}>
@@ -467,6 +583,233 @@ export default function HardwareForm({
         </div>
       </div>
 
+      {/* One-Click Automatic Local AI Setup Card */}
+      {(() => {
+        const topRecommended = modelsList.find((m) => m.recommended_for_tier) || modelsList[0] || {
+          model_id: 'qwen2.5:3b',
+          display_name: 'Qwen 2.5 3B (Standard Floor)',
+          size_gb: 1.9,
+          installed: false
+        };
+        const isJobRunning = provisioningJob && ['checking', 'compatibility_check', 'runtime_missing', 'downloading', 'verifying', 'starting_model', 'health_check'].includes(provisioningJob.status);
+        const isJobReady = provisioningJob?.status === 'ready';
+        const isJobFailed = provisioningJob?.status === 'failed';
+
+        return (
+          <div
+            style={{
+              background: 'linear-gradient(135deg, rgba(0, 132, 255, 0.08) 0%, rgba(255, 0, 127, 0.05) 100%)',
+              border: '1px solid var(--accent-blue)',
+              borderRadius: '12px',
+              padding: '20px 22px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+              boxShadow: 'var(--shadow-md)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 10,
+                    background: 'var(--accent-blue)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <SparklesIcon size={20} color="#ffffff" />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                      One-Click Local AI Setup
+                    </h3>
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        background: 'rgba(0, 132, 255, 0.2)',
+                        color: 'var(--accent-blue)',
+                        border: '1px solid var(--accent-blue)',
+                        padding: '2px 8px',
+                        borderRadius: '10px'
+                      }}
+                    >
+                      Zero-Config
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '3px 0 0 0' }}>
+                    Automatically detects device capacity, allocates storage, pulls legal model weights, and verifies generation.
+                  </p>
+                </div>
+              </div>
+
+              {/* Hardware capability pill badges */}
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.7rem', padding: '3px 8px', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '6px', color: 'var(--text-secondary)' }}>
+                  RAM: {ram.available_gb} GB Free
+                </span>
+                <span style={{ fontSize: '0.7rem', padding: '3px 8px', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '6px', color: 'var(--text-secondary)' }}>
+                  Disk: {disk.free_gb} GB Free
+                </span>
+                <span style={{ fontSize: '0.7rem', padding: '3px 8px', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '6px', color: 'var(--text-secondary)' }}>
+                  {cpu.cores_physical} Physical Cores
+                </span>
+              </div>
+            </div>
+
+            {/* Target model and setup action */}
+            <div
+              style={{
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '8px',
+                padding: '14px 16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                  Recommended Model for This Computer
+                </div>
+                <div style={{ fontSize: '0.98rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
+                  {topRecommended.display_name} <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-secondary)' }}>(~{topRecommended.size_gb} GB)</span>
+                </div>
+              </div>
+
+              {/* State-dependent Action Buttons */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {isJobRunning ? (
+                  <button
+                    type="button"
+                    onClick={handleCancelProvisioning}
+                    style={{
+                      background: 'rgba(255, 0, 127, 0.15)',
+                      color: 'var(--accent-pink)',
+                      border: '1px solid var(--accent-pink)',
+                      borderRadius: '6px',
+                      padding: '7px 14px',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancel Setup
+                  </button>
+                ) : isJobReady || topRecommended.installed ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-blue)' }}>
+                      <CheckCircleIcon size={16} />
+                      <span>Ready & Active</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleStartProvisioning(topRecommended.model_id)}
+                      style={{
+                        background: 'var(--bg-input)',
+                        color: 'var(--text-secondary)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '6px',
+                        padding: '6px 12px',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Re-verify Health
+                    </button>
+                  </div>
+                ) : isJobFailed ? (
+                  <button
+                    type="button"
+                    onClick={() => handleStartProvisioning(topRecommended.model_id)}
+                    style={{
+                      background: 'var(--accent-pink)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '8px 18px',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <RefreshIcon size={14} />
+                    <span>Retry Automatic Setup</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleStartProvisioning(topRecommended.model_id)}
+                    style={{
+                      background: 'var(--accent-blue)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '9px 20px',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      boxShadow: 'var(--shadow-sm)'
+                    }}
+                  >
+                    <DownloadIcon size={15} />
+                    <span>Download & Set Up Automatically</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Active Provisioning Progress Bar and Stage Feedback */}
+            {isJobRunning && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.76rem' }}>
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span className="pulse-text">●</span>
+                    <span>{provisioningJob.message || 'Provisioning local model...'}</span>
+                  </span>
+                  <span style={{ color: 'var(--accent-blue)', fontWeight: 700 }}>
+                    {Math.round(provisioningJob.percent || 0)}%
+                  </span>
+                </div>
+                <div style={{ width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${Math.max(5, Math.min(100, provisioningJob.percent || 0))}%`,
+                      height: '100%',
+                      background: 'var(--accent-blue)',
+                      transition: 'width 0.3s ease'
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Job Error Notice */}
+            {isJobFailed && (
+              <div style={{ fontSize: '0.76rem', color: 'var(--accent-pink)', background: 'rgba(255, 0, 127, 0.1)', border: '1px solid rgba(255, 0, 127, 0.3)', borderRadius: '6px', padding: '8px 12px' }}>
+                ⚠️ {provisioningJob.error || provisioningJob.message || 'Setup encountered an error'}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Recommended Models Section */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -480,7 +823,7 @@ export default function HardwareForm({
           </div>
 
           {!ollamaOnline && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(231, 76, 60, 0.12)', border: '1px solid rgba(231, 76, 60, 0.3)', borderRadius: '6px', color: '#e74c3c', fontSize: '0.72rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(255, 0, 127, 0.12)', border: '1px solid rgba(255, 0, 127, 0.4)', borderRadius: '6px', color: 'var(--accent-pink)', fontSize: '0.72rem' }}>
               <ShieldAlertIcon size={14} />
               <span>Ollama unreachable at 127.0.0.1:11434</span>
             </div>
@@ -498,8 +841,8 @@ export default function HardwareForm({
               <div
                 key={mId}
                 style={{
-                  background: isSelected ? 'rgba(0, 210, 180, 0.05)' : 'var(--bg-card)',
-                  border: isSelected ? '1px solid var(--accent-cyan)' : '1px solid var(--border-subtle)',
+                  background: isSelected ? 'rgba(0, 132, 255, 0.08)' : 'var(--bg-card)',
+                  border: isSelected ? '1px solid var(--accent-blue)' : '1px solid var(--border-subtle)',
                   borderRadius: '8px',
                   padding: '14px 16px',
                   display: 'flex',
@@ -525,7 +868,7 @@ export default function HardwareForm({
                         </span>
                       )}
                       {model.recommended_for_tier && (
-                        <span style={{ fontSize: '0.68rem', fontWeight: 600, padding: '1px 6px', background: 'rgba(46, 204, 113, 0.12)', color: '#2ecc71', borderRadius: '4px' }}>
+                        <span style={{ fontSize: '0.68rem', fontWeight: 600, padding: '1px 6px', background: 'rgba(0, 132, 255, 0.15)', color: 'var(--accent-blue)', border: '1px solid rgba(0, 132, 255, 0.3)', borderRadius: '4px' }}>
                           Tier Matched
                         </span>
                       )}
@@ -542,7 +885,7 @@ export default function HardwareForm({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {model.installed ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 600, color: '#2ecc71' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-blue)' }}>
                           <CheckCircleIcon size={14} />
                           <span>Installed</span>
                         </span>
@@ -554,9 +897,9 @@ export default function HardwareForm({
                             if (!isFullView && onClose) onClose();
                           }}
                           style={{
-                            background: isSelected ? 'var(--accent-cyan)' : 'var(--bg-input)',
-                            color: isSelected ? '#0d0f14' : 'var(--text-primary)',
-                            border: '1px solid var(--border-subtle)',
+                            background: isSelected ? 'var(--accent-blue)' : 'var(--bg-input)',
+                            color: isSelected ? '#ffffff' : 'var(--text-primary)',
+                            border: isSelected ? '1px solid var(--accent-blue)' : '1px solid var(--border-subtle)',
                             borderRadius: '6px',
                             padding: '6px 12px',
                             fontSize: '0.74rem',
@@ -574,9 +917,9 @@ export default function HardwareForm({
                             type="button"
                             onClick={() => handleCancelPull(mId)}
                             style={{
-                              background: 'rgba(231, 76, 60, 0.15)',
-                              color: '#e74c3c',
-                              border: '1px solid rgba(231, 76, 60, 0.3)',
+                              background: 'rgba(255, 0, 127, 0.15)',
+                              color: 'var(--accent-pink)',
+                              border: '1px solid rgba(255, 0, 127, 0.4)',
                               borderRadius: '6px',
                               padding: '6px 10px',
                               fontSize: '0.72rem',
@@ -591,7 +934,7 @@ export default function HardwareForm({
                             type="button"
                             onClick={() => handlePullModel(mId)}
                             style={{
-                              background: 'var(--accent-gradient)',
+                              background: 'var(--accent-blue)',
                               color: 'white',
                               border: 'none',
                               borderRadius: '6px',
@@ -625,7 +968,7 @@ export default function HardwareForm({
                         style={{
                           width: `${progress.percent}%`,
                           height: '100%',
-                          background: 'var(--accent-cyan)',
+                          background: 'var(--accent-blue)',
                           transition: 'width 0.2s ease'
                         }}
                       />

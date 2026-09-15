@@ -180,7 +180,7 @@ export default function AuditLedgerView({ sessionId }) {
           </div>
         </div>
 
-        <div style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', background: 'rgba(0, 210, 180, 0.1)', padding: '4px 10px', borderRadius: '16px', fontWeight: 700 }}>
+        <div style={{ fontSize: '0.75rem', color: 'var(--accent-blue)', background: 'rgba(0, 132, 255, 0.12)', border: '1px solid rgba(0, 132, 255, 0.3)', padding: '4px 10px', borderRadius: '16px', fontWeight: 700 }}>
           ACTIVE SESSION: {sessionId || 'WKD_DEFAULT'}
         </div>
       </div>
@@ -209,7 +209,7 @@ export default function AuditLedgerView({ sessionId }) {
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
             Shield Block Events
           </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: blockedQueries > 0 ? 'var(--defense-block)' : 'var(--defense-pass)', marginTop: '4px' }}>
+          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: blockedQueries > 0 ? 'var(--accent-pink)' : 'var(--accent-blue)', marginTop: '4px' }}>
             {blockedQueries}
           </div>
         </div>
@@ -218,7 +218,7 @@ export default function AuditLedgerView({ sessionId }) {
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
             Defense Architecture
           </div>
-          <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--accent-cyan)', marginTop: '8px' }}>
+          <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--accent-pink)', marginTop: '8px' }}>
             3-Layer Guard
           </div>
         </div>
@@ -237,7 +237,7 @@ export default function AuditLedgerView({ sessionId }) {
             type="button"
             onClick={() => setFilterAction(f.key)}
             style={{
-              background: filterAction === f.key ? 'rgba(56, 189, 248, 0.15)' : 'var(--bg-card)',
+              background: filterAction === f.key ? 'rgba(0, 132, 255, 0.15)' : 'var(--bg-card)',
               border: `1px solid ${filterAction === f.key ? 'var(--accent-blue)' : 'var(--border-subtle)'}`,
               color: filterAction === f.key ? 'var(--accent-blue)' : 'var(--text-secondary)',
               borderRadius: '8px',
@@ -296,9 +296,10 @@ export default function AuditLedgerView({ sessionId }) {
                         borderRadius: '4px',
                         fontSize: '0.74rem',
                         background: row.action.includes('blocked')
-                          ? 'rgba(239, 68, 68, 0.15)'
-                          : 'rgba(56, 189, 248, 0.1)',
-                        color: row.action.includes('blocked') ? 'var(--defense-block)' : 'var(--accent-blue)',
+                          ? 'rgba(255, 0, 127, 0.15)'
+                          : 'rgba(0, 132, 255, 0.12)',
+                        border: `1px solid ${row.action.includes('blocked') ? 'rgba(255, 0, 127, 0.3)' : 'rgba(0, 132, 255, 0.25)'}`,
+                        color: row.action.includes('blocked') ? 'var(--accent-pink)' : 'var(--accent-blue)',
                       }}
                     >
                       {row.action}
@@ -311,7 +312,7 @@ export default function AuditLedgerView({ sessionId }) {
                       <span style={{ color: 'var(--text-dim)' }}>Runtime</span>
                     )}
                   </td>
-                  <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: '0.72rem', color: 'var(--accent-cyan)' }}>
+                  <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: '0.72rem', color: 'var(--accent-blue)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span>{row.hash ? `${row.hash.substring(0, 16)}...` : 'N/A'}</span>
                       {row.hash && (
@@ -321,7 +322,7 @@ export default function AuditLedgerView({ sessionId }) {
                           style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
                           title="Copy Full Hash"
                         >
-                          {copiedHash === `curr_${idx}` ? <CheckIcon size={12} color="var(--defense-pass)" /> : <CopyIcon size={12} />}
+                          {copiedHash === `curr_${idx}` ? <CheckIcon size={12} color="var(--accent-blue)" /> : <CopyIcon size={12} />}
                         </button>
                       )}
                     </div>

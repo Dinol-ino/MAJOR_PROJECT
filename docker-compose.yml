@@ -9,11 +9,13 @@ services:
       - "5432:5432"
     volumes:
       - pg-data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
   ollama:
     image: ollama/ollama:latest
@@ -23,6 +25,23 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
     build:
@@ -35,7 +54,6 @@ services:
       - sqlite-data:/workspace/db
     environment:
       - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/dfrag_memory
-      - REDIS_URL=redis://redis:6379
       - OLLAMA_URL=http://ollama:11434
       - DEFAULT_MODEL=qwen2.5:3b
       - ANONYMIZED_TELEMETRY=False
@@ -44,9 +62,19 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      - postgres
-      - redis
-      - ollama
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5)"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
   frontend:
     build:
@@ -60,12 +88,12 @@ services:
     environment:
       - VITE_PROXY_TARGET=http://backend:8000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pg-data:
   chroma-data:
   sqlite-data:
   ollama-models:
-
-

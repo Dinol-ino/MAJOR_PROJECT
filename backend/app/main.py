@@ -9,7 +9,7 @@ import logging
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import chat, upload, recommend, audit, models, memory, cache, runtime, mcp, research, diagnostics, statutes, auth, vaults, conversations, settings as settings_routes, hardware
+from app.routes import chat, upload, recommend, audit, models, memory, runtime, mcp, research, diagnostics, statutes, auth, vaults, conversations
 from app.observability.correlation import CorrelationMiddleware
 from app.config import settings
 from app.system.hardware_detector import HardwareDetector
@@ -61,24 +61,21 @@ app.add_middleware(
 )
 
 
-# Register routes
+# Register routes (consolidated modular routers)
 app.include_router(chat.router)
 app.include_router(upload.router)
 app.include_router(recommend.router)
 app.include_router(audit.router)
-app.include_router(models.router)
+app.include_router(models.router)       # Includes hardware & telemetry routes
 app.include_router(memory.router)
-app.include_router(cache.router)
 app.include_router(runtime.router)
 app.include_router(mcp.router)
 app.include_router(research.router)
-app.include_router(diagnostics.router)
+app.include_router(diagnostics.router)  # Includes cache metrics & control routes
 app.include_router(statutes.router)
-app.include_router(auth.router)
+app.include_router(auth.router)         # Includes settings & API vault routes
 app.include_router(vaults.router)
 app.include_router(conversations.router)
-app.include_router(settings_routes.router)
-app.include_router(hardware.router)
 
 @app.get("/")
 def read_root():

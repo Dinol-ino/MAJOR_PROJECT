@@ -23,6 +23,21 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def seed_statutes_and_graph():
     statute_sync_service.auto_seed_if_empty()
+    with get_sync_session() as session:
+        existing_mcp = session.query(CitationEdge).filter_by(derivation_method=DERIVATION_MCP_CASE_LAW_LOOKUP).first()
+        if not existing_mcp:
+            session.add(CitationEdge(
+                id=str(uuid.uuid4()),
+                src_type="section",
+                src_key="section:it_act_2000:66A",
+                dst_type="precedent",
+                dst_key="precedent:shreya_singhal_2015",
+                relation="interpreted_in",
+                origin="mcp_relation",
+                derivation_method=DERIVATION_MCP_CASE_LAW_LOOKUP,
+                confidence=1.0
+            ))
+            session.commit()
     yield
 
 
@@ -51,6 +66,22 @@ def test_statute_catalog_coverage_honesty():
 
 def test_citation_graph_derivation_methods_and_backend():
     """Task 5.2.1 & 5.2.2: Every graph edge must have an explicit valid derivation_method."""
+    from datetime import datetime
+    with get_sync_session() as session:
+        session.add(CitationEdge(
+            id=str(uuid.uuid4()),
+            src_type="section",
+            src_key="section:it_act_2000:66A",
+            dst_type="precedent",
+            dst_key="precedent:shreya_singhal_2015",
+            relation="interpreted_in",
+            origin="mcp_relation",
+            derivation_method=DERIVATION_MCP_CASE_LAW_LOOKUP,
+            confidence=1.0,
+            created_at=datetime.utcnow()
+        ))
+        session.commit()
+
     response = client.get("/statutes/graph?scope=global")
     assert response.status_code == 200
     data = response.json()

@@ -134,13 +134,13 @@ export default function ChatWindow({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {msg.role === 'user' ? (
                       <>
-                        <UserIcon size={14} color="var(--accent)" />
-                        <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>YOU</span>
+                        <UserIcon size={14} color="var(--accent-pink)" />
+                        <span style={{ fontWeight: 700, color: 'var(--accent-pink)' }}>YOU</span>
                       </>
                     ) : (
                       <>
-                        <BotIcon size={15} color="var(--accent-cyan)" />
-                        <span style={{ fontWeight: 700, color: 'var(--accent-cyan)' }}>NYAYA-CORE v4</span>
+                        <BotIcon size={15} color="var(--accent-blue)" />
+                        <span style={{ fontWeight: 700, color: 'var(--accent-blue)' }}>NYAYA-CORE v4</span>
                         <ConfidenceIndicator
                           confidenceScore={msg.confidence_score}
                           sourcesCount={msg.sources ? msg.sources.length : 0}

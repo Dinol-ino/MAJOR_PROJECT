@@ -20,7 +20,7 @@ export default function SourcesPanel({ sources }) {
   return (
     <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
       <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px', fontWeight: 700 }}>
-        <BookIcon size={14} color="var(--accent-cyan)" />
+        <BookIcon size={14} color="var(--accent-blue)" />
         <span>{panelTitle} ({sources.length})</span>
       </div>
 
@@ -48,14 +48,14 @@ export default function SourcesPanel({ sources }) {
               {/* Card Header with Badges */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontWeight: 700, color: isUserDoc ? 'var(--accent-blue)' : 'var(--accent-cyan)' }}>
+                  <span style={{ fontWeight: 700, color: isUserDoc ? 'var(--accent-pink)' : 'var(--accent-blue)' }}>
                     [{index + 1}] {actName}
                   </span>
-                  <span style={{ fontSize: '0.65rem', background: isUserDoc ? 'rgba(56, 189, 248, 0.15)' : 'rgba(0, 210, 180, 0.15)', color: isUserDoc ? 'var(--accent-blue)' : 'var(--accent-cyan)', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                  <span style={{ fontSize: '0.65rem', background: isUserDoc ? 'rgba(255, 0, 127, 0.15)' : 'rgba(0, 132, 255, 0.15)', color: isUserDoc ? 'var(--accent-pink)' : 'var(--accent-blue)', border: `1px solid ${isUserDoc ? 'rgba(255, 0, 127, 0.3)' : 'rgba(0, 132, 255, 0.3)'}`, padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
                     {isUserDoc ? 'USER DOC' : 'STATUTE'}
                   </span>
                   {sectionNum && (
-                    <span style={{ color: 'var(--accent-blue)', background: 'rgba(56, 189, 248, 0.1)', padding: '1px 6px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 600 }}>
+                    <span style={{ color: 'var(--accent-blue)', background: 'rgba(0, 132, 255, 0.1)', border: '1px solid rgba(0, 132, 255, 0.25)', padding: '1px 6px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 600 }}>
                       {sectionNum}
                     </span>
                   )}

@@ -131,16 +131,16 @@ export default function Sidebar({
   };
 
   const navItems = [
-    { key: 'chat', label: 'Legal Copilot', icon: SparklesIcon, color: 'var(--accent-indigo)' },
-    { key: 'graph', label: 'Citation Graph', icon: GraphIcon, color: 'var(--accent-cyan)', badge: 'BETA' },
+    { key: 'chat', label: 'Legal Copilot', icon: SparklesIcon, color: 'var(--accent-blue)' },
+    { key: 'graph', label: 'Citation Graph', icon: GraphIcon, color: 'var(--accent-pink)', badge: 'BETA' },
     { key: 'statutes', label: 'Statute Library', icon: LibraryIcon, color: 'var(--accent-blue)' },
-    { key: 'audit', label: 'Cryptographic Audit', icon: AuditIcon, color: 'var(--defense-pass)' },
+    { key: 'audit', label: 'Cryptographic Audit', icon: AuditIcon, color: 'var(--accent-pink)' },
   ];
 
   const toolItems = [
-    { key: 'hardware', label: 'Hardware Engine', icon: CpuIcon, color: 'var(--accent-cyan)' },
-    { key: 'mcp', label: 'API & MCP Tools', icon: CodeIcon, color: 'var(--accent-blue)' },
-    { key: 'settings', label: 'Settings', icon: EditIcon, color: 'var(--accent)' },
+    { key: 'hardware', label: 'Hardware Engine', icon: CpuIcon, color: 'var(--accent-blue)' },
+    { key: 'mcp', label: 'API & MCP Tools', icon: CodeIcon, color: 'var(--accent-pink)' },
+    { key: 'settings', label: 'Settings', icon: EditIcon, color: 'var(--accent-blue)' },
   ];
 
   if (collapsed) {
@@ -199,8 +199,8 @@ export default function Sidebar({
               type="button"
               onClick={() => setActiveView(item.key)}
               style={{
-                background: isActive ? 'rgba(0, 210, 180, 0.12)' : 'none',
-                border: 'none',
+                background: isActive ? 'rgba(0, 132, 255, 0.15)' : 'none',
+                border: isActive ? '1px solid rgba(0, 132, 255, 0.4)' : '1px solid transparent',
                 borderRadius: '8px',
                 width: '38px',
                 height: '38px',
@@ -241,7 +241,7 @@ export default function Sidebar({
             <ShieldIcon size={16} color="white" />
           </div>
           <span style={{ fontFamily: 'var(--font-title)', fontWeight: 800, fontSize: '1.2rem', color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
-            dfrag<span style={{ color: 'var(--accent-cyan)' }}>.ai</span>
+            dfrag<span style={{ color: 'var(--accent-pink)' }}>.ai</span>
           </span>
         </div>
         <button
@@ -275,10 +275,9 @@ export default function Sidebar({
           marginBottom: '18px',
           boxShadow: 'var(--shadow-sm)',
         }}
-        className="glow-pill"
       >
-        <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(0, 210, 180, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <PlusIcon size={14} color="var(--accent-cyan)" />
+        <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(0, 132, 255, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <PlusIcon size={14} color="var(--accent-blue)" />
         </div>
         <span>New Task</span>
       </button>
@@ -301,7 +300,8 @@ export default function Sidebar({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                background: isActive ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
+                background: isActive ? 'rgba(0, 132, 255, 0.12)' : 'transparent',
+                borderLeft: isActive ? `3px solid ${item.color}` : '3px solid transparent',
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
               }}
@@ -311,7 +311,7 @@ export default function Sidebar({
                 <span>{item.label}</span>
               </div>
               {item.badge && (
-                <span style={{ fontSize: '0.62rem', background: 'rgba(0, 210, 180, 0.15)', color: 'var(--accent-cyan)', padding: '1px 6px', borderRadius: '10px', fontWeight: 700 }}>
+                <span style={{ fontSize: '0.62rem', background: 'rgba(255, 0, 127, 0.15)', color: 'var(--accent-pink)', border: '1px solid rgba(255, 0, 127, 0.35)', padding: '1px 6px', borderRadius: '10px', fontWeight: 700 }}>
                   {item.badge}
                 </span>
               )}
@@ -363,7 +363,7 @@ export default function Sidebar({
           <button
             type="button"
             onClick={() => setIsCreatingVault(!isCreatingVault)}
-            style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '2px' }}
+            style={{ background: 'none', border: 'none', color: 'var(--accent-blue)', cursor: 'pointer', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '2px' }}
             title="Create new matter vault"
           >
             <PlusIcon size={12} />
@@ -384,7 +384,7 @@ export default function Sidebar({
                 padding: '5px 8px',
                 fontSize: '0.76rem',
                 borderRadius: '6px',
-                border: '1px solid var(--accent-cyan)',
+                border: '1px solid var(--accent-blue)',
                 background: 'var(--bg-card)',
                 color: 'var(--text-primary)',
                 outline: 'none',
@@ -412,9 +412,9 @@ export default function Sidebar({
                   padding: '6px 10px',
                   borderRadius: '6px',
                   fontSize: '0.78rem',
-                  color: isSelected ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                  background: isSelected ? 'rgba(0, 210, 180, 0.12)' : 'transparent',
-                  border: isSelected ? '1px solid rgba(0, 210, 180, 0.3)' : '1px solid transparent',
+                  color: isSelected ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                  background: isSelected ? 'rgba(0, 132, 255, 0.12)' : 'transparent',
+                  border: isSelected ? '1px solid rgba(0, 132, 255, 0.3)' : '1px solid transparent',
                   cursor: 'pointer',
                   display: 'flex',
                   justifyContent: 'space-between',
@@ -423,7 +423,7 @@ export default function Sidebar({
                 title={v.description || v.vault_name}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', flex: 1 }}>
-                  <FolderIcon size={14} color={isSelected ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
+                  <FolderIcon size={14} color={isSelected ? 'var(--accent-blue)' : 'var(--text-muted)'} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {v.vault_name}
                   </span>
@@ -501,7 +501,7 @@ export default function Sidebar({
                           fontSize: '0.78rem',
                           background: 'var(--bg-card)',
                           color: 'var(--text-primary)',
-                          border: '1px solid var(--accent-cyan)',
+                          border: '1px solid var(--accent-blue)',
                           borderRadius: '4px',
                           padding: '2px 6px',
                           outline: 'none',
@@ -557,8 +557,8 @@ export default function Sidebar({
         {/* Shield Status Badge */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-secondary)', padding: '2px 4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <CheckShieldIcon size={14} color={shieldOn ? 'var(--defense-pass)' : 'var(--defense-block)'} />
-            <span>3-Layer Shield: <strong style={{ color: shieldOn ? 'var(--defense-pass)' : 'var(--defense-block)' }}>{shieldOn ? 'Active' : 'Bypassed'}</strong></span>
+            <CheckShieldIcon size={14} color={shieldOn ? 'var(--accent-pink)' : 'var(--defense-block)'} />
+            <span>3-Layer Shield: <strong style={{ color: shieldOn ? 'var(--accent-pink)' : 'var(--defense-block)' }}>{shieldOn ? 'Active' : 'Bypassed'}</strong></span>
           </div>
         </div>
 

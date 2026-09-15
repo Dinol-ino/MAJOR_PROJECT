@@ -5,41 +5,54 @@
    ========================================================================== */
 
 :root {
-  /* Color Palette — Slate / Ink Dark Mode Base */
-  --bg-app: #0f1115;
-  --bg-surface: #161a21;
-  --bg-raised: #1d222b;
-  --bg-card: #161a21;
-  --bg-card-hover: #1d222b;
-  --bg-sidebar: #12151b;
-  --bg-input: #13161c;
-  --bg-modal: #161a21;
+  /* Color Palette — Solid Pitch/Obsidian Black Base */
+  --bg-app: #060709;
+  --bg-surface: #0c0d12;
+  --bg-raised: #12141a;
+  --bg-card: #101218;
+  --bg-card-hover: #161822;
+  --bg-sidebar: #060709;
+  --bg-input: #0a0b0f;
+  --bg-modal: #101218;
 
-  /* Borders & Dividers */
-  --border-subtle: #262c37;
-  --border-medium: #323a48;
-  --border-active: #4a5568;
+  /* Borders & Dividers — Crisp Solid Lines */
+  --border-subtle: #1c1f28;
+  --border-medium: #272c3a;
+  --border-active: #0084ff;
+  --border-pink: #ff007f;
 
-  /* Typography Colors */
-  --text-primary: #e8eaed;
-  --text-secondary: #9aa3b2;
-  --text-muted: #64748b;
-  --text-dim: #4b5563;
+  /* Typography Colors — High-Contrast Pure White & Cool Silver */
+  --text-primary: #ffffff;
+  --text-secondary: #a3aab8;
+  --text-muted: #6e7587;
+  --text-dim: #494e5d;
 
-  /* Restrained Accents */
-  --accent: #4f8cff;              /* Clean Muted Blue — links, primary actions */
-  --accent-hover: #3d79eb;
-  --accent-cyan: #00d2b4;         /* Teal/Cyan — primary badge */
-  --accent-blue: #4f8cff;
-  --accent-amber: #d29922;        /* Cloud mode, warnings, medium grounding */
-  --status-green: #3fb950;        /* Indexed, ready, shield active */
-  --status-red: #f85149;          /* Failed, circuit open, errors */
-  --defense-pass: #3fb950;
-  --defense-review: #d29922;
-  --defense-block: #f85149;
+  /* Solid Professional Duotone: Electric Blue & Vivid Magenta Pink */
+  --accent: #0084ff;              /* Solid Electric Blue — Primary Actions, Links, Controls */
+  --accent-hover: #0073e6;
+  --accent-blue: #0084ff;
+  --accent-blue-subtle: rgba(0, 132, 255, 0.12);
+  --accent-blue-border: rgba(0, 132, 255, 0.35);
 
-  /* Logo-only subtle accent */
-  --accent-gradient: linear-gradient(135deg, #00d2b4 0%, #4f8cff 100%);
+  --accent-pink: #ff007f;         /* Solid Vivid Magenta Pink — Security Shield, Key Highlights, Emblem */
+  --accent-pink-hover: #e60072;
+  --accent-pink-subtle: rgba(255, 0, 127, 0.12);
+  --accent-pink-border: rgba(255, 0, 127, 0.35);
+
+  --accent-cyan: #0084ff;         /* Replaced AI-teal with solid Electric Blue */
+  --accent-indigo: #0084ff;
+  --accent-amber: #ffaa00;        /* Warning / Review */
+
+  --status-green: #00e599;        /* Solid Mint for healthy system signals */
+  --status-red: #ff2a55;          /* Circuit open / Security errors */
+  --defense-pass: #0084ff;        /* Electric Blue for verified citations */
+  --defense-review: #ffaa00;
+  --defense-block: #ff007f;       /* Magenta Pink for security blocks */
+
+  /* Distinctive Solid Duotone Logo / Hero Accent */
+  --accent-gradient: linear-gradient(135deg, #ff007f 0%, #0084ff 100%);
+  --accent-pink-gradient: linear-gradient(135deg, #ff007f 0%, #ff3399 100%);
+  --accent-blue-gradient: linear-gradient(135deg, #0084ff 0%, #00b4d8 100%);
 
   /* Typography */
   --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -55,18 +68,18 @@
   --space-6: 24px;
   --space-8: 32px;
 
-  /* Radii */
+  /* Radii — Clean, professional geometry */
   --radius-sm: 6px;
   --radius-md: 10px;
-  --radius-lg: 16px;
+  --radius-lg: 14px;
 
-  /* Shadows — Subdued, no neon glow */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.25);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+  /* Shadows — Minimal, crisp depth (No murky neon AI glow) */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.65);
 
   /* Layout */
-  --max-content-width: 760px;     /* Optimized for legal reading readability */
+  --max-content-width: 780px;
 }
 
 /* ==========================================================================

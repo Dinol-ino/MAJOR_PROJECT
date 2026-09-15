@@ -23,6 +23,7 @@ from app.runtime.confidence_scorer import ConfidenceScorer
 from app.runtime.response_formatter import ResponseFormatter
 
 from app.memory.durable_memory import DurableMemoryManager
+from app.memory.request_memory import RequestMemory
 from app.services.ingest import ingest_service
 from app.db.engine import get_sync_session
 from app.db.models import Conversation, Message
@@ -143,6 +144,11 @@ def create_semantic_memory(user_id: str = "default_user", category: str = "prefe
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
     start_time = time.time()
+    req_memory = RequestMemory(
+        session_id=request.session_id,
+        raw_query=request.message,
+        model_name=request.model or settings.DEFAULT_MODEL
+    )
     
     # Write-through persistence: record user turn
     durable_memory.create_conversation_if_not_exists(
@@ -195,6 +201,13 @@ async def chat_endpoint(request: ChatRequest):
                 h_rep = hallucination_detector.detect(orch_res.answer, source_chunks)
                 conf_score = confidence_scorer.score(orch_res.answer, source_chunks, h_rep)
                 halluc_flags = h_rep.signals
+
+            req_memory.record_defense_event(
+                layer="orchestrator",
+                passed=not bool(orch_res.blocked_by),
+                details={"failure_kind": orch_res.failure_kind, "correlation_id": orch_res.correlation_id or orch_res.request_id}
+            )
+            req_memory.mark_completed()
 
             return ChatResponse(
                 answer=orch_res.answer,

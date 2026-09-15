@@ -47,8 +47,16 @@ def cpu_name() -> str:
     return f"{platform.machine()} Processor"
 
 
-def _gpu_sample() -> Dict[str, Any]:
-    """Fast non-blocking GPU sample using NVML or torch. Returns CPU mode if not available."""
+_cached_gpu_info: Optional[Dict[str, Any]] = None
+_cached_gpu_time: float = 0.0
+
+def _get_static_gpu_info() -> Dict[str, Any]:
+    global _cached_gpu_info, _cached_gpu_time
+    now = time.time()
+    if _cached_gpu_info is not None and (now - _cached_gpu_time) < 60.0:
+        return _cached_gpu_info
+
+    # 1. NVML
     if NVML_AVAILABLE:
         try:
             device_count = pynvml.nvmlDeviceGetCount()
@@ -57,52 +65,100 @@ def _gpu_sample() -> Dict[str, Any]:
                 name_bytes = pynvml.nvmlDeviceGetName(handle)
                 name = name_bytes.decode("utf-8") if isinstance(name_bytes, bytes) else str(name_bytes)
                 mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                util = pynvml.nvmlDeviceGetUtilizationRates(handle)
                 total_mb = int(mem.total // (1024**2))
-                used_mb = int(mem.used // (1024**2))
-                total_gb = round(total_mb / 1024, 1)
-                used_gb = round(used_mb / 1024, 1)
-                return {
+                _cached_gpu_info = {
                     "detected": True,
                     "name": name,
                     "vram_total_mb": total_mb,
-                    "vram_used_mb": used_mb,
-                    "vram_total_gb": total_gb,
-                    "vram_used_gb": used_gb,
-                    "util_percent": int(util.gpu),
+                    "vram_total_gb": round(total_mb / 1024, 1),
                     "cuda": True,
-                    "mode": "cuda"
+                    "mode": "cuda",
+                    "handle": handle
                 }
+                _cached_gpu_time = now
+                return _cached_gpu_info
         except Exception:
             pass
 
-    # Secondary fast check via torch if available
+    # 2. Torch CUDA
     try:
         import torch
         if torch.cuda.is_available():
-            device_idx = 0
-            name = torch.cuda.get_device_name(device_idx)
-            total_bytes = torch.cuda.get_device_properties(device_idx).total_memory
-            total_mb = int(total_bytes // (1024**2))
-            total_gb = round(total_mb / 1024, 1)
-            used_bytes = torch.cuda.memory_allocated(device_idx)
-            used_mb = int(used_bytes // (1024**2))
-            used_gb = round(used_mb / 1024, 1)
-            return {
+            name = torch.cuda.get_device_name(0)
+            vram_bytes = torch.cuda.get_device_properties(0).total_memory
+            total_mb = int(vram_bytes // (1024**2))
+            _cached_gpu_info = {
                 "detected": True,
                 "name": name,
                 "vram_total_mb": total_mb,
-                "vram_used_mb": used_mb,
-                "vram_total_gb": total_gb,
-                "vram_used_gb": used_gb,
-                "util_percent": 0,
+                "vram_total_gb": round(total_mb / 1024, 1),
                 "cuda": True,
                 "mode": "cuda"
             }
+            _cached_gpu_time = now
+            return _cached_gpu_info
     except Exception:
         pass
 
-    return {
+    # 3. nvidia-smi probe (PATH or standard directories)
+    nvsmi_candidates = ["nvidia-smi"]
+    if sys.platform == "win32":
+        nvsmi_candidates.extend([
+            r"C:\Windows\System32\nvidia-smi.exe",
+            r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+        ])
+    for cmd in nvsmi_candidates:
+        try:
+            import subprocess
+            res = subprocess.run(
+                [cmd, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                parts = res.stdout.strip().split("\n")[0].split(",")
+                if len(parts) >= 2:
+                    name = parts[0].strip()
+                    total_mb = int(float(parts[1].strip()))
+                    _cached_gpu_info = {
+                        "detected": True,
+                        "name": name,
+                        "vram_total_mb": total_mb,
+                        "vram_total_gb": round(total_mb / 1024, 1),
+                        "cuda": True,
+                        "mode": "cuda"
+                    }
+                    _cached_gpu_time = now
+                    return _cached_gpu_info
+        except Exception:
+            continue
+
+    # 4. Windows WMI fallback
+    if sys.platform == "win32":
+        try:
+            import subprocess, json
+            wmi_cmd = 'Get-CimInstance Win32_VideoController | Where-Object { $_.Name -like "*NVIDIA*" -or $_.Name -like "*Radeon*" } | Select-Object -First 1 Name, AdapterRAM | ConvertTo-Json'
+            res = subprocess.run(["powershell", "-NoProfile", "-Command", wmi_cmd], capture_output=True, text=True, timeout=3)
+            if res.returncode == 0 and res.stdout.strip():
+                data = json.loads(res.stdout.strip())
+                name = data.get("Name")
+                raw_ram = data.get("AdapterRAM", 0)
+                total_mb = int(raw_ram // (1024**2)) if raw_ram else 4096
+                _cached_gpu_info = {
+                    "detected": True,
+                    "name": name,
+                    "vram_total_mb": total_mb,
+                    "vram_total_gb": round(total_mb / 1024, 1),
+                    "cuda": "nvidia" in (name or "").lower(),
+                    "mode": "cuda" if "nvidia" in (name or "").lower() else "directx"
+                }
+                _cached_gpu_time = now
+                return _cached_gpu_info
+        except Exception:
+            pass
+
+    _cached_gpu_info = {
         "detected": False,
         "name": "No Dedicated GPU (CPU Only)",
         "vram_total_mb": 0,
@@ -113,6 +169,33 @@ def _gpu_sample() -> Dict[str, Any]:
         "cuda": False,
         "mode": "cpu"
     }
+    _cached_gpu_time = now
+    return _cached_gpu_info
+
+
+def _gpu_sample() -> Dict[str, Any]:
+    """Fast non-blocking GPU sample with multi-tier hardware probe."""
+    info = dict(_get_static_gpu_info())
+    if not info.get("detected"):
+        return info
+
+    handle = info.get("handle")
+    if handle and NVML_AVAILABLE:
+        try:
+            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+            used_mb = int(mem.used // (1024**2))
+            info["vram_used_mb"] = used_mb
+            info["vram_used_gb"] = round(used_mb / 1024, 1)
+            info["util_percent"] = int(util.gpu)
+            return info
+        except Exception:
+            pass
+
+    info["vram_used_mb"] = info.get("vram_used_mb", 0)
+    info["vram_used_gb"] = info.get("vram_used_gb", 0.0)
+    info["util_percent"] = info.get("util_percent", 0)
+    return info
 
 
 def compute_hardware_tier(gpu_data: Dict[str, Any], ram_data: Dict[str, Any]) -> Dict[str, Any]:

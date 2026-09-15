@@ -1,0 +1,76 @@
+name: DFrag Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend deps
+        working-directory: backend
+        run: pip install -r requirements.txt
+      - name: Run backend tests
+        working-directory: backend
+        run: pytest tests/ -v --tb=short
+
+  build-backend:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/dfrag-backend:latest -f backend/Dockerfile backend/
+      - name: Push backend image
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/dfrag-backend:latest
+
+  build-frontend:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Build frontend image
+        run: docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/dfrag-frontend:latest -f frontend/Dockerfile frontend/
+      - name: Push frontend image
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/dfrag-frontend:latest
+
+  deploy:
+    needs: [build-backend, build-frontend]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Pull latest images
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/dfrag-backend:latest
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/dfrag-frontend:latest
+      - name: Tag for local compose
+        run: |
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/dfrag-backend:latest dfrag-backend:latest
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/dfrag-frontend:latest dfrag-frontend:latest
+      - name: Restart stack
+        run: |
+          docker compose up -d --no-build --remove-orphans
+          docker compose ps

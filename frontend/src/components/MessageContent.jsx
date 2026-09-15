@@ -58,22 +58,22 @@ export default function MessageContent({
   let groundingBadge = null;
 
   if (score !== null && !isNaN(score)) {
-    let color = 'var(--defense-pass, #10b981)';
-    let bg = 'rgba(16, 185, 129, 0.12)';
-    let border = 'rgba(16, 185, 129, 0.3)';
+    let color = 'var(--accent-blue)';
+    let bg = 'rgba(0, 132, 255, 0.12)';
+    let border = 'rgba(0, 132, 255, 0.35)';
     let label = `Grounded: ${Math.round(score)}%`;
     let title = 'Grounded in authoritative statutory provisions';
 
     if (score < 60) {
-      color = '#ef4444';
-      bg = 'rgba(239, 68, 68, 0.12)';
-      border = 'rgba(239, 68, 68, 0.3)';
+      color = 'var(--accent-pink)';
+      bg = 'rgba(255, 0, 127, 0.12)';
+      border = 'rgba(255, 0, 127, 0.35)';
       label = `Weakly Grounded: ${Math.round(score)}%`;
       title = 'Multiple claims lack source evidence';
     } else if (score < 80) {
-      color = '#f59e0b';
-      bg = 'rgba(245, 158, 11, 0.12)';
-      border = 'rgba(245, 158, 11, 0.3)';
+      color = 'var(--accent-amber)';
+      bg = 'rgba(255, 170, 0, 0.12)';
+      border = 'rgba(255, 170, 0, 0.35)';
       label = `Grounded: ${Math.round(score)}%`;
       title = 'Low grounding — verify sources';
     }
@@ -113,7 +113,7 @@ export default function MessageContent({
           style={{
             display: 'inline-block',
             cursor: matchedCit ? 'pointer' : 'default',
-            color: 'var(--accent-cyan, #06b6d4)',
+            color: 'var(--accent-blue)',
             fontWeight: 700,
             padding: '0 2px',
             fontSize: '0.75rem',

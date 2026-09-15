@@ -215,13 +215,33 @@ async def upload_vault_document(
         session.add(doc_mem)
         session.flush()
 
-    # Dispatch ingestion in background task worker
+    # Dispatch ingestion in background task worker with safe failure handling
+    def _safe_background_ingest(d_id: str, v_id: str, f_name: str, file_bytes: bytes):
+        try:
+            ingest_service.ingest_document(
+                doc_id=d_id,
+                vault_id=v_id,
+                filename=f_name,
+                content=file_bytes,
+            )
+        except Exception as exc:
+            logger.error(f"Background ingestion unhandled failure for doc {d_id}: {exc}", exc_info=True)
+            try:
+                ingest_service.update_doc_state(
+                    doc_id=d_id,
+                    status="failed",
+                    progress=0,
+                    error=f"Ingestion failed: {str(exc)}"
+                )
+            except Exception as db_err:
+                logger.error(f"Failed to record ingest failure in DB for doc {d_id}: {db_err}")
+
     background_tasks.add_task(
-        ingest_service.ingest_document,
-        doc_id=doc_id,
-        vault_id=vault_id,
-        filename=file.filename,
-        content=content,
+        _safe_background_ingest,
+        d_id=doc_id,
+        v_id=vault_id,
+        f_name=file.filename,
+        file_bytes=content,
     )
 
     audit_logger.log(action=f"vault_doc_queued:{doc_id}", layer="ingest")

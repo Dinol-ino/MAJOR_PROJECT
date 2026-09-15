@@ -262,7 +262,7 @@ export default function StatuteLibraryView({ onAskCopilot, onViewInGraph }) {
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
-                      <span style={{ fontSize: '0.68rem', color: 'var(--accent-cyan)', background: 'rgba(0, 210, 180, 0.1)', padding: '1px 6px', borderRadius: '4px', textTransform: 'capitalize' }}>
+                      <span style={{ fontSize: '0.68rem', color: 'var(--accent-blue)', background: 'rgba(0, 132, 255, 0.12)', border: '1px solid rgba(0, 132, 255, 0.25)', padding: '1px 6px', borderRadius: '4px', textTransform: 'capitalize' }}>
                         {statute.domain}
                       </span>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>

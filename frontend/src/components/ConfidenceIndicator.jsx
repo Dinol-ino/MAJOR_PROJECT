@@ -19,9 +19,9 @@ export default function ConfidenceIndicator({ confidenceScore, sourcesCount = 0,
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
         style={{
-          background: isHighConfidence ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-          border: `1px solid ${isHighConfidence ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
-          color: isHighConfidence ? 'var(--defense-pass)' : 'var(--defense-warn, #f59e0b)',
+          background: isHighConfidence ? 'rgba(0, 132, 255, 0.12)' : 'rgba(255, 170, 0, 0.12)',
+          border: `1px solid ${isHighConfidence ? 'rgba(0, 132, 255, 0.35)' : 'rgba(255, 170, 0, 0.35)'}`,
+          color: isHighConfidence ? 'var(--accent-blue)' : 'var(--accent-amber)',
           fontSize: '0.68rem',
           fontWeight: 700,
           padding: '1px 8px',
@@ -33,7 +33,7 @@ export default function ConfidenceIndicator({ confidenceScore, sourcesCount = 0,
         }}
         title="Click to view grounding verification breakdown"
       >
-        <CheckShieldIcon size={12} color={isHighConfidence ? 'var(--defense-pass)' : '#f59e0b'} />
+        <CheckShieldIcon size={12} color={isHighConfidence ? 'var(--accent-blue)' : 'var(--accent-amber)'} />
         <span>Grounded ({scorePct}%)</span>
       </button>
 
@@ -44,8 +44,8 @@ export default function ConfidenceIndicator({ confidenceScore, sourcesCount = 0,
             bottom: '125%',
             left: '50%',
             transform: 'translateX(-50%)',
-            background: 'var(--bg-modal, #1e222d)',
-            border: '1px solid var(--border-medium, #333d4d)',
+            background: 'var(--bg-modal, #101218)',
+            border: '1px solid var(--border-medium, #272c3a)',
             borderRadius: '8px',
             padding: '10px 14px',
             width: '220px',
@@ -59,7 +59,7 @@ export default function ConfidenceIndicator({ confidenceScore, sourcesCount = 0,
             pointerEvents: 'none',
           }}
         >
-          <div style={{ fontWeight: 700, color: 'var(--accent-cyan)', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '4px' }}>
+          <div style={{ fontWeight: 700, color: 'var(--accent-blue)', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '4px' }}>
             Grounding Transparency
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -72,7 +72,7 @@ export default function ConfidenceIndicator({ confidenceScore, sourcesCount = 0,
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ color: 'var(--text-secondary)' }}>L3 Guardrail:</span>
-            <span style={{ color: 'var(--defense-pass)', fontWeight: 700 }}>Passed</span>
+            <span style={{ color: 'var(--accent-blue)', fontWeight: 700 }}>Passed</span>
           </div>
         </div>
       )}

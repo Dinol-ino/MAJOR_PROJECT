@@ -215,3 +215,7 @@ coverage.xml
 .local-data/
 .runtime/
 .runtime-data/
+# Project documentation - keep local
+docs/
+
+faults/

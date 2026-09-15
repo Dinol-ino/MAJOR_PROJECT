@@ -22,7 +22,17 @@ class L3EmbeddingCache:
 
     @property
     def enabled(self) -> bool:
-        return settings.performance.cache_enabled
+        if not settings.performance.cache_enabled:
+            return False
+        # For <= 8GB RAM systems, disable L3 dense vector cache to prevent RAM exhaustion (Fault 01)
+        try:
+            import psutil
+            total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+            if total_ram_gb <= 8.5:
+                return False
+        except Exception:
+            pass
+        return True
 
     def get_embedding(self, text: str, model_name: str) -> Optional[List[float]]:
         if not self.enabled or not text:

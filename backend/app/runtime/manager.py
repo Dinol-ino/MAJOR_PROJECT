@@ -12,6 +12,8 @@ from app.runtime.circuit_breaker import circuit_breaker, FailureKind
 from app.runtime.cloud_runtime import CloudRuntime
 from app.config.api_vault import api_vault
 from app.memory.audit_memory import audit_memory
+from app.system.model_download_manager import ModelDownloadManager
+from app.system.model_registry import ModelRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,7 @@ class ModelLifecycleManager:
     - Circuit breaker failure classification and recovery.
     - Seamless Cloud Fallback promotion (Grok / Z.ai).
     - Startup floor model warmup (Tier 0).
+    - Auto-pull missing models on startup.
     - Status transparency.
     """
 
@@ -34,6 +37,7 @@ class ModelLifecycleManager:
         self._active_model = settings.DEFAULT_MODEL
         self._last_used_at = time.time()
         self._is_warmed_up = False
+        self._download_manager = ModelDownloadManager(ModelRegistry())
 
     @property
     def runtime(self):
@@ -48,6 +52,43 @@ class ModelLifecycleManager:
             text_length=text_length
         )
         return route_decision
+
+    async def _is_model_installed(self, model_id: str) -> bool:
+        """Check if a model is already installed in Ollama."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{settings.OLLAMA_URL.rstrip('/')}/api/tags")
+                if resp.status_code == 200:
+                    tags = [m.get("name", "").lower() for m in resp.json().get("models", [])]
+                    return model_id.lower() in tags or model_id.split(":")[0].lower() in tags
+        except Exception as e:
+            logger.debug(f"Model install check failed for {model_id}: {e}")
+        return False
+
+    async def _pull_and_wait(self, model_id: str) -> bool:
+        """Trigger model pull and wait for completion."""
+        try:
+            task_id = await self._download_manager.pull(model_id)
+            logger.info(f"Auto-pull started for {model_id}, task_id={task_id}")
+            # Poll progress until done
+            for _ in range(600):  # Max 60 seconds polling
+                progress = self._download_manager.get_progress(task_id)
+                if progress is None:
+                    await asyncio.sleep(0.5)
+                    continue
+                status = progress.get("status")
+                if status == "done":
+                    logger.info(f"Auto-pull completed for {model_id}")
+                    return True
+                if status == "error":
+                    logger.error(f"Auto-pull failed for {model_id}: {progress.get('error')}")
+                    return False
+                await asyncio.sleep(0.5)
+            logger.warning(f"Auto-pull timed out for {model_id}")
+            return False
+        except Exception as e:
+            logger.error(f"Auto-pull exception for {model_id}: {e}")
+            return False
 
     async def generate_with_oom_recovery(
         self,
@@ -163,6 +204,26 @@ class ModelLifecycleManager:
                 except Exception as final_exc:
                     logger.error(f"Secondary local fallback model failed: {final_exc}")
 
+            # 5. Deterministic Grounded Statutory Synthesis fallback (Fault 01 §Cloud Fallback)
+            # Avoids crashing single-user offline workflows when no cloud API keys are configured.
+            logger.warning(
+                f"All active model runtimes exhausted for '{target_model}'. "
+                f"Synthesizing authoritative grounded response from local statutory corpus."
+            )
+            try:
+                from app.routes.chat import _synthesize_grounded_legal_answer
+                grounded_answer = _synthesize_grounded_legal_answer(prompt, [])
+                return {
+                    "answer": grounded_answer,
+                    "model_used": "statutory_grounded_synthesizer",
+                    "tier": "deterministic_grounded",
+                    "fallback_occurred": True,
+                    "notice": f"Local model execution was unavailable. Authoritative statutory provisions were synthesized directly from the verified legal corpus.",
+                    "status": "grounded_synthesis_fallback"
+                }
+            except Exception as synth_err:
+                logger.error(f"Grounded statutory synthesis fallback failed: {synth_err}")
+
             raise RuntimeError(
                 f"Model execution failed for '{target_model}' ({kind.value}). "
                 f"Configure Grok API or Z.ai in settings for automatic cloud fallback."
@@ -217,14 +278,25 @@ class ModelLifecycleManager:
     async def warmup_floor_model(self) -> bool:
         """
         Warms up the Tier 0 floor model on startup to avoid cold start latency.
+        Auto-pulls the model if it is not installed in Ollama.
         Does not warm up higher tiers to conserve hardware resources.
         """
         if not settings.model.model_warmup_on_startup:
             logger.info("Model warmup on startup is disabled in configuration.")
             return False
 
+        floor_model = settings.model.default_model
+
+        # Check if model is installed; if not, auto-pull
+        installed = await self._is_model_installed(floor_model)
+        if not installed:
+            logger.info(f"Floor model {floor_model} not installed. Auto-pulling...")
+            pulled = await self._pull_and_wait(floor_model)
+            if not pulled:
+                logger.warning(f"Auto-pull failed for {floor_model}. Will retry on first request.")
+                return False
+
         try:
-            floor_model = settings.model.default_model
             logger.info(f"Warming up Tier 0 floor model ({floor_model})...")
             await self._runtime.generate("Warmup test.", model=floor_model)
             self._is_warmed_up = True

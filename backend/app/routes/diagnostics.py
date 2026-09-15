@@ -9,10 +9,12 @@ from app.network.mode_enforcer import mode_enforcer
 from app.orchestrator.circuit_breaker import circuit_breaker
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
+router = APIRouter(tags=["diagnostics", "cache"])
+from .cache import router as cache_router
+router.include_router(cache_router)
 
 
-@router.get("")
+@router.get("/diagnostics")
 async def get_diagnostics_overview():
     """
     Local-only diagnostics dashboard endpoint (Phase 11).
@@ -51,7 +53,7 @@ async def get_diagnostics_overview():
     }
 
 
-@router.get("/trace/{request_id}")
+@router.get("/diagnostics/trace/{request_id}")
 async def get_request_trace(request_id: str):
     """
     Returns the correlated per-request trace across all state machine stages,
@@ -63,7 +65,7 @@ async def get_request_trace(request_id: str):
     return trace
 
 
-@router.get("/metrics/recent")
+@router.get("/diagnostics/metrics/recent")
 async def get_recent_metrics(limit: int = 50):
     """
     Returns recent sanitized request telemetry records.
@@ -74,7 +76,7 @@ async def get_recent_metrics(limit: int = 50):
     }
 
 
-@router.get("/metrics/summary")
+@router.get("/diagnostics/metrics/summary")
 async def get_metrics_summary():
     """
     Returns aggregate performance summary (p50, p95, p99, TTFT, retrieval avg).

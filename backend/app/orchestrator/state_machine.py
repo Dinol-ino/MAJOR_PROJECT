@@ -56,15 +56,15 @@ class AgentState(str, Enum):
 
 # Explicit, code-controlled finite state transition graph
 ALLOWED_TRANSITIONS: Dict[AgentState, Set[AgentState]] = {
-    AgentState.INITIALIZED: {AgentState.CLASSIFY, AgentState.FAILED, AgentState.CANCELLED},
+    AgentState.INITIALIZED: {AgentState.CLASSIFY, AgentState.SECURITY_CHECK, AgentState.RETRIEVE, AgentState.FAILED, AgentState.CANCELLED},
     AgentState.CLASSIFY: {AgentState.SECURITY_CHECK, AgentState.COMPLETED, AgentState.FAILED, AgentState.CANCELLED},
-    AgentState.SECURITY_CHECK: {AgentState.PLAN, AgentState.FAILED, AgentState.CANCELLED},
+    AgentState.SECURITY_CHECK: {AgentState.PLAN, AgentState.RETRIEVE, AgentState.FAILED, AgentState.CANCELLED},
     AgentState.PLAN: {AgentState.RETRIEVE, AgentState.FAILED, AgentState.CANCELLED},
     AgentState.RETRIEVE: {AgentState.TOOL_CALL, AgentState.EVIDENCE_VALIDATION, AgentState.SYNTHESIS, AgentState.FAILED, AgentState.CANCELLED},
     AgentState.TOOL_CALL: {AgentState.EVIDENCE_VALIDATION, AgentState.RETRIEVE, AgentState.SYNTHESIS, AgentState.FAILED, AgentState.CANCELLED},
     AgentState.EVIDENCE_VALIDATION: {AgentState.TOOL_CALL, AgentState.SYNTHESIS, AgentState.INSUFFICIENT_EVIDENCE, AgentState.FAILED, AgentState.CANCELLED},
     AgentState.INSUFFICIENT_EVIDENCE: set(),
-    AgentState.SYNTHESIS: {AgentState.LEGAL_VERIFICATION, AgentState.FAILED, AgentState.CANCELLED},
+    AgentState.SYNTHESIS: {AgentState.LEGAL_VERIFICATION, AgentState.COMPLETED, AgentState.FAILED, AgentState.CANCELLED},
     AgentState.LEGAL_VERIFICATION: {AgentState.COMPLETED, AgentState.SYNTHESIS, AgentState.FAILED, AgentState.CANCELLED},
     AgentState.COMPLETED: set(),
     AgentState.FAILED: set(),
@@ -173,6 +173,36 @@ class ResearchStateMachine:
             return self._build_result(ctx, current_state, traces, budget, start_time)
 
         try:
+            # Fast-Path for Simple Statutory Lookups (Fault 01 §10-State FSM)
+            # Trivial queries like "Section 302 IPC" bypass planning, tools, and multi-pass verification.
+            if (reasoning_effort == "off" or not reasoning_effort) and self._is_simple_statutory_lookup(query):
+                current_state = self._transition(current_state, AgentState.SECURITY_CHECK, req_id)
+                sec_trace = await self._run_security_check(ctx, budget)
+                traces.append(sec_trace)
+                if not ctx.get("security_passed", False):
+                    current_state = self._transition(current_state, AgentState.FAILED, req_id)
+                    return self._build_result(ctx, current_state, traces, budget, start_time)
+
+                current_state = self._transition(current_state, AgentState.RETRIEVE, req_id)
+                retrieve_trace = await self._run_retrieve(ctx, budget)
+                traces.append(retrieve_trace)
+
+                current_state = self._transition(current_state, AgentState.EVIDENCE_VALIDATION, req_id)
+                val_trace = await self._run_evidence_validation(ctx, budget)
+                traces.append(val_trace)
+
+                if ctx.get("insufficient_evidence", False):
+                    current_state = self._transition(current_state, AgentState.INSUFFICIENT_EVIDENCE, req_id)
+                    ctx["clean_answer"] = self._format_insufficient_evidence_refusal(ctx)
+                    return self._build_result(ctx, current_state, traces, budget, start_time)
+
+                current_state = self._transition(current_state, AgentState.SYNTHESIS, req_id)
+                synth_trace = await self._run_synthesis(ctx, budget)
+                traces.append(synth_trace)
+
+                current_state = self._transition(current_state, AgentState.COMPLETED, req_id)
+                return self._build_result(ctx, current_state, traces, budget, start_time)
+
             # 1. State: INITIALIZED -> CLASSIFY
             current_state = self._transition(current_state, AgentState.CLASSIFY, req_id)
             step_trace = await self._run_classify(ctx, budget)
@@ -287,6 +317,18 @@ class ResearchStateMachine:
             raise ValueError(f"Illegal state transition attempted from '{current.value}' to '{target.value}' in request '{request_id}'")
         logger.debug(f"StateMachine [{request_id[:8]}]: {current.value} -> {target.value}")
         return target
+
+    def _is_simple_statutory_lookup(self, query: str) -> bool:
+        """
+        Fast-path heuristic for simple statutory lookups (Fault 01 §10-State FSM).
+        Matches queries targeting a specific section of a codified act without deep analytical complexity.
+        """
+        import re
+        q = query.strip().lower()
+        has_section = bool(re.search(r"\b(?:section|sec\.?|s\.)\s*\d+[a-z]?\b", q))
+        has_act = any(act in q for act in ["ipc", "crpc", "bns", "bnss", "bsa", "evidence act", "companies act", "constitution", "it act", "contract act", "act", "code"])
+        is_complex = any(k in q for k in ["compare", "synthesize", "deep research", "cross examine", "multihop", "draft legal notice"])
+        return has_section and has_act and not is_complex
 
     # --- Step Implementations ---
 

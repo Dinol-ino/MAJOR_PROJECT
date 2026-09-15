@@ -137,27 +137,27 @@ export default function UploadButton({ sessionId, onUploadSuccess, activeVaultId
         onClick={() => fileInputRef.current?.click()}
         style={{
           background: uploadStatus?.status === 'ready'
-            ? 'rgba(16, 185, 129, 0.12)'
+            ? 'rgba(0, 132, 255, 0.12)'
             : uploadStatus?.status === 'failed'
-            ? 'rgba(239, 68, 68, 0.12)'
+            ? 'rgba(255, 0, 127, 0.12)'
             : uploadStatus
-            ? 'rgba(0, 210, 180, 0.12)'
+            ? 'rgba(0, 132, 255, 0.12)'
             : 'rgba(255, 255, 255, 0.05)',
           border: uploadStatus?.status === 'ready'
-            ? '1px solid rgba(16, 185, 129, 0.3)'
+            ? '1px solid rgba(0, 132, 255, 0.4)'
             : uploadStatus?.status === 'failed'
-            ? '1px solid rgba(239, 68, 68, 0.3)'
+            ? '1px solid rgba(255, 0, 127, 0.4)'
             : uploadStatus
-            ? '1px solid rgba(0, 210, 180, 0.3)'
+            ? '1px solid rgba(0, 132, 255, 0.3)'
             : '1px solid var(--border-medium)',
           borderRadius: '20px',
           padding: '6px 14px',
           color: uploadStatus?.status === 'ready'
-            ? 'var(--defense-pass)'
+            ? 'var(--accent-blue)'
             : uploadStatus?.status === 'failed'
-            ? 'var(--defense-block)'
+            ? 'var(--accent-pink)'
             : uploadStatus
-            ? 'var(--accent-cyan)'
+            ? 'var(--accent-blue)'
             : 'var(--text-secondary)',
           fontSize: '0.8rem',
           fontWeight: 600,
@@ -171,17 +171,17 @@ export default function UploadButton({ sessionId, onUploadSuccess, activeVaultId
         {uploadStatus ? (
           uploadStatus.status === 'ready' ? (
             <>
-              <CheckIcon size={14} color="var(--defense-pass)" />
+              <CheckIcon size={14} color="var(--accent-blue)" />
               <span>{uploadStatus.filename}: Indexed ✓ {uploadStatus.pages ? `(${uploadStatus.pages}p)` : ''}</span>
             </>
           ) : uploadStatus.status === 'failed' ? (
             <>
-              <span style={{ color: 'var(--defense-block)' }}>✗</span>
+              <span style={{ color: 'var(--accent-pink)' }}>✗</span>
               <span>Failed ({uploadStatus.error ? uploadStatus.error.slice(0, 20) : 'Error'}) - Retry</span>
             </>
           ) : (
             <>
-              <UploadIcon size={14} color="var(--accent-cyan)" className="pulse-text" />
+              <UploadIcon size={14} color="var(--accent-blue)" className="pulse-text" />
               <span className="pulse-text">{uploadStatus.status.toUpperCase()} {uploadStatus.progress}%</span>
             </>
           )

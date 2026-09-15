@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import List, Dict, Any, Optional
+# pyrefly: ignore [missing-import]
 import chromadb
 
 from app.retrieval.client import get_shared_chroma_client

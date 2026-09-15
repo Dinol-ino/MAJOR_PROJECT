@@ -1,12 +1,20 @@
 import os
 from typing import List, Optional
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+# Load .env from backend directory or project root
+load_dotenv()
+_root_env = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
+if os.path.exists(_root_env):
+    load_dotenv(_root_env)
 
 
 class ModelConfig(BaseModel):
     ollama_url: str = Field(default_factory=lambda: os.getenv("OLLAMA_URL", "http://127.0.0.1:11434"))
     default_model: str = Field(default_factory=lambda: os.getenv("DEFAULT_MODEL", "gemma2:2b"))
     fallback_model: str = Field(default_factory=lambda: os.getenv("OLLAMA_FALLBACK_MODEL", "qwen2.5:3b"))
+    hf_token: str = Field(default_factory=lambda: os.getenv("HF_TOKEN", ""))
     connect_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_CONNECT_TIMEOUT_SECONDS", "30.0")))
     generation_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_GENERATION_TIMEOUT_SECONDS", "180.0")))
     runtime: str = Field(default_factory=lambda: os.getenv("MODEL_RUNTIME", "ollama"))  # ollama | llamacpp | transformers | mock
@@ -151,6 +159,10 @@ class Settings(BaseModel):
         return self.model.ollama_url
 
     @property
+    def HF_TOKEN(self) -> str:
+        return self.model.hf_token
+
+    @property
     def DEFAULT_MODEL(self) -> str:
         return self.model.default_model
 
@@ -260,7 +272,7 @@ class Settings(BaseModel):
 
     @property
     def SECRET_KEY(self) -> str:
-        return os.getenv("SECRET_KEY", "dfrag-vault-default-secret-key-32bytes-min!")
+        return os.getenv("SECRET_KEY", "")
 
 
 settings = Settings()
