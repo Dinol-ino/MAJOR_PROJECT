@@ -1,11 +1,85 @@
 const BASE_URL = '/api';
 
+const TOKEN_KEY = 'dfrag_auth_token';
+
+export function getAuthToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setAuthToken(token) {
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+}
+
+/**
+ * Central fetch wrapper: injects the Bearer session token and, on 401,
+ * broadcasts a 'dfrag:unauthorized' event so the app can show the login screen.
+ */
+export async function authFetch(url, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  const token = getAuthToken();
+  if (token && !url.includes('/auth/login') && !url.includes('/auth/register')) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const response = await fetch(url, { ...opts, headers });
+  if (response.status === 401 && !url.includes('/auth/')) {
+    window.dispatchEvent(new Event('dfrag:unauthorized'));
+  }
+  return response;
+}
+
 export const apiClient = {
+  /**
+   * POST /auth/login
+   */
+  async login(username, password) {
+    const response = await authFetch(`${BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Login failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * POST /auth/register
+   */
+  async register(username, email, password, fullName) {
+    const response = await authFetch(`${BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, email, password, full_name: fullName || undefined }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Registration failed with status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * GET /auth/me
+   */
+  async me() {
+    const response = await authFetch(`${BASE_URL}/auth/me`);
+    if (!response.ok) {
+      throw new Error(`Not authenticated (status ${response.status})`);
+    }
+    return response.json();
+  },
+
   /**
    * POST /chat
    */
   async chat(message, sessionId, shieldOn, model, vaultId = null, reasoningEffort = 'off') {
-    const response = await fetch(`${BASE_URL}/chat`, {
+    const response = await authFetch(`${BASE_URL}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -29,7 +103,7 @@ export const apiClient = {
    * GET /messages/{messageId}/grounding
    */
   async getMessageGrounding(messageId) {
-    const response = await fetch(`${BASE_URL}/messages/${messageId}/grounding`);
+    const response = await authFetch(`${BASE_URL}/messages/${messageId}/grounding`);
     if (!response.ok) {
       throw new Error(`Failed to fetch grounding breakdown for message: ${messageId}`);
     }
@@ -40,7 +114,7 @@ export const apiClient = {
    * GET /chat/sessions
    */
   async getSessions() {
-    const response = await fetch(`${BASE_URL}/chat/sessions`, {
+    const response = await authFetch(`${BASE_URL}/chat/sessions`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -53,7 +127,7 @@ export const apiClient = {
    * DELETE /chat/sessions/{session_id}
    */
   async deleteSession(sessionId) {
-    const response = await fetch(`${BASE_URL}/chat/sessions/${sessionId}`, {
+    const response = await authFetch(`${BASE_URL}/chat/sessions/${sessionId}`, {
       method: 'DELETE',
     });
     if (!response.ok) {
@@ -70,7 +144,7 @@ export const apiClient = {
     formData.append('file', file);
     formData.append('session_id', sessionId);
 
-    const response = await fetch(`${BASE_URL}/upload`, {
+    const response = await authFetch(`${BASE_URL}/upload`, {
       method: 'POST',
       body: formData,
     });
@@ -90,7 +164,7 @@ export const apiClient = {
     }
     formData.append('session_id', sessionId);
 
-    const response = await fetch(`${BASE_URL}/upload/batch`, {
+    const response = await authFetch(`${BASE_URL}/upload/batch`, {
       method: 'POST',
       body: formData,
     });
@@ -108,7 +182,7 @@ export const apiClient = {
     if (ramGb !== null && ramGb !== undefined) bodyPayload.ram_gb = parseInt(ramGb);
     if (vramGb !== null && vramGb !== undefined) bodyPayload.vram_gb = parseInt(vramGb);
 
-    const response = await fetch(`${BASE_URL}/recommend`, {
+    const response = await authFetch(`${BASE_URL}/recommend`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(bodyPayload),
@@ -123,7 +197,7 @@ export const apiClient = {
    * GET /health
    */
   async getHealth() {
-    const response = await fetch(`${BASE_URL}/health`, {
+    const response = await authFetch(`${BASE_URL}/health`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -136,7 +210,7 @@ export const apiClient = {
    * POST /models/pull
    */
   async pullModel(modelId) {
-    const response = await fetch(`${BASE_URL}/models/pull`, {
+    const response = await authFetch(`${BASE_URL}/models/pull`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model_id: modelId }),
@@ -151,7 +225,7 @@ export const apiClient = {
    * GET /models/pull/progress/{task_id}
    */
   async getPullProgress(taskId) {
-    const response = await fetch(`${BASE_URL}/models/pull/progress/${taskId}`, {
+    const response = await authFetch(`${BASE_URL}/models/pull/progress/${taskId}`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -164,7 +238,7 @@ export const apiClient = {
    * GET /audit/{session_id}
    */
   async getAuditLogs(sessionId) {
-    const response = await fetch(`${BASE_URL}/audit/${sessionId}`, {
+    const response = await authFetch(`${BASE_URL}/audit/${sessionId}`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -177,7 +251,7 @@ export const apiClient = {
    * GET /mcp/status
    */
   async getMcpStatus() {
-    const response = await fetch(`${BASE_URL}/mcp/status`, {
+    const response = await authFetch(`${BASE_URL}/mcp/status`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -195,7 +269,7 @@ export const apiClient = {
     if (q) params.append('q', q);
     params.append('page', page);
     params.append('limit', limit);
-    const response = await fetch(`${BASE_URL}/statutes/catalog?${params.toString()}`, {
+    const response = await authFetch(`${BASE_URL}/statutes/catalog?${params.toString()}`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -208,7 +282,7 @@ export const apiClient = {
    * GET /statutes/{slug}
    */
   async getStatute(slug) {
-    const response = await fetch(`${BASE_URL}/statutes/${encodeURIComponent(slug)}`, {
+    const response = await authFetch(`${BASE_URL}/statutes/${encodeURIComponent(slug)}`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -221,7 +295,7 @@ export const apiClient = {
    * GET /statutes/{slug}/sections/{number}
    */
   async getStatuteSection(slug, number) {
-    const response = await fetch(`${BASE_URL}/statutes/${encodeURIComponent(slug)}/sections/${encodeURIComponent(number)}`, {
+    const response = await authFetch(`${BASE_URL}/statutes/${encodeURIComponent(slug)}/sections/${encodeURIComponent(number)}`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -234,7 +308,7 @@ export const apiClient = {
    * POST /statutes/sync
    */
   async syncStatutes() {
-    const response = await fetch(`${BASE_URL}/statutes/sync`, {
+    const response = await authFetch(`${BASE_URL}/statutes/sync`, {
       method: 'POST',
     });
     if (!response.ok) {
@@ -247,7 +321,7 @@ export const apiClient = {
    * GET /statutes/{act_id}/tree
    */
   async getStatuteTree(actId) {
-    const response = await fetch(`${BASE_URL}/statutes/${actId}/tree`, {
+    const response = await authFetch(`${BASE_URL}/statutes/${actId}/tree`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -265,7 +339,7 @@ export const apiClient = {
     if (conversationId) params.append('conversation_id', conversationId);
     if (vaultId) params.append('vault_id', vaultId);
     if (q) params.append('q', q);
-    const response = await fetch(`${BASE_URL}/statutes/graph?${params.toString()}`, {
+    const response = await authFetch(`${BASE_URL}/statutes/graph?${params.toString()}`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -278,7 +352,7 @@ export const apiClient = {
    * POST /statutes/graph/expand
    */
   async expandGraphNode(nodeId, depth = 1) {
-    const response = await fetch(`${BASE_URL}/statutes/graph/expand`, {
+    const response = await authFetch(`${BASE_URL}/statutes/graph/expand`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ node_id: nodeId, depth }),
@@ -293,7 +367,7 @@ export const apiClient = {
    * POST /mcp/servers/{server_name}/reconnect
    */
   async reconnectMcpServer(serverName) {
-    const response = await fetch(`${BASE_URL}/mcp/servers/${encodeURIComponent(serverName)}/reconnect`, {
+    const response = await authFetch(`${BASE_URL}/mcp/servers/${encodeURIComponent(serverName)}/reconnect`, {
       method: 'POST',
     });
     if (!response.ok) {
@@ -306,7 +380,7 @@ export const apiClient = {
    * POST /mcp/discover
    */
   async discoverMcpTools() {
-    const response = await fetch(`${BASE_URL}/mcp/discover`, {
+    const response = await authFetch(`${BASE_URL}/mcp/discover`, {
       method: 'POST',
     });
     if (!response.ok) {
@@ -320,7 +394,7 @@ export const apiClient = {
    * GET /vaults
    */
   async getVaults(userId = 'default_user') {
-    const response = await fetch(`${BASE_URL}/vaults?user_id=${encodeURIComponent(userId)}`, {
+    const response = await authFetch(`${BASE_URL}/vaults?user_id=${encodeURIComponent(userId)}`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -333,7 +407,7 @@ export const apiClient = {
    * POST /vaults
    */
   async createVault(vaultName, description, userId = 'default_user') {
-    const response = await fetch(`${BASE_URL}/vaults`, {
+    const response = await authFetch(`${BASE_URL}/vaults`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -353,7 +427,7 @@ export const apiClient = {
    * GET /vaults/{vault_id}
    */
   async getVault(vaultId) {
-    const response = await fetch(`${BASE_URL}/vaults/${vaultId}`, {
+    const response = await authFetch(`${BASE_URL}/vaults/${vaultId}`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -366,7 +440,7 @@ export const apiClient = {
    * PATCH /vaults/{vault_id}
    */
   async updateVault(vaultId, data) {
-    const response = await fetch(`${BASE_URL}/vaults/${vaultId}`, {
+    const response = await authFetch(`${BASE_URL}/vaults/${vaultId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -381,7 +455,7 @@ export const apiClient = {
    * DELETE /vaults/{vault_id}
    */
   async deleteVault(vaultId) {
-    const response = await fetch(`${BASE_URL}/vaults/${vaultId}`, {
+    const response = await authFetch(`${BASE_URL}/vaults/${vaultId}`, {
       method: 'DELETE',
     });
     if (!response.ok) {
@@ -396,7 +470,7 @@ export const apiClient = {
   async uploadVaultDocument(vaultId, file) {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await fetch(`${BASE_URL}/vaults/${vaultId}/documents`, {
+    const response = await authFetch(`${BASE_URL}/vaults/${vaultId}/documents`, {
       method: 'POST',
       body: formData,
     });
@@ -411,7 +485,7 @@ export const apiClient = {
    * GET /vaults/{vault_id}/documents
    */
   async getVaultDocuments(vaultId) {
-    const response = await fetch(`${BASE_URL}/vaults/${vaultId}/documents`, {
+    const response = await authFetch(`${BASE_URL}/vaults/${vaultId}/documents`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -424,7 +498,7 @@ export const apiClient = {
    * GET /vaults/{vault_id}/documents/{doc_id}/status
    */
   async getVaultDocumentStatus(vaultId, docId) {
-    const response = await fetch(`${BASE_URL}/vaults/${vaultId}/documents/${docId}/status`, {
+    const response = await authFetch(`${BASE_URL}/vaults/${vaultId}/documents/${docId}/status`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -437,7 +511,7 @@ export const apiClient = {
    * DELETE /vaults/{vault_id}/documents/{doc_id}
    */
   async deleteVaultDocument(vaultId, docId) {
-    const response = await fetch(`${BASE_URL}/vaults/${vaultId}/documents/${docId}`, {
+    const response = await authFetch(`${BASE_URL}/vaults/${vaultId}/documents/${docId}`, {
       method: 'DELETE',
     });
     if (!response.ok) {
@@ -465,7 +539,7 @@ export const apiClient = {
    * POST /conversations
    */
   async createConversation(vaultId = null, title = 'New Legal Chat') {
-    const response = await fetch(`${BASE_URL}/conversations`, {
+    const response = await authFetch(`${BASE_URL}/conversations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -483,7 +557,7 @@ export const apiClient = {
    * GET /conversations/{id}
    */
   async getConversation(conversationId) {
-    const response = await fetch(`${BASE_URL}/conversations/${conversationId}`, {
+    const response = await authFetch(`${BASE_URL}/conversations/${conversationId}`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -496,7 +570,7 @@ export const apiClient = {
    * PATCH /conversations/{id} (Rename Chat)
    */
   async renameConversation(conversationId, title) {
-    const response = await fetch(`${BASE_URL}/conversations/${conversationId}`, {
+    const response = await authFetch(`${BASE_URL}/conversations/${conversationId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
@@ -511,7 +585,7 @@ export const apiClient = {
    * DELETE /conversations/{id}
    */
   async deleteConversation(conversationId) {
-    const response = await fetch(`${BASE_URL}/conversations/${conversationId}`, {
+    const response = await authFetch(`${BASE_URL}/conversations/${conversationId}`, {
       method: 'DELETE',
     });
     if (!response.ok) {
@@ -524,7 +598,7 @@ export const apiClient = {
    * GET /settings/fallback
    */
   async getFallbackSettings() {
-    const response = await fetch(`${BASE_URL}/settings/fallback`, {
+    const response = await authFetch(`${BASE_URL}/settings/fallback`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -537,7 +611,7 @@ export const apiClient = {
    * POST /settings/fallback
    */
   async updateFallbackSettings(payload) {
-    const response = await fetch(`${BASE_URL}/settings/fallback`, {
+    const response = await authFetch(`${BASE_URL}/settings/fallback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -552,7 +626,7 @@ export const apiClient = {
    * POST /settings/fallback/test
    */
   async testFallbackKey(provider, key = null) {
-    const response = await fetch(`${BASE_URL}/settings/fallback/test`, {
+    const response = await authFetch(`${BASE_URL}/settings/fallback/test`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider, key }),
@@ -564,7 +638,7 @@ export const apiClient = {
    * GET /telemetry/sample
    */
   async getTelemetrySample() {
-    const response = await fetch(`${BASE_URL}/telemetry/sample`, {
+    const response = await authFetch(`${BASE_URL}/telemetry/sample`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -577,7 +651,7 @@ export const apiClient = {
    * GET /models/recommended
    */
   async getRecommendedModels() {
-    const response = await fetch(`${BASE_URL}/models/recommended`, {
+    const response = await authFetch(`${BASE_URL}/models/recommended`, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -651,7 +725,7 @@ export const apiClient = {
    * POST /api/models/provision - Triggers idempotent one-click model provisioning
    */
   async startProvisioning(modelId = null, auto = true) {
-    const response = await fetch(`${BASE_URL}/api/models/provision`, {
+    const response = await authFetch(`${BASE_URL}/api/models/provision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model_id: modelId, auto }),
@@ -667,7 +741,7 @@ export const apiClient = {
    * GET /api/models/provision/active - Returns currently running or recent provisioning job
    */
   async getActiveProvisioningJob() {
-    const response = await fetch(`${BASE_URL}/api/models/provision/active`);
+    const response = await authFetch(`${BASE_URL}/api/models/provision/active`);
     if (!response.ok) return null;
     return response.json();
   },
@@ -676,7 +750,7 @@ export const apiClient = {
    * GET /api/models/provision/{job_id} - Polls job metrics
    */
   async getProvisioningStatus(jobId) {
-    const response = await fetch(`${BASE_URL}/api/models/provision/${jobId}`);
+    const response = await authFetch(`${BASE_URL}/api/models/provision/${jobId}`);
     if (!response.ok) {
       throw new Error(`Failed to fetch job status: ${response.status}`);
     }
@@ -745,7 +819,7 @@ export const apiClient = {
    * POST /api/models/provision/{job_id}/cancel
    */
   async cancelProvisioningJob(jobId) {
-    const response = await fetch(`${BASE_URL}/api/models/provision/${jobId}/cancel`, {
+    const response = await authFetch(`${BASE_URL}/api/models/provision/${jobId}/cancel`, {
       method: 'POST',
     });
     if (!response.ok) {
@@ -758,7 +832,7 @@ export const apiClient = {
    * GET /api/models/hf/search
    */
   async searchHfModels(query = 'legal gguf') {
-    const response = await fetch(`${BASE_URL}/api/models/hf/search?query=${encodeURIComponent(query)}`);
+    const response = await authFetch(`${BASE_URL}/api/models/hf/search?query=${encodeURIComponent(query)}`);
     if (!response.ok) return [];
     return response.json();
   },

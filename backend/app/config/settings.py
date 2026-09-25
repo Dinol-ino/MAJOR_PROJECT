@@ -15,17 +15,18 @@ class ModelConfig(BaseModel):
     default_model: str = Field(default_factory=lambda: os.getenv("DEFAULT_MODEL", "gemma2:2b"))
     fallback_model: str = Field(default_factory=lambda: os.getenv("OLLAMA_FALLBACK_MODEL", "qwen2.5:3b"))
     hf_token: str = Field(default_factory=lambda: os.getenv("HF_TOKEN", ""))
-    connect_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_CONNECT_TIMEOUT_SECONDS", "30.0")))
-    generation_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_GENERATION_TIMEOUT_SECONDS", "180.0")))
+    connect_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_CONNECT_TIMEOUT_SECONDS", "2.0")))
+    generation_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_GENERATION_TIMEOUT_SECONDS", "30.0")))
     runtime: str = Field(default_factory=lambda: os.getenv("MODEL_RUNTIME", "ollama"))  # ollama | llamacpp | transformers | mock
     llamacpp_gpu: bool = Field(default_factory=lambda: os.getenv("LLAMACPP_GPU", "false").lower() == "true")
     llamacpp_model_path: str = Field(default_factory=lambda: os.getenv("LLAMACPP_MODEL_PATH", ""))
     num_gpu_layers: int = Field(default_factory=lambda: int(os.getenv("OLLAMA_NUM_GPU_LAYERS", "0")))  # -1=auto, 0=CPU-only
-    context_tokens: int = Field(default_factory=lambda: int(os.getenv("GENERATOR_CONTEXT_TOKENS", "4096")))
-    max_output_tokens: int = Field(default_factory=lambda: int(os.getenv("GENERATOR_MAX_OUTPUT_TOKENS", "1024")))
+    context_tokens: int = Field(default_factory=lambda: int(os.getenv("GENERATOR_CONTEXT_TOKENS", "8192")))
+    max_output_tokens: int = Field(default_factory=lambda: int(os.getenv("GENERATOR_MAX_OUTPUT_TOKENS", "2048")))
     models_dir: str = Field(default_factory=lambda: os.getenv("MODELS_DIR", "./models"))
     routing_enabled: bool = Field(default_factory=lambda: os.getenv("MODEL_ROUTING_ENABLED", "true").lower() == "true")
     model_warmup_on_startup: bool = Field(default_factory=lambda: os.getenv("MODEL_WARMUP_ON_STARTUP", "true").lower() == "true")
+    auto_pull_on_startup: bool = Field(default_factory=lambda: os.getenv("AUTO_PULL_ON_STARTUP", "true").lower() == "true")
     model_idle_unload_seconds: int = Field(default_factory=lambda: int(os.getenv("MODEL_IDLE_UNLOAD_SECONDS", "600")))
 
 
@@ -36,6 +37,7 @@ class SecurityConfig(BaseModel):
     pii_entities: List[str] = ["PHONE_NUMBER", "EMAIL_ADDRESS", "AADHAAR_NUMBER", "PAN_NUMBER", "CREDIT_CARD", "IP_ADDRESS"]
     max_query_chars: int = 2000
     allowed_origins: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "tauri://localhost"]
+    allow_credentials: bool = Field(default_factory=lambda: os.getenv("ALLOW_CREDENTIALS", "true").lower() == "true")
 
 
 

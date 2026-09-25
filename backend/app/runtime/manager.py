@@ -43,6 +43,10 @@ class ModelLifecycleManager:
     def runtime(self):
         return self._runtime
 
+    @property
+    def is_warmed_up(self) -> bool:
+        return self._is_warmed_up
+
     def get_routed_model_for_task(self, task_type: str, text_length: int = 0) -> Dict[str, Any]:
         """Routes task to appropriate model using config-driven ModelRouter."""
         current_tier = get_current_tier()
@@ -139,6 +143,26 @@ class ModelLifecycleManager:
             }
         except Exception as exc:
             error_msg = str(exc)
+            # Self-heal: if the model is simply missing, auto-pull it and retry once.
+            if settings.model.auto_pull_on_startup and self._is_model_missing_error(error_msg):
+                logger.info(f"Model '{target_model}' missing on first use. Auto-pulling (self-heal)...")
+                pulled = await self._pull_and_wait(target_model)
+                if pulled:
+                    try:
+                        answer = await self._runtime.generate(prompt, model=target_model)
+                        circuit_breaker.record_success(target_model)
+                        return {
+                            "answer": answer,
+                            "model_used": target_model,
+                            "tier": route_info.get("tier", "unknown"),
+                            "fallback_occurred": True,
+                            "notice": f"Model ({target_model}) was auto-downloaded and executed locally. No terminal action required.",
+                            "status": "self_heal_success"
+                        }
+                    except Exception as retry_exc:
+                        logger.warning(f"Self-heal retry failed for {target_model}: {retry_exc}")
+                        error_msg = str(retry_exc)
+                        exc = retry_exc
             kind = fallback_router.classify_failure(exc)
             new_state = circuit_breaker.record_failure(target_model, kind=kind, reason=error_msg)
             logger.warning(
@@ -256,6 +280,19 @@ class ModelLifecycleManager:
                 yield token
             circuit_breaker.record_success(target_model)
         except Exception as exc:
+            # Self-heal: auto-pull missing model mid-stream and retry once.
+            if settings.model.auto_pull_on_startup and self._is_model_missing_error(str(exc)):
+                logger.info(f"Model '{target_model}' missing during stream. Auto-pulling (self-heal)...")
+                pulled = await self._pull_and_wait(target_model)
+                if pulled:
+                    try:
+                        async for token in self._runtime.generate_stream(prompt, model=target_model):
+                            yield token
+                        circuit_breaker.record_success(target_model)
+                        return
+                    except Exception as retry_exc:
+                        logger.warning(f"Self-heal stream retry failed for {target_model}: {retry_exc}")
+                        exc = retry_exc
             kind = fallback_router.classify_failure(exc)
             circuit_breaker.record_failure(target_model, kind=kind, reason=str(exc))
             logger.warning(f"Streaming error on '{target_model}' ({kind.value}): {exc}")
@@ -275,14 +312,20 @@ class ModelLifecycleManager:
             else:
                 raise
 
+    @staticmethod
+    def _is_model_missing_error(error_msg: str) -> bool:
+        """Detects Ollama 'model not found' style errors eligible for auto-pull self-heal."""
+        msg = error_msg.lower()
+        return "not found" in msg or "no such model" in msg or "file does not exist" in msg
+
     async def warmup_floor_model(self) -> bool:
         """
         Warms up the Tier 0 floor model on startup to avoid cold start latency.
         Auto-pulls the model if it is not installed in Ollama.
         Does not warm up higher tiers to conserve hardware resources.
         """
-        if not settings.model.model_warmup_on_startup:
-            logger.info("Model warmup on startup is disabled in configuration.")
+        if not (settings.model.model_warmup_on_startup or settings.model.auto_pull_on_startup):
+            logger.info("Model warmup/auto-pull on startup is disabled in configuration.")
             return False
 
         floor_model = settings.model.default_model
@@ -290,11 +333,18 @@ class ModelLifecycleManager:
         # Check if model is installed; if not, auto-pull
         installed = await self._is_model_installed(floor_model)
         if not installed:
+            if not settings.model.auto_pull_on_startup:
+                logger.info(f"Floor model {floor_model} not installed and auto-pull is disabled.")
+                return False
             logger.info(f"Floor model {floor_model} not installed. Auto-pulling...")
             pulled = await self._pull_and_wait(floor_model)
             if not pulled:
                 logger.warning(f"Auto-pull failed for {floor_model}. Will retry on first request.")
                 return False
+
+        if not settings.model.model_warmup_on_startup:
+            logger.info("Model warmup disabled; auto-pull completed.")
+            return True
 
         try:
             logger.info(f"Warming up Tier 0 floor model ({floor_model})...")

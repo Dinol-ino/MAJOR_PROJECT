@@ -334,7 +334,7 @@ class ModelProvisioningService:
     async def _pull_model(self, job: ProvisioningJob, entry: ModelEntry) -> bool:
         tag = entry.ollama_tag or entry.model_id
         try:
-            async with httpx.AsyncClient(timeout=3600.0, connect=10.0) as client:
+            async with httpx.AsyncClient(timeout=300.0, connect=2.0) as client:
                 async with client.stream("POST", f"{settings.OLLAMA_URL}/api/pull",
                                          json={"name": tag, "stream": True}) as resp:
                     if resp.status_code != 200:

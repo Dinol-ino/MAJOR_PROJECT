@@ -43,7 +43,7 @@ class ModelDownloadManager:
         payload = {"name": tag, "stream": True}
         
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(25.0, connect=2.0)) as client:
                 async with client.stream("POST", url, json=payload) as response:
                     if response.status_code != 200:
                         self._tasks[task_id]["status"] = "error"
