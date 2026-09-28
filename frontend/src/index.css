@@ -1,11 +1,10 @@
 /* ==========================================================================
    Self-Hosted Typography via @fontsource (Zero External Network Requests)
    ========================================================================== */
-@import "@fontsource/playfair-display/400.css";
-@import "@fontsource/playfair-display/400-italic.css";
-@import "@fontsource/playfair-display/600.css";
-@import "@fontsource/playfair-display/700.css";
-@import "@fontsource/playfair-display/900.css";
+@import "@fontsource/source-serif-4/400.css";
+@import "@fontsource/source-serif-4/400-italic.css";
+@import "@fontsource/source-serif-4/600.css";
+@import "@fontsource/source-serif-4/700.css";
 @import "@fontsource/inter/400.css";
 @import "@fontsource/inter/500.css";
 @import "@fontsource/inter/600.css";
@@ -36,7 +35,11 @@ html, body, #root {
 /* ==========================================================================
    Paper Grain Texture & Architectural 4-Grid Lines
    ========================================================================== */
-.editorial-paper-noise {
+/* Decorative overlays are retired (kept as no-ops so older markup renders nothing). */
+.editorial-paper-noise,
+.editorial-grid-overlay { display: none !important; }
+
+.editorial-paper-noise-legacy {
   position: fixed;
   inset: 0;
   pointer-events: none;
@@ -45,7 +48,7 @@ html, body, #root {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
 }
 
-.editorial-grid-overlay {
+.editorial-grid-overlay-legacy {
   position: fixed;
   inset: 0;
   pointer-events: none;
@@ -158,7 +161,7 @@ html, body, #root {
 .luxury-btn-primary:hover {
   color: #1A1A1A !important;
   border-color: var(--accent-gold);
-  box-shadow: 0 8px 24px rgba(212, 175, 55, 0.35);
+  box-shadow: none;
 }
 
 .luxury-btn-primary > * {

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import CommandInput from './CommandInput';
 import SourcesPanel from './SourcesPanel';
-import ConfidenceIndicator from './ConfidenceIndicator';
 import MessageContent from './MessageContent';
 import StagedLoadingIndicator from './StagedLoadingIndicator';
 import {
@@ -24,8 +23,11 @@ export default function ChatWindow({
   isGenerating,
   generationStage = 'retrieving',
   onClearThread,
-  activeVaultId
+  activeVaultId,
+  activeModel = null,
+  onNavigate = null,
 }) {
+  const lastMetrics = [...messages].reverse().find((m) => m.role === 'assistant' && m.metrics)?.metrics || null;
   const [speakingIdx, setSpeakingIdx] = useState(null);
   const [copiedIdx, setCopiedIdx] = useState(null);
 
@@ -80,73 +82,12 @@ export default function ChatWindow({
             }}
             className="view-container"
           >
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '4px 14px',
-                  borderRadius: '999px',
-                  background: 'rgba(230, 57, 70, 0.12)',
-                  border: '1px solid rgba(230, 57, 70, 0.35)',
-                  fontSize: '0.72rem',
-                  fontFamily: 'var(--font-mono)',
-                  letterSpacing: '0.08em',
-                  color: 'var(--accent-pink)',
-                  textTransform: 'uppercase',
-                  boxShadow: '0 0 14px rgba(230, 57, 70, 0.2)'
-                }}
-              >
-                <span>✦</span>
-                <span>FIAT JUSTITIA RUAT CAELUM</span>
-                <span>✦</span>
-              </div>
-
-              <div
-                style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 'var(--radius-md)',
-                  background: 'linear-gradient(135deg, rgba(230, 57, 70, 0.25) 0%, rgba(26, 8, 14, 0.8) 100%)',
-                  border: '1px solid rgba(230, 57, 70, 0.5)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 0 24px rgba(230, 57, 70, 0.35)',
-                  marginTop: '4px'
-                }}
-              >
-                <span style={{ fontSize: '24px' }}>⚖️</span>
-              </div>
-            </div>
-
-            <h1 style={{
-              fontSize: '2.4rem',
-              fontWeight: 900,
-              color: 'var(--text-primary)',
-              marginBottom: '10px',
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              textShadow: '0 2px 20px rgba(230, 57, 70, 0.3)'
-            }}>
-              JUSTICE <span style={{ color: 'var(--accent)' }}>COPILOT</span>
+            <h1 style={{ fontFamily: 'var(--font-serif)', fontWeight: 600, fontSize: '2.1rem', color: 'var(--text-primary)', marginBottom: '12px', lineHeight: 1.2 }}>
+              Legal research, grounded in your sources
             </h1>
-
-            <p style={{
-              fontSize: '0.85rem',
-              fontStyle: 'italic',
-              color: 'var(--text-secondary)',
-              maxWidth: '580px',
-              marginBottom: '24px',
-              lineHeight: '1.6',
-              borderLeft: '2px solid rgba(230, 57, 70, 0.4)',
-              borderRight: '2px solid rgba(230, 57, 70, 0.4)',
-              padding: '4px 16px',
-              background: 'rgba(230, 57, 70, 0.04)',
-              borderRadius: '4px'
-            }}>
-              "Yield not to the influence of power, but let each act rest on the unwavering balance of truth and ethical reckoning."
+            <p style={{ fontFamily: 'var(--font-serif)', fontSize: '1.05rem', color: 'var(--text-secondary)', maxWidth: '560px', marginBottom: '28px', lineHeight: 1.6 }}>
+              Ask about indexed statutes or your uploaded documents. Answers cite the passages they rely on;
+              when the evidence is insufficient, you will be told rather than given a guess.
             </p>
 
             <CommandInput
@@ -183,13 +124,11 @@ export default function ChatWindow({
                       </>
                     ) : (
                       <>
-                        <BotIcon size={15} color="var(--accent-blue)" />
-                        <span style={{ fontWeight: 700, color: 'var(--accent-blue)' }}>NYAYA-CORE v4</span>
-                        <ConfidenceIndicator
-                          confidenceScore={msg.confidence_score}
-                          sourcesCount={msg.sources ? msg.sources.length : 0}
-                          isGrounded={!msg.blocked_by}
-                        />
+                        <BotIcon size={15} color="var(--accent)" />
+                        <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
+                          {msg.model_used ? msg.model_used : (msg.failure_kind ? 'No model output' : 'Assistant')}
+                        </span>
+
                       </>
                     )}
                   </div>
@@ -210,7 +149,7 @@ export default function ChatWindow({
                         type="button"
                         onClick={() => handleSpeak(msg.content, idx)}
                         style={{
-                          background: speakingIdx === idx ? 'rgba(79, 140, 255, 0.15)' : 'none',
+                          background: speakingIdx === idx ? 'var(--accent-blue-subtle)' : 'none',
                           border: 'none',
                           color: speakingIdx === idx ? 'var(--accent)' : 'var(--text-muted)',
                           cursor: 'pointer',
@@ -240,7 +179,7 @@ export default function ChatWindow({
                     content={msg.content}
                     reasoningTrace={msg.reasoning_trace}
                     citations={msg.citations_parsed || msg.citations || []}
-                    groundingScore={msg.grounding_score ?? msg.confidence_score}
+                    groundingScore={msg.grounding_score}
                     modelUsed={msg.model_used}
                     runtimeUsed={msg.runtime_used}
                     onRegenerate={
@@ -274,8 +213,13 @@ export default function ChatWindow({
                   <div style={{ marginTop: '12px', padding: '10px 14px', background: 'rgba(217, 119, 6, 0.1)', border: '1px solid rgba(217, 119, 6, 0.4)', borderRadius: 'var(--radius-sm)', color: '#d97706', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <AlertTriangleIcon size={16} color="#d97706" />
-                      <span><strong>Model Engine Notice</strong>: {msg.block_reason || 'Local model engine or Ollama daemon is unreachable. Verify service status or auto-pull recommended model.'}</span>
+                      <span>The local model did not answer. {activeModel ? `Active model: ${activeModel}.` : 'No local model is active.'}</span>
                     </div>
+                    {onNavigate && (
+                      <button type="button" onClick={() => onNavigate('hardware')} style={{ alignSelf: 'flex-start', marginLeft: '24px', background: 'transparent', border: '1px solid currentColor', color: 'inherit', borderRadius: 'var(--radius-sm)', padding: '3px 10px', cursor: 'pointer', fontSize: '0.76rem' }}>
+                        Open Hardware &amp; Models
+                      </button>
+                    )}
                     {msg.correlation_id && (
                       <span style={{ fontSize: '0.68rem', opacity: 0.85, fontFamily: 'var(--font-mono, monospace)', marginLeft: '24px' }}>
                         Trace ID: {msg.correlation_id}
@@ -289,7 +233,7 @@ export default function ChatWindow({
                   <div style={{ marginTop: '10px', padding: '8px 12px', background: 'rgba(56, 189, 248, 0.07)', border: '1px solid rgba(56, 189, 248, 0.25)', borderRadius: 'var(--radius-sm)', color: 'var(--accent-cyan)', fontSize: '0.78rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <InfoIcon size={15} color="var(--accent-cyan)" />
-                      <span>Statutory Corpus Refusal: Insufficient grounded evidence in local legal database.</span>
+                      <span>Insufficient verified evidence was retrieved to answer this reliably.</span>
                     </div>
                     {msg.correlation_id && (
                       <span style={{ fontSize: '0.68rem', opacity: 0.75, fontFamily: 'var(--font-mono, monospace)' }}>
@@ -321,6 +265,7 @@ export default function ChatWindow({
                 onUploadSuccess={onUploadSuccess}
                 isGenerating={isGenerating}
                 activeVaultId={activeVaultId}
+                lastMetrics={lastMetrics}
               />
             </div>
           </div>

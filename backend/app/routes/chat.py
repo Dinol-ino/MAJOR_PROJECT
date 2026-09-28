@@ -183,13 +183,13 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
                 reasoning_trace=orch_res.reasoning_trace,
                 user_id=current_uid
             )
+            # No synthetic "confidence" number is reported: the previous formula mostly measured
+            # whether any evidence existed. Hallucination signals (concrete checks) are still returned.
             conf_score = None
             halluc_flags = []
-            if not orch_res.blocked_by and orch_res.answer:
+            if not orch_res.blocked_by and orch_res.answer and orch_res.failure_kind != "model_unavailable":
                 source_chunks = [s for s in orch_res.sources if isinstance(s, dict)]
-                h_rep = hallucination_detector.detect(orch_res.answer, source_chunks)
-                conf_score = confidence_scorer.score(orch_res.answer, source_chunks, h_rep)
-                halluc_flags = h_rep.signals
+                halluc_flags = hallucination_detector.detect(orch_res.answer, source_chunks).signals
 
             req_memory.record_defense_event(
                 layer="orchestrator",
@@ -296,7 +296,9 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
         runtime_used = "local"
 
         routing = fallback_router.route_request(target_model)
-        if routing.use_cloud and routing.provider:
+        # Vault (client matter) evidence never leaves the machine, whatever the cloud settings.
+        cloud_allowed = settings.cloud_fallback.enabled and not active_vault_id
+        if cloud_allowed and routing.use_cloud and routing.provider:
             logger.info(f"Proactive cloud promotion: {routing.reason}")
             cloud_rt = CloudRuntime(provider=routing.provider)
             raw_answer = await cloud_rt.generate(prompt, model=routing.model)
@@ -310,7 +312,7 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
                 kind = fallback_router.classify_failure(exc)
                 circuit_breaker.record_failure(target_model, kind=kind, reason=str(exc))
                 cloud_prov = fallback_router.resolve_cloud_provider()
-                if settings.cloud_fallback.enabled and settings.cloud_fallback.auto_fallback and cloud_prov:
+                if cloud_allowed and settings.cloud_fallback.auto_fallback and cloud_prov:
                     cloud_model = (
                         settings.cloud_fallback.grok_model
                         if cloud_prov == "grok"
@@ -447,7 +449,7 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
             block_reason=None,
             failure_kind=None,
             correlation_id=request.session_id,
-            confidence_score=confidence,
+            confidence_score=None,
             grounding_score=grounding_score,
             hallucination_flags=hallucination_report.signals,
             reasoning_trace=reasoning_trace,
@@ -493,7 +495,7 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
             sources=sources,
             blocked_by=None,
             block_reason=None,
-            confidence_score=confidence,
+            confidence_score=None,
             hallucination_flags=hallucination_report.signals,
             correlation_id=request.session_id,
             model_used=request.model or settings.DEFAULT_MODEL,

@@ -1,74 +1,68 @@
 /* ==========================================================================
-   DFrag Design System — Tokens (Luxury / Editorial Theme)
-   Emulating high-end editorial magazines & luxury design with architectural
-   precision (0px radius), rich typography (Playfair Display + Inter),
-   sophisticated monochrome palette (#1A1A1A Charcoal / #F9F8F6 Alabaster),
-   metallic gold (#D4AF37) accents, and cinematic motion.
+   DFrag Design Tokens — restrained legal-research workspace
+   - Editorial serif for reading & headings (Source Serif 4, OFL, self-hosted)
+   - Neutral charcoal / slate (dark) and cream paper (light)
+   - One restrained accent (aged brass), used for focus and primary actions only
+   - No gradients, no glow, thin rules, generous spacing
+   Variable names are kept stable so existing components keep working.
    ========================================================================== */
 
 :root {
-  /* Dark Luxury (Primary Default) — Rich Charcoal Palette */
-  --bg-app: #141414;
-  --bg-surface: #1A1A1A;
-  --bg-raised: #222222;
-  --bg-card: #1c1c1c;
-  --bg-card-hover: #262626;
-  --bg-sidebar: #111111;
-  --bg-input: #171717;
-  --bg-modal: #1e1e1e;
+  --bg-app: #121314;
+  --bg-surface: #17191b;
+  --bg-raised: #1d2023;
+  --bg-card: #17191b;
+  --bg-card-hover: #1c1f22;
+  --bg-sidebar: #0f1011;
+  --bg-input: #141618;
+  --bg-modal: #191b1e;
 
-  /* Borders & Architectural 1px Dividers */
-  --border-subtle: rgba(249, 248, 246, 0.10);
-  --border-medium: rgba(249, 248, 246, 0.18);
-  --border-active: #D4AF37;
-  --border-bold: rgba(212, 175, 55, 0.45);
-  --border-pink: #D4AF37;
+  --border-subtle: rgba(236, 232, 225, 0.08);
+  --border-medium: rgba(236, 232, 225, 0.16);
+  --border-active: #a88b5a;
+  --border-bold: rgba(168, 139, 90, 0.5);
+  --border-pink: var(--border-active);
 
-  /* Typography Colors — Warm Alabaster & Taupe */
-  --text-primary: #F9F8F6;       /* Warm Alabaster */
-  --text-secondary: #EBE5DE;     /* Pale Taupe */
-  --text-muted: #8E8A85;         /* Warm Grey */
-  --text-dim: #5C5854;
+  --text-primary: #ece8e1;
+  --text-secondary: #c9c3b9;
+  --text-muted: #8f8a82;
+  --text-dim: #5f5b56;
 
-  /* Metallic Gold Accent (#D4AF37) — Used sparingly for luxury details */
-  --accent: #D4AF37;
-  --accent-gold: #D4AF37;
-  --accent-hover: #E5C158;
-  
-  /* Compatibility Aliases to ensure 0 code breaks in existing components */
-  --accent-blue: #D4AF37;
-  --accent-blue-subtle: rgba(212, 175, 55, 0.12);
-  --accent-blue-border: rgba(212, 175, 55, 0.35);
+  --accent: #a88b5a;
+  --accent-gold: #a88b5a;
+  --accent-hover: #bfa071;
 
-  --accent-pink: #E5C158;
-  --accent-pink-hover: #F2D27A;
-  --accent-pink-subtle: rgba(229, 193, 88, 0.12);
-  --accent-pink-border: rgba(229, 193, 88, 0.35);
+  /* Compatibility aliases: every legacy "blue/pink/cyan" accent maps to the one accent. */
+  --accent-blue: var(--accent);
+  --accent-blue-subtle: rgba(168, 139, 90, 0.10);
+  --accent-blue-border: rgba(168, 139, 90, 0.32);
+  --accent-pink: var(--accent);
+  --accent-pink-hover: var(--accent-hover);
+  --accent-pink-subtle: rgba(168, 139, 90, 0.10);
+  --accent-pink-border: rgba(168, 139, 90, 0.32);
+  --accent-cyan: var(--accent);
+  --accent-indigo: var(--accent);
+  --accent-amber: #b98a3e;
 
-  --accent-cyan: #D4AF37;
-  --accent-indigo: #B8860B;
-  --accent-amber: #D4AF37;
+  --status-green: #6fae8a;
+  --status-red: #d0746b;
+  --status-amber: #c9a15a;
+  --defense-pass: var(--status-green);
+  --defense-review: var(--status-amber);
+  --defense-block: var(--status-red);
 
-  /* Status Colors */
-  --status-green: #34d399;
-  --status-red: #f87171;
-  --defense-pass: #34d399;
-  --defense-review: #D4AF37;
-  --defense-block: #f87171;
+  /* Gradients retired: kept as solid values for backwards compatibility. */
+  --accent-gradient: var(--accent);
+  --accent-pink-gradient: var(--accent);
+  --accent-blue-gradient: var(--accent);
+  --gold-glow: none;
 
-  /* Editorial Gradients */
-  --accent-gradient: linear-gradient(135deg, #D4AF37 0%, #8C7322 100%);
-  --accent-pink-gradient: linear-gradient(135deg, #E5C158 0%, #A68326 100%);
-  --accent-blue-gradient: linear-gradient(135deg, #D4AF37 0%, #6E5714 100%);
-  --gold-glow: 0 0 20px rgba(212, 175, 55, 0.3);
-
-  /* Typography Hierarchy */
-  --font-serif: "Playfair Display", Georgia, "Times New Roman", serif;
-  --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  --font-serif: "Source Serif 4", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
   --font-title: var(--font-serif);
+  --font-reading: var(--font-serif);
 
-  /* Spacing Scale */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -78,87 +72,59 @@
   --space-8: 32px;
   --space-12: 48px;
 
-  /* Radius — Strictly 0px Architectural Rectangles (Spec Mandate) */
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-full: 0px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-full: 999px;
 
-  /* Shadows — Subtle, Layered, Soft Depth */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 1px rgba(212, 175, 55, 0.2);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(212, 175, 55, 0.15);
-  --shadow-image: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-sm: none;
+  --shadow-md: 0 1px 0 rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-image: none;
 
-  /* Layout */
-  --max-content-width: 860px;
+  --max-content-width: 780px;
 }
 
-/* ==========================================================================
-   Warm Alabaster Light Mode — Editorial Paper Aesthetic
-   ========================================================================== */
 body.light-theme,
 [data-theme="light"] {
-  --bg-app: #F9F8F6;              /* Warm Alabaster Paper */
-  --bg-surface: #FFFFFF;
-  --bg-raised: #EBE5DE;           /* Pale Taupe */
-  --bg-card: #FFFFFF;
-  --bg-card-hover: #F3EFEA;
-  --bg-sidebar: #F4EFEB;
-  --bg-input: #FFFFFF;
-  --bg-modal: #FFFFFF;
+  --bg-app: #f6f3ec;
+  --bg-surface: #fbf9f4;
+  --bg-raised: #efeae0;
+  --bg-card: #fbf9f4;
+  --bg-card-hover: #f3efe6;
+  --bg-sidebar: #efebe2;
+  --bg-input: #fffdf8;
+  --bg-modal: #fbf9f4;
 
-  --border-subtle: rgba(26, 26, 26, 0.10);
-  --border-medium: rgba(26, 26, 26, 0.20);
-  --border-active: #997A15;
-  --border-bold: rgba(153, 122, 21, 0.45);
-  --border-pink: #997A15;
+  --border-subtle: rgba(33, 30, 26, 0.10);
+  --border-medium: rgba(33, 30, 26, 0.20);
+  --border-active: #7a5c2e;
+  --border-bold: rgba(122, 92, 46, 0.5);
 
-  --text-primary: #1A1A1A;        /* Rich Charcoal */
-  --text-secondary: #6C6863;      /* Warm Grey */
-  --text-muted: #8E8A85;
-  --text-dim: #B3ADA6;
+  --text-primary: #211e1a;
+  --text-secondary: #4a453e;
+  --text-muted: #6f6a62;
+  --text-dim: #a19b91;
 
-  --accent: #997A15;              /* Deeper Gold for AAA contrast on paper */
-  --accent-gold: #997A15;
-  --accent-hover: #7D630E;
+  --accent: #7a5c2e;
+  --accent-gold: #7a5c2e;
+  --accent-hover: #5f4721;
+  --accent-blue-subtle: rgba(122, 92, 46, 0.08);
+  --accent-blue-border: rgba(122, 92, 46, 0.28);
+  --accent-pink-subtle: rgba(122, 92, 46, 0.08);
+  --accent-pink-border: rgba(122, 92, 46, 0.28);
+  --accent-amber: #8a6320;
 
-  --accent-blue: #997A15;
-  --accent-blue-subtle: rgba(153, 122, 21, 0.10);
-  --accent-blue-border: rgba(153, 122, 21, 0.30);
+  --status-green: #2f6b48;
+  --status-red: #9c3b32;
+  --status-amber: #8a6320;
 
-  --accent-pink: #B8860B;
-  --accent-pink-hover: #997A15;
-  --accent-pink-subtle: rgba(184, 134, 11, 0.10);
-  --accent-pink-border: rgba(184, 134, 11, 0.30);
-
-  --accent-cyan: #997A15;
-  --accent-indigo: #7D630E;
-  --accent-amber: #997A15;
-
-  --status-green: #15803d;
-  --status-red: #b91c1c;
-  --defense-pass: #15803d;
-  --defense-review: #997A15;
-  --defense-block: #b91c1c;
-
-  --accent-gradient: linear-gradient(135deg, #B8860B 0%, #6E5714 100%);
-  --accent-pink-gradient: linear-gradient(135deg, #997A15 0%, #544109 100%);
-  --accent-blue-gradient: linear-gradient(135deg, #B8860B 0%, #544109 100%);
-
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08), 0 0 1px rgba(0, 0, 0, 0.12);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.12);
-  --shadow-image: 0 8px 32px rgba(0, 0, 0, 0.12), inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 1px 0 rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 12px 32px rgba(33, 30, 26, 0.12);
 }
 
-/* ==========================================================================
-   Reduced Motion Accessibility
-   ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

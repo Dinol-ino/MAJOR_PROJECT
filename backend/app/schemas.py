@@ -19,6 +19,16 @@ class CitationSource(BaseModel):
     freshness_score: Optional[float] = None
     injection_risk_score: Optional[float] = None
     confidence_score: Optional[float] = None
+    # Provenance carried from the index so every citation can be inspected and resolved.
+    act_slug: Optional[str] = None
+    doc_type: Optional[str] = None
+    source_url: Optional[str] = None
+    document_version: Optional[str] = None
+    legal_status: Optional[str] = None
+    verified_at: Optional[str] = None
+    filename: Optional[str] = None
+    retrieval_score: Optional[float] = None
+    via: Optional[str] = None  # e.g. "cross_reference" when added by citation-graph expansion
 
 class ChatResponse(BaseModel):
     answer: str

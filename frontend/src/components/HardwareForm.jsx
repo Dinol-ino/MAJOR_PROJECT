@@ -1,1033 +1,271 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '../api/client';
-import {
-  CpuIcon,
-  DownloadIcon,
-  CheckCircleIcon,
-  RefreshIcon,
-  ServerIcon,
-  SparklesIcon,
-  CheckShieldIcon,
-  ShieldAlertIcon
-} from './Icons';
 
-export default function HardwareForm({
-  onModelRecommended,
-  selectedModel,
-  setSelectedModel,
-  isOpen,
-  onClose,
-  setRecommendedModels,
-  isFullView = false
-}) {
+/**
+ * Hardware & Models.
+ * Every value shown comes from the backend: live telemetry (authenticated SSE with bounded
+ * back-off), the runtime's installed models, and registry recommendations evaluated against
+ * the detected hardware. Unknown values are shown as unknown, never as placeholders.
+ */
+export default function HardwareForm({ activeModel, onModelsChanged, onActivateModel }) {
   const [telemetry, setTelemetry] = useState(null);
-  const [streamStatus, setStreamStatus] = useState('connecting'); // 'live' | 'offline' | 'connecting'
-  const [sparklineData, setSparklineData] = useState([]);
-  const [catalogData, setCatalogData] = useState(null);
-  const [modelsLoading, setModelsLoading] = useState(false);
-  const [pullProgress, setPullProgress] = useState({});
-  const [provisioningJob, setProvisioningJob] = useState(null);
+  const [streamState, setStreamState] = useState('connecting'); // connecting | live | retrying
+  const [recommend, setRecommend] = useState(null);
+  const [recommendError, setRecommendError] = useState('');
+  const [installed, setInstalled] = useState(null);
+  const [job, setJob] = useState(null);
+  const [actionError, setActionError] = useState('');
+  const [busyModel, setBusyModel] = useState(null);
+  const jobStreamRef = useRef(null);
 
-  const pullControllers = useRef({});
-  const provisioningControllerRef = useRef(null);
-  const onModelRecommendedRef = useRef(onModelRecommended);
-  onModelRecommendedRef.current = onModelRecommended;
-
-  const selectedModelRef = useRef(selectedModel);
-  selectedModelRef.current = selectedModel;
-
-  const setRecommendedModelsRef = useRef(setRecommendedModels);
-  setRecommendedModelsRef.current = setRecommendedModels;
-
-  // Append sample to sparkline ring buffer (max 30 points)
-  const addSparklineSample = useCallback((val) => {
-    setSparklineData((prev) => {
-      const next = [...prev, val];
-      if (next.length > 30) return next.slice(next.length - 30);
-      return next;
-    });
-  }, []);
-
-  // 1. Fetch Dynamic Model Recommendations
-  const fetchModels = useCallback(async () => {
-    setModelsLoading(true);
-    try {
-      const res = await apiClient.getRecommendedModels();
-      setCatalogData(res);
-      if (setRecommendedModelsRef.current) {
-        setRecommendedModelsRef.current(res.recommended || []);
-      }
-      if (!selectedModelRef.current && res.recommended && res.recommended.length > 0) {
-        const firstInstalled = res.recommended.find((m) => m.installed) || res.recommended[0];
-        if (onModelRecommendedRef.current) {
-          onModelRecommendedRef.current(firstInstalled.model_id);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load recommended models:', e);
-    } finally {
-      setModelsLoading(false);
-    }
-  }, []);
-
-  // 2. Persistent SSE Telemetry Stream + Initial Fast Hydration
+  // ---- telemetry: one authenticated stream, exponential back-off, cleaned up on unmount
   useEffect(() => {
-    let es = null;
-    let reconnectTimeout = null;
-    let active = true;
+    let cancelled = false;
+    let controller = null;
+    let timer = null;
+    let attempt = 0;
 
-    // Instant initial hydration via fast <50ms snapshot
-    apiClient.getTelemetrySample()
-      .then((data) => {
-        if (active && data) {
-          setTelemetry(data);
-          setStreamStatus('live');
-          addSparklineSample(data.cpu?.load_percent || 0);
-        }
-      })
-      .catch(() => {
-        // Fallback silently if offline
-      });
-
-    fetchModels();
+    apiClient.getTelemetrySample().then((d) => !cancelled && setTelemetry(d)).catch(() => {});
 
     const connect = () => {
-      try {
-        const streamUrl = `${apiClient.BASE_URL || ''}/api/telemetry/stream`;
-        es = new EventSource(streamUrl);
-
-        es.onopen = () => {
-          if (active) setStreamStatus('live');
-        };
-
-        es.onmessage = (event) => {
-          if (!active) return;
-          try {
-            const data = JSON.parse(event.data);
-            if (data.cpu) {
-              setTelemetry(data);
-              setStreamStatus('live');
-              addSparklineSample(data.cpu.load_percent || 0);
-            }
-          } catch (e) {
-            console.debug('Telemetry chunk parse error:', e);
-          }
-        };
-
-        es.onerror = () => {
-          if (!active) return;
-          setStreamStatus('offline');
-          if (es) {
-            es.close();
-            es = null;
-          }
-          reconnectTimeout = setTimeout(connect, 3000);
-        };
-      } catch (err) {
-        setStreamStatus('offline');
-        reconnectTimeout = setTimeout(connect, 3000);
-      }
+      if (cancelled) return;
+      setStreamState(attempt === 0 ? 'connecting' : 'retrying');
+      controller = apiClient.streamTelemetry({
+        onOpen: () => { attempt = 0; setStreamState('live'); },
+        onEvent: (d) => { if (!cancelled && d && d.cpu) setTelemetry(d); },
+        onError: () => scheduleReconnect(),
+        onClose: () => scheduleReconnect(),
+      });
     };
-
+    const scheduleReconnect = () => {
+      if (cancelled) return;
+      attempt += 1;
+      setStreamState('retrying');
+      const delay = Math.min(30000, 1000 * 2 ** Math.min(attempt, 5));
+      timer = setTimeout(connect, delay);
+    };
     connect();
-
     return () => {
-      active = false;
-      if (es) es.close();
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      // Abort any active pulls on unmount
-      Object.values(pullControllers.current).forEach((ctrl) => ctrl && ctrl.abort());
+      cancelled = true;
+      if (controller) controller.abort();
+      if (timer) clearTimeout(timer);
     };
-  }, [addSparklineSample, fetchModels]);
+  }, []);
 
-  // Handle Model Pull via SSE Stream
-  const handlePullModel = (modelId) => {
-    if (pullControllers.current[modelId]) return;
-
-    setPullProgress((prev) => ({
-      ...prev,
-      [modelId]: { percent: 0, status: 'starting', completed: 0, total: 0 }
-    }));
-
-    const controller = apiClient.pullModelStream(
-      modelId,
-      (progress) => {
-        setPullProgress((prev) => ({
-          ...prev,
-          [modelId]: {
-            percent: Math.min(100, Math.round(progress.percent || 0)),
-            status: progress.status || 'downloading',
-            completed: progress.completed || 0,
-            total: progress.total || 0,
-            digest: progress.digest
-          }
-        }));
-      },
-      () => {
-        delete pullControllers.current[modelId];
-        setPullProgress((prev) => ({
-          ...prev,
-          [modelId]: { percent: 100, status: 'done' }
-        }));
-        fetchModels();
-        if (setSelectedModel) setSelectedModel(modelId);
-        if (onModelRecommended) onModelRecommended(modelId);
-      },
-      (err) => {
-        delete pullControllers.current[modelId];
-        setPullProgress((prev) => ({
-          ...prev,
-          [modelId]: { status: 'error', error: err.message }
-        }));
-      }
-    );
-
-    pullControllers.current[modelId] = controller;
-  };
-
-  const handleCancelPull = (modelId) => {
-    if (pullControllers.current[modelId]) {
-      pullControllers.current[modelId].abort();
-      delete pullControllers.current[modelId];
-    }
-    setPullProgress((prev) => {
-      const copy = { ...prev };
-      delete copy[modelId];
-      return copy;
-    });
-  };
-
-  // One-Click Model Provisioning Workflow
-  const handleStartProvisioning = async (targetModelId = null) => {
+  const loadModels = useCallback(async () => {
+    setRecommendError('');
     try {
-      setProvisioningJob({
-        status: 'checking',
-        percent: 5,
-        message: 'Initializing local AI provisioning engine...',
-        model_id: targetModelId || ''
-      });
-
-      const res = await apiClient.startProvisioning(targetModelId, !targetModelId);
-      const jobId = res.job_id;
-
-      if (provisioningControllerRef.current) {
-        provisioningControllerRef.current.abort();
-      }
-
-      const controller = apiClient.streamProvisioningProgress(
-        jobId,
-        (progress) => {
-          setProvisioningJob((prev) => ({
-            ...prev,
-            ...progress,
-            job_id: jobId
-          }));
-        },
-        (doneData) => {
-          setProvisioningJob((prev) => ({
-            ...prev,
-            ...doneData,
-            status: 'ready',
-            percent: 100,
-            message: doneData?.message || 'Model verified and ready for legal inference.'
-          }));
-          fetchModels();
-          const finalId = doneData?.model_id || targetModelId;
-          if (finalId) {
-            if (setSelectedModel) setSelectedModel(finalId);
-            if (onModelRecommended) onModelRecommended(finalId);
-          }
-        },
-        (err) => {
-          setProvisioningJob((prev) => ({
-            ...prev,
-            status: 'failed',
-            error: err.message,
-            message: `Provisioning failed: ${err.message}`
-          }));
-        }
-      );
-
-      provisioningControllerRef.current = controller;
+      const [rec, inst] = await Promise.all([apiClient.getRecommendedModels(), apiClient.getInstalledModels()]);
+      setRecommend(rec);
+      setInstalled(inst);
     } catch (err) {
-      setProvisioningJob({
-        status: 'failed',
-        error: err.message,
-        message: `Failed to initiate provisioning: ${err.message}`
-      });
+      setRecommendError(err.message || 'Could not load models.');
     }
-  };
+  }, []);
 
-  const handleCancelProvisioning = async () => {
-    if (!provisioningJob?.job_id) return;
-    try {
-      await apiClient.cancelProvisioningJob(provisioningJob.job_id);
-    } catch (e) {
-      console.debug('Cancel error:', e);
-    }
-    if (provisioningControllerRef.current) {
-      provisioningControllerRef.current.abort();
-      provisioningControllerRef.current = null;
-    }
-    setProvisioningJob((prev) => ({
-      ...prev,
-      status: 'cancelled',
-      message: 'Provisioning cancelled by user'
-    }));
-  };
+  useEffect(() => { loadModels(); }, [loadModels]);
 
-  // Hydrate active provisioning job on mount
+  const followJob = useCallback((jobId) => {
+    if (jobStreamRef.current) jobStreamRef.current.abort();
+    jobStreamRef.current = apiClient.streamProvisioningProgress(
+      jobId,
+      (p) => setJob(p),
+      async (p) => { setJob(p); await loadModels(); if (onModelsChanged) onModelsChanged(); },
+      (err) => { setJob((j) => (j ? { ...j, status: j.status === 'ready' ? 'ready' : 'failed', error: j.error || err.message } : j)); loadModels(); },
+    );
+  }, [loadModels, onModelsChanged]);
+
+  // Resume a download that is still running (e.g. after a page refresh).
   useEffect(() => {
-    let unmounted = false;
-    apiClient.getActiveProvisioningJob().then((job) => {
-      if (unmounted || !job || !job.job_id) return;
-      if (['checking', 'compatibility_check', 'runtime_missing', 'downloading', 'verifying', 'starting_model', 'health_check'].includes(job.status)) {
-        setProvisioningJob(job);
-        const ctrl = apiClient.streamProvisioningProgress(
-          job.job_id,
-          (p) => setProvisioningJob((prev) => ({ ...prev, ...p })),
-          (d) => {
-            setProvisioningJob((prev) => ({ ...prev, ...d, status: 'ready', percent: 100 }));
-            fetchModels();
-            if (job.model_id) {
-              if (setSelectedModel) setSelectedModel(job.model_id);
-              if (onModelRecommended) onModelRecommended(job.model_id);
-            }
-          },
-          (e) => setProvisioningJob((prev) => ({ ...prev, status: 'failed', error: e.message }))
-        );
-        provisioningControllerRef.current = ctrl;
-      } else if (job.status === 'ready') {
-        setProvisioningJob(job);
+    apiClient.getActiveProvisioningJob().then((j) => {
+      if (j && j.job_id && !['ready', 'failed', 'cancelled', 'none'].includes(j.status)) {
+        setJob(j);
+        followJob(j.job_id);
       }
     }).catch(() => {});
+    return () => { if (jobStreamRef.current) jobStreamRef.current.abort(); };
+  }, [followJob]);
 
-    return () => {
-      unmounted = true;
-      if (provisioningControllerRef.current) {
-        provisioningControllerRef.current.abort();
+  const downloadAndActivate = async (modelId) => {
+    setActionError('');
+    setBusyModel(modelId);
+    try {
+      const res = await apiClient.startProvisioning(modelId, false, true);
+      if (res.job_id) {
+        setJob({ job_id: res.job_id, model_id: modelId, status: res.status, percent: res.percent || 0, message: res.message });
+        followJob(res.job_id);
       }
-    };
-  }, [fetchModels, setSelectedModel, onModelRecommended]);
-
-  if (!isFullView && isOpen === false) return null;
-
-  // Derived telemetry presentation
-  const cpu = telemetry?.cpu || {
-    name: 'Multi-Core Processor',
-    load_percent: 0,
-    cores_physical: 4,
-    cores_logical: 8,
-    arch: 'x86_64'
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setBusyModel(null);
+    }
   };
 
-  const ram = telemetry?.ram || {
-    total_gb: 16.0,
-    available_gb: 8.0,
-    used_percent: 50
+  const activate = async (name) => {
+    setActionError('');
+    setBusyModel(name);
+    try {
+      await onActivateModel(name);
+      await loadModels();
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setBusyModel(null);
+    }
   };
 
-  const gpu = telemetry?.gpu || {
-    detected: false,
-    name: 'No Dedicated GPU (CPU Only)',
-    vram_total_gb: 0.0,
-    vram_used_gb: 0.0,
-    util_percent: 0,
-    mode: 'cpu'
+  const cancelJob = async () => {
+    if (!job?.job_id) return;
+    try { await apiClient.cancelProvisioningJob(job.job_id); } catch (err) { setActionError(err.message); }
   };
 
-  const disk = telemetry?.disk || {
-    free_gb: 100.0,
-    total_gb: 512.0
-  };
-
-  const tier = telemetry?.tier || {
-    tier_code: 'tier_0',
-    tier_label: 'Tier 0 (Lightweight)',
-    reason: 'Tier 0 — CPU mode active',
-    max_model: '3B (Q4)'
-  };
-
-  let tierColor = 'var(--accent-blue)';
-  if (tier.tier_code === 'tier_1') tierColor = 'var(--accent-blue)';
-  else if (tier.tier_code === 'tier_2') tierColor = 'var(--accent-pink)';
-  else if (tier.tier_code === 'tier_3') tierColor = 'var(--accent-pink)';
-
-  const modelsList = catalogData?.recommended || [];
-  const ollamaOnline = catalogData?.ollama_online ?? true;
-
-  const content = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: 8,
-              background: 'rgba(0, 132, 255, 0.12)',
-              border: '1px solid rgba(0, 132, 255, 0.3)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            <CpuIcon size={20} color="var(--accent-blue)" />
-          </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h2 style={{ fontFamily: 'var(--font-title)', fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-                Hardware Engine & Model Manager
-              </h2>
-              <span
-                style={{
-                  fontSize: '0.68rem',
-                  fontWeight: 600,
-                  padding: '2px 8px',
-                  borderRadius: '10px',
-                  background: streamStatus === 'live' ? 'rgba(0, 132, 255, 0.15)' : 'rgba(255, 0, 127, 0.15)',
-                  color: streamStatus === 'live' ? 'var(--accent-blue)' : 'var(--accent-pink)',
-                  border: `1px solid ${streamStatus === 'live' ? 'rgba(0, 132, 255, 0.4)' : 'rgba(255, 0, 127, 0.4)'}`
-                }}
-              >
-                {streamStatus === 'live' ? '● SSE Live' : '○ Telemetry Offline'}
-              </span>
-            </div>
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
-              Live telemetry via Server-Sent Events, deterministic hardware tiering, and real-time model streaming.
-            </p>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button
-            type="button"
-            onClick={() => fetchModels()}
-            disabled={modelsLoading}
-            style={{
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '6px',
-              padding: '6px 12px',
-              color: 'var(--text-secondary)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.75rem',
-              cursor: 'pointer'
-            }}
-          >
-            <RefreshIcon size={13} className={modelsLoading ? 'pulse-text' : ''} />
-            <span>Refresh Models</span>
-          </button>
-
-          {!isFullView && onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-muted)',
-                fontSize: '1.2rem',
-                cursor: 'pointer',
-                padding: '4px'
-              }}
-            >
-              ✕
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Hardware Tier Banner & Deterministic Reason Tooltip */}
-      <div
-        style={{
-          background: 'rgba(255, 255, 255, 0.02)',
-          border: `1px solid ${tierColor}44`,
-          borderLeft: `4px solid ${tierColor}`,
-          borderRadius: '8px',
-          padding: '12px 16px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px'
-        }}
-      >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
-              Evaluated Hardware Tier
-            </span>
-            <span
-              style={{
-                background: `${tierColor}22`,
-                color: tierColor,
-                border: `1px solid ${tierColor}66`,
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                padding: '2px 8px',
-                borderRadius: '4px'
-              }}
-            >
-              {tier.tier_label}
-            </span>
-          </div>
-          <div style={{ fontSize: '0.82rem', color: 'var(--text-primary)', marginTop: '4px' }}>
-            {tier.reason}
-          </div>
-        </div>
-
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Max Model Ceiling</div>
-          <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
-            {tier.max_model}
-          </div>
-        </div>
-      </div>
-
-      {/* Live Telemetry Stat Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: isFullView ? 'repeat(4, 1fr)' : 'repeat(2, 1fr)', gap: '12px' }}>
-        {/* CPU Card */}
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>CPU Processor</span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-blue)' }}>
-              {!telemetry ? <span className="pulse-text">Sampling…</span> : `${cpu.load_percent}% Load`}
-            </span>
-          </div>
-          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cpu.name}>
-            {!telemetry ? <span style={{ opacity: 0.5 }}>Probing CPU architecture…</span> : cpu.name}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '2px' }}>
-            {!telemetry ? 'Hardware detection in progress' : `${cpu.cores_physical} Physical / ${cpu.cores_logical} Logical Cores (${cpu.arch})`}
-          </div>
-
-          {/* Sparkline Graph */}
-          {sparklineData.length > 1 && (
-            <div style={{ marginTop: '10px', height: '24px', width: '100%', display: 'flex', alignItems: 'flex-end', gap: '2px' }}>
-              {sparklineData.map((val, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    flex: 1,
-                    height: `${Math.max(10, Math.min(100, val))}%`,
-                    background: 'var(--accent-blue)',
-                    opacity: 0.3 + (idx / sparklineData.length) * 0.7,
-                    borderRadius: '1px'
-                  }}
-                  title={`${val}% load`}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* System RAM Card */}
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>System RAM</span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: ram.used_percent > 85 ? 'var(--accent-pink)' : 'var(--accent-blue)' }}>
-              {!telemetry ? <span className="pulse-text">Measuring…</span> : `${ram.used_percent}% Used`}
-            </span>
-          </div>
-          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--accent-blue)', marginTop: '4px' }}>
-            {!telemetry ? <span style={{ opacity: 0.5 }}>Reading virtual memory…</span> : `${ram.available_gb} GB Free / ${ram.total_gb} GB Total`}
-          </div>
-          <div style={{ width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', height: '5px', marginTop: '6px', overflow: 'hidden' }}>
-            <div
-              style={{
-                width: !telemetry ? '40%' : `${ram.used_percent}%`,
-                height: '100%',
-                background: ram.used_percent > 85 ? 'var(--accent-pink)' : 'var(--accent-blue)',
-                transition: 'width 0.4s ease'
-              }}
-              className={!telemetry ? 'pulse-text' : ''}
-            />
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '6px' }}>
-            {!telemetry ? 'Checking OS memory buffers' : (ram.available_gb < 3.0 ? '⚠️ High memory pressure — CPU offload limited' : 'Available for In-Memory Vectors & Model Weights')}
-          </div>
-        </div>
-
-        {/* GPU / VRAM Card */}
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>GPU Acceleration</span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: gpu.detected ? 'var(--accent-pink)' : 'var(--text-muted)' }}>
-              {!telemetry ? <span className="pulse-text">Scanning…</span> : (gpu.detected ? `${gpu.util_percent}% Utilized` : 'CPU Mode')}
-            </span>
-          </div>
-          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: gpu.detected ? 'var(--accent-pink)' : 'var(--text-secondary)', marginTop: '4px' }}>
-            {!telemetry ? <span style={{ opacity: 0.5 }}>Checking CUDA / NVML…</span> : (gpu.detected ? `${gpu.vram_used_gb || 0} / ${gpu.vram_total_gb || 0} GB VRAM` : 'No CUDA GPU')}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={gpu.name}>
-            {!telemetry ? 'Evaluating GPU acceleration' : (gpu.detected ? gpu.name : 'Running in CPU-Only Mode (Tier 0 Qualified)')}
-          </div>
-        </div>
-
-        {/* Storage Card */}
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Disk Storage</span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Model Weights</span>
-          </div>
-          <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '4px' }}>
-            {!telemetry ? <span style={{ opacity: 0.5 }}>Measuring disk…</span> : `${disk.free_gb} GB Free`}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            Sufficient space for legal LLM downloads & ChromaDB vectors
-          </div>
-        </div>
-      </div>
-
-      {/* One-Click Automatic Local AI Setup Card */}
-      {(() => {
-        const topRecommended = modelsList.find((m) => m.recommended_for_tier) || modelsList[0] || {
-          model_id: 'qwen2.5:3b',
-          display_name: 'Qwen 2.5 3B (Standard Floor)',
-          size_gb: 1.9,
-          installed: false
-        };
-        const isJobRunning = provisioningJob && ['checking', 'compatibility_check', 'runtime_missing', 'downloading', 'verifying', 'starting_model', 'health_check'].includes(provisioningJob.status);
-        const isJobReady = provisioningJob?.status === 'ready';
-        const isJobFailed = provisioningJob?.status === 'failed';
-
-        return (
-          <div
-            style={{
-              background: 'linear-gradient(135deg, rgba(0, 132, 255, 0.08) 0%, rgba(255, 0, 127, 0.05) 100%)',
-              border: '1px solid var(--accent-blue)',
-              borderRadius: '12px',
-              padding: '20px 22px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '14px',
-              boxShadow: 'var(--shadow-md)'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div
-                  style={{
-                    width: 38,
-                    height: 38,
-                    borderRadius: 10,
-                    background: 'var(--accent-blue)',
-                    color: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <SparklesIcon size={20} color="#ffffff" />
-                </div>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-                      One-Click Local AI Setup
-                    </h3>
-                    <span
-                      style={{
-                        fontSize: '0.68rem',
-                        fontWeight: 700,
-                        background: 'rgba(0, 132, 255, 0.2)',
-                        color: 'var(--accent-blue)',
-                        border: '1px solid var(--accent-blue)',
-                        padding: '2px 8px',
-                        borderRadius: '10px'
-                      }}
-                    >
-                      Zero-Config
-                    </span>
-                  </div>
-                  <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '3px 0 0 0' }}>
-                    Automatically detects device capacity, allocates storage, pulls legal model weights, and verifies generation.
-                  </p>
-                </div>
-              </div>
-
-              {/* Hardware capability pill badges */}
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '0.7rem', padding: '3px 8px', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '6px', color: 'var(--text-secondary)' }}>
-                  RAM: {ram.available_gb} GB Free
-                </span>
-                <span style={{ fontSize: '0.7rem', padding: '3px 8px', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '6px', color: 'var(--text-secondary)' }}>
-                  Disk: {disk.free_gb} GB Free
-                </span>
-                <span style={{ fontSize: '0.7rem', padding: '3px 8px', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '6px', color: 'var(--text-secondary)' }}>
-                  {cpu.cores_physical} Physical Cores
-                </span>
-              </div>
-            </div>
-
-            {/* Target model and setup action */}
-            <div
-              style={{
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '8px',
-                padding: '14px 16px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '12px'
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
-                  Recommended Model for This Computer
-                </div>
-                <div style={{ fontSize: '0.98rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
-                  {topRecommended.display_name} <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-secondary)' }}>(~{topRecommended.size_gb} GB)</span>
-                </div>
-              </div>
-
-              {/* State-dependent Action Buttons */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {isJobRunning ? (
-                  <button
-                    type="button"
-                    onClick={handleCancelProvisioning}
-                    style={{
-                      background: 'rgba(255, 0, 127, 0.15)',
-                      color: 'var(--accent-pink)',
-                      border: '1px solid var(--accent-pink)',
-                      borderRadius: '6px',
-                      padding: '7px 14px',
-                      fontSize: '0.78rem',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Cancel Setup
-                  </button>
-                ) : isJobReady || topRecommended.installed ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-blue)' }}>
-                      <CheckCircleIcon size={16} />
-                      <span>Ready & Active</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleStartProvisioning(topRecommended.model_id)}
-                      style={{
-                        background: 'var(--bg-input)',
-                        color: 'var(--text-secondary)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: '6px',
-                        padding: '6px 12px',
-                        fontSize: '0.75rem',
-                        fontWeight: 600,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Re-verify Health
-                    </button>
-                  </div>
-                ) : isJobFailed ? (
-                  <button
-                    type="button"
-                    onClick={() => handleStartProvisioning(topRecommended.model_id)}
-                    style={{
-                      background: 'var(--accent-pink)',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '6px',
-                      padding: '8px 18px',
-                      fontSize: '0.8rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
-                    }}
-                  >
-                    <RefreshIcon size={14} />
-                    <span>Retry Automatic Setup</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleStartProvisioning(topRecommended.model_id)}
-                    style={{
-                      background: 'var(--accent-blue)',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '6px',
-                      padding: '9px 20px',
-                      fontSize: '0.82rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      boxShadow: 'var(--shadow-sm)'
-                    }}
-                  >
-                    <DownloadIcon size={15} />
-                    <span>Download & Set Up Automatically</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Active Provisioning Progress Bar and Stage Feedback */}
-            {isJobRunning && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.76rem' }}>
-                  <span style={{ color: 'var(--text-primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span className="pulse-text">●</span>
-                    <span>{provisioningJob.message || 'Provisioning local model...'}</span>
-                  </span>
-                  <span style={{ color: 'var(--accent-blue)', fontWeight: 700 }}>
-                    {Math.round(provisioningJob.percent || 0)}%
-                  </span>
-                </div>
-                <div style={{ width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-                  <div
-                    style={{
-                      width: `${Math.max(5, Math.min(100, provisioningJob.percent || 0))}%`,
-                      height: '100%',
-                      background: 'var(--accent-blue)',
-                      transition: 'width 0.3s ease'
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Job Error Notice */}
-            {isJobFailed && (
-              <div style={{ fontSize: '0.76rem', color: 'var(--accent-pink)', background: 'rgba(255, 0, 127, 0.1)', border: '1px solid rgba(255, 0, 127, 0.3)', borderRadius: '6px', padding: '8px 12px' }}>
-                ⚠️ {provisioningJob.error || provisioningJob.message || 'Setup encountered an error'}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* Recommended Models Section */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-              Hardware-Matched Model Catalog
-            </h3>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
-              Dynamically evaluated against your live hardware capacity and Ollama installations.
-            </p>
-          </div>
-
-          {!ollamaOnline && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(255, 0, 127, 0.12)', border: '1px solid rgba(255, 0, 127, 0.4)', borderRadius: '6px', color: 'var(--accent-pink)', fontSize: '0.72rem' }}>
-              <ShieldAlertIcon size={14} />
-              <span>Ollama unreachable at 127.0.0.1:11434</span>
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {modelsList.map((model) => {
-            const mId = model.model_id;
-            const isSelected = selectedModel === mId;
-            const progress = pullProgress[mId];
-            const isPulling = progress && progress.status !== 'done' && progress.status !== 'error';
-
-            return (
-              <div
-                key={mId}
-                style={{
-                  background: isSelected ? 'rgba(0, 132, 255, 0.08)' : 'var(--bg-card)',
-                  border: isSelected ? '1px solid var(--accent-blue)' : '1px solid var(--border-subtle)',
-                  borderRadius: '8px',
-                  padding: '14px 16px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
-                  transition: 'all 0.2s ease'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                        {model.display_name}
-                      </span>
-                      {model.parameter_size && (
-                        <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '1px 6px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', color: 'var(--text-secondary)' }}>
-                          {model.parameter_size}
-                        </span>
-                      )}
-                      {model.quantization && (
-                        <span style={{ fontSize: '0.68rem', padding: '1px 6px', background: 'rgba(255, 255, 255, 0.04)', borderRadius: '4px', color: 'var(--text-dim)' }}>
-                          {model.quantization.toUpperCase()}
-                        </span>
-                      )}
-                      {model.recommended_for_tier && (
-                        <span style={{ fontSize: '0.68rem', fontWeight: 600, padding: '1px 6px', background: 'rgba(0, 132, 255, 0.15)', color: 'var(--accent-blue)', border: '1px solid rgba(0, 132, 255, 0.3)', borderRadius: '4px' }}>
-                          Tier Matched
-                        </span>
-                      )}
-                    </div>
-
-                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '4px', display: 'flex', gap: '14px' }}>
-                      <span>Size: ~{model.size_gb} GB</span>
-                      <span>RAM Needed: {model.ram_required_gb} GB</span>
-                      {model.vram_required_gb && <span>VRAM Needed: {model.vram_required_gb} GB</span>}
-                      <span>Context: {model.context_window} tokens</span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {model.installed ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-blue)' }}>
-                          <CheckCircleIcon size={14} />
-                          <span>Installed</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (setSelectedModel) setSelectedModel(mId);
-                            if (onModelRecommended) onModelRecommended(mId);
-                            if (!isFullView && onClose) onClose();
-                          }}
-                          style={{
-                            background: isSelected ? 'var(--accent-blue)' : 'var(--bg-input)',
-                            color: isSelected ? '#ffffff' : 'var(--text-primary)',
-                            border: isSelected ? '1px solid var(--accent-blue)' : '1px solid var(--border-subtle)',
-                            borderRadius: '6px',
-                            padding: '6px 12px',
-                            fontSize: '0.74rem',
-                            fontWeight: 700,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {isSelected ? 'Active Model' : 'Select'}
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {isPulling ? (
-                          <button
-                            type="button"
-                            onClick={() => handleCancelPull(mId)}
-                            style={{
-                              background: 'rgba(255, 0, 127, 0.15)',
-                              color: 'var(--accent-pink)',
-                              border: '1px solid rgba(255, 0, 127, 0.4)',
-                              borderRadius: '6px',
-                              padding: '6px 10px',
-                              fontSize: '0.72rem',
-                              fontWeight: 600,
-                              cursor: 'pointer'
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handlePullModel(mId)}
-                            style={{
-                              background: 'var(--accent-blue)',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '6px',
-                              padding: '6px 14px',
-                              fontSize: '0.74rem',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px'
-                            }}
-                          >
-                            <DownloadIcon size={13} />
-                            <span>{model.action_label}</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Pulling Progress Bar & Details */}
-                {isPulling && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                      <span>Status: {progress.status}</span>
-                      <span>{progress.percent}%</span>
-                    </div>
-                    <div style={{ width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', height: '6px', overflow: 'hidden' }}>
-                      <div
-                        style={{
-                          width: `${progress.percent}%`,
-                          height: '100%',
-                          background: 'var(--accent-blue)',
-                          transition: 'width 0.2s ease'
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {progress?.status === 'error' && (
-                  <div style={{ fontSize: '0.72rem', color: '#e74c3c', marginTop: '4px' }}>
-                    ⚠️ {progress.error || 'Failed to pull model'}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-
-  if (isFullView) {
-    return (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          background: 'var(--bg-app)',
-          padding: '32px 40px',
-          boxSizing: 'border-box',
-          overflowY: 'auto'
-        }}
-        className="view-container"
-      >
-        <div style={{ maxWidth: '960px', margin: '0 auto' }}>
-          {content}
-        </div>
-      </div>
-    );
-  }
+  const jobRunning = job && !['ready', 'failed', 'cancelled'].includes(job.status);
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        right: 0,
-        width: '440px',
-        height: '100vh',
-        background: 'var(--bg-sidebar)',
-        borderLeft: '1px solid var(--border-subtle)',
-        boxShadow: 'var(--shadow-lg)',
-        padding: '24px',
-        zIndex: 1000,
-        boxSizing: 'border-box',
-        overflowY: 'auto'
-      }}
-      className="view-container"
-    >
-      {content}
+    <div style={st.page}>
+      <section style={st.section}>
+        <div style={st.sectionHead}>
+          <h2 style={st.h2}>This machine</h2>
+          <span style={st.muted}>
+            {streamState === 'live' ? 'Live' : streamState === 'retrying' ? 'Reconnecting…' : 'Connecting…'}
+            {telemetry?.ts ? ` · updated ${new Date(telemetry.ts * 1000).toLocaleTimeString()}` : ''}
+          </span>
+        </div>
+        <div style={st.grid}>
+          <Metric label="Processor" value={telemetry?.cpu?.name} sub={telemetry?.cpu ? `${telemetry.cpu.cores_physical} cores / ${telemetry.cpu.cores_logical} threads · ${telemetry.cpu.load_percent}% load` : null} />
+          <Metric label="Memory" value={telemetry?.ram ? `${telemetry.ram.available_gb} GB free` : null} sub={telemetry?.ram ? `of ${telemetry.ram.total_gb} GB` : null} />
+          <Metric
+            label="GPU"
+            value={telemetry?.gpu ? (telemetry.gpu.status === 'probing' ? 'Probing…' : telemetry.gpu.detected ? telemetry.gpu.name : 'None detected') : null}
+            sub={telemetry?.gpu?.detected
+              ? (telemetry.gpu.vram_reliable ? `${telemetry.gpu.vram_total_gb} GB VRAM · ${telemetry.gpu.backend}` : 'VRAM unknown (not used for sizing)')
+              : telemetry?.gpu?.reason}
+          />
+          <Metric label="Disk (model store)" value={telemetry?.disk?.free_gb != null ? `${telemetry.disk.free_gb} GB free` : telemetry ? 'Unavailable' : null} sub={telemetry?.disk?.total_gb != null ? `of ${telemetry.disk.total_gb} GB` : null} />
+        </div>
+        {telemetry?.tier?.reason && <p style={st.note}>{telemetry.tier.reason}</p>}
+      </section>
+
+      <section style={st.section}>
+        <div style={st.sectionHead}>
+          <h2 style={st.h2}>Installed models</h2>
+          <span style={st.muted}>{installed ? (installed.runtime_online ? 'Runtime reachable' : 'Runtime not reachable') : 'Loading…'}</span>
+        </div>
+        {installed && !installed.runtime_online && (
+          <p style={st.warn}>The local model runtime (Ollama) is not reachable, so no model can answer. Start Ollama, then reload this page.</p>
+        )}
+        {installed?.models?.length === 0 && installed.runtime_online && (
+          <p style={st.note}>No models are installed yet. Download a recommended model below.</p>
+        )}
+        {(installed?.models || []).map((m) => (
+          <Row
+            key={m.name}
+            title={m.name}
+            meta={[m.parameter_size, m.quantization, m.size_bytes ? `${(m.size_bytes / 1e9).toFixed(1)} GB` : null].filter(Boolean).join(' · ')}
+            detail={m.fit_reason}
+            tag={m.name === activeModel ? 'Active' : m.safety_tier !== 'SAFE' ? m.safety_tier : null}
+            action={m.name === activeModel ? null : (
+              <button type="button" style={st.btn} disabled={!!busyModel} onClick={() => activate(m.name)}>
+                {busyModel === m.name ? 'Loading…' : 'Activate'}
+              </button>
+            )}
+          />
+        ))}
+      </section>
+
+      {job && (
+        <section style={st.section} aria-live="polite">
+          <div style={st.sectionHead}>
+            <h2 style={st.h2}>Download: {job.model_id}</h2>
+            <span style={st.muted}>{job.status}</span>
+          </div>
+          <div style={st.track}><div style={{ ...st.fill, width: `${Math.max(0, Math.min(100, job.percent || 0))}%` }} /></div>
+          <p style={st.note}>
+            {job.message}
+            {job.speed_mbps ? ` · ${job.speed_mbps} MB/s` : ''}
+            {job.retries ? ` · retry ${job.retries}` : ''}
+          </p>
+          {job.error && <p style={st.warn}>{job.error}</p>}
+          {jobRunning && <button type="button" style={st.btnGhost} onClick={cancelJob}>Cancel download</button>}
+        </section>
+      )}
+
+      <section style={st.section}>
+        <div style={st.sectionHead}>
+          <h2 style={st.h2}>Recommended for this machine</h2>
+          <span style={st.muted}>From the model registry, sized against detected memory and disk</span>
+        </div>
+        {recommendError && <p style={st.warn}>{recommendError}</p>}
+        {actionError && <p role="alert" style={st.warn}>{actionError}</p>}
+        {(recommend?.recommended || []).map((m) => (
+          <Row
+            key={m.model_id}
+            title={m.display_name}
+            meta={[m.parameter_size, m.quantization, `~${m.size_gb} GB download`, `needs ~${m.ram_required_gb} GB RAM`, m.license].filter(Boolean).join(' · ')}
+            detail={m.fits_storage ? m.fit_reason : `Not enough free disk (needs ~${m.storage_required_gb} GB).`}
+            tag={m.installed ? 'Installed' : m.recommended_for_tier ? 'Recommended' : m.safety_tier === 'UNSUPPORTED' ? 'Too large' : m.safety_tier === 'CAUTION' ? 'Tight fit' : null}
+            action={m.installed ? null : (
+              <button
+                type="button"
+                style={st.btn}
+                disabled={!m.downloadable || jobRunning || !!busyModel || !recommend?.ollama_online}
+                title={!recommend?.ollama_online ? 'The model runtime is not reachable' : !m.downloadable ? 'Not safe for this machine' : ''}
+                onClick={() => downloadAndActivate(m.model_id)}
+              >
+                Download &amp; activate
+              </button>
+            )}
+          />
+        ))}
+      </section>
     </div>
   );
 }
+
+function Metric({ label, value, sub }) {
+  return (
+    <div style={st.metric}>
+      <div style={st.metricLabel}>{label}</div>
+      <div style={st.metricValue}>{value ?? <span style={{ color: 'var(--text-muted)' }}>Waiting for first sample…</span>}</div>
+      {sub && <div style={st.metricSub}>{sub}</div>}
+    </div>
+  );
+}
+
+function Row({ title, meta, detail, tag, action }) {
+  return (
+    <div style={st.row}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={st.rowTitle}>{title}{tag && <span style={st.tag}>{tag}</span>}</div>
+        {meta && <div style={st.rowMeta}>{meta}</div>}
+        {detail && <div style={st.rowDetail}>{detail}</div>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+const st = {
+  page: { height: '100%', overflowY: 'auto', padding: '28px 40px 64px', maxWidth: 980 },
+  section: { borderTop: '1px solid var(--border-subtle)', padding: '20px 0 8px' },
+  sectionHead: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 12 },
+  h2: { fontFamily: 'var(--font-serif)', fontWeight: 600, fontSize: '1.15rem' },
+  muted: { color: 'var(--text-muted)', fontSize: '0.78rem' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 },
+  metric: { border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: '12px 14px' },
+  metricLabel: { color: 'var(--text-muted)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 },
+  metricValue: { fontSize: '0.95rem', color: 'var(--text-primary)' },
+  metricSub: { color: 'var(--text-muted)', fontSize: '0.76rem', marginTop: 4 },
+  note: { color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '10px 0' },
+  warn: { color: 'var(--status-amber)', fontSize: '0.85rem', margin: '10px 0' },
+  row: { display: 'flex', alignItems: 'center', gap: 16, padding: '12px 0', borderBottom: '1px solid var(--border-subtle)' },
+  rowTitle: { fontSize: '0.95rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 },
+  rowMeta: { color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 3 },
+  rowDetail: { color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: 3 },
+  tag: { fontSize: '0.68rem', color: 'var(--accent)', border: '1px solid var(--accent-blue-border)', borderRadius: 'var(--radius-full)', padding: '1px 8px' },
+  btn: { background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 'var(--radius-sm)', padding: '6px 12px', cursor: 'pointer', fontSize: '0.8rem', whiteSpace: 'nowrap' },
+  btnGhost: { background: 'transparent', border: '1px solid var(--border-medium)', color: 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', padding: '6px 12px', cursor: 'pointer', fontSize: '0.8rem' },
+  track: { height: 4, background: 'var(--bg-raised)', borderRadius: 2, overflow: 'hidden' },
+  fill: { height: '100%', background: 'var(--accent)', transition: 'width 0.4s ease' },
+};

@@ -2,6 +2,14 @@ import os
 import hashlib
 import logging
 import chromadb
+
+# chromadb loads onnxruntime, whose native library can emit telemetry to Microsoft endpoints.
+# OFFLINE must mean offline: switch it off before any session is created.
+try:
+    import onnxruntime as _ort
+    _ort.disable_telemetry_events()
+except Exception:
+    pass
 from chromadb.config import Settings as ChromaSettings
 from typing import Dict, Any
 

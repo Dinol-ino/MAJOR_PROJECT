@@ -31,6 +31,57 @@ export async function authFetch(url, opts = {}) {
   return response;
 }
 
+/** Builds an Error from a FastAPI error body; keeps a machine-readable `code` when the server sends one. */
+async function errorFrom(response, fallback) {
+  const body = await response.json().catch(() => ({}));
+  const detail = body.detail;
+  const message = (detail && typeof detail === 'object' ? detail.message : detail) || body.message || fallback;
+  const err = new Error(message);
+  err.status = response.status;
+  err.code = detail && typeof detail === 'object' ? detail.code : undefined;
+  return err;
+}
+
+/**
+ * Reads a text/event-stream over fetch (so the Authorization header is sent — EventSource cannot).
+ * Returns an AbortController. Calls onEvent(parsedJson) per `data:` block.
+ */
+export function openAuthedStream(url, { onEvent, onOpen, onError, onClose }) {
+  const controller = new AbortController();
+  const headers = { Accept: 'text/event-stream' };
+  const token = getAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  fetch(url, { headers, signal: controller.signal })
+    .then(async (response) => {
+      if (!response.ok) {
+        if (response.status === 401) window.dispatchEvent(new Event('dfrag:unauthorized'));
+        throw Object.assign(new Error(`Stream failed: ${response.status}`), { status: response.status });
+      }
+      if (onOpen) onOpen();
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() || '';
+        for (const block of blocks) {
+          const line = block.trim();
+          if (!line.startsWith('data:')) continue;
+          try { onEvent(JSON.parse(line.replace(/^data:\s*/, ''))); } catch { /* partial or non-JSON block */ }
+        }
+      }
+      if (onClose) onClose();
+    })
+    .catch((err) => {
+      if (err.name === 'AbortError') return;
+      if (onError) onError(err);
+    });
+  return controller;
+}
+
 export const apiClient = {
   /** Base prefix for all API calls (Vite dev proxy strips it; prod serves same-origin). */
   BASE_URL,
@@ -66,6 +117,20 @@ export const apiClient = {
     return response.json();
   },
 
+  /** GET /auth/status (public): whether to show sign-in or first-account registration. */
+  async authStatus() {
+    const response = await fetch(`${BASE_URL}/auth/status`);
+    if (!response.ok) throw await errorFrom(response, `Auth status failed (${response.status})`);
+    return response.json();
+  },
+
+  /** POST /auth/logout: revokes the current session token server-side. */
+  async logout() {
+    try {
+      await authFetch(`${BASE_URL}/auth/logout`, { method: 'POST' });
+    } catch { /* logging out locally regardless */ }
+  },
+
   /**
    * GET /auth/me
    */
@@ -80,7 +145,7 @@ export const apiClient = {
   /**
    * POST /chat
    */
-  async chat(message, sessionId, shieldOn, model, vaultId = null, reasoningEffort = 'off') {
+  async chat(message, sessionId, shieldOn, model, vaultId = null, reasoningEffort = 'medium') {
     const response = await authFetch(`${BASE_URL}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -90,13 +155,11 @@ export const apiClient = {
         shield_on: shieldOn,
         model: model || undefined,
         vault_id: vaultId || undefined,
-        reasoning_effort: reasoningEffort || 'off',
+        reasoning_effort: reasoningEffort || 'medium',
       }),
     });
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      const errorMsg = errData.detail || errData.message || `Chat request failed with status: ${response.status}`;
-      throw new Error(errorMsg);
+      throw await errorFrom(response, `Chat request failed with status: ${response.status}`);
     }
     return response.json();
   },
@@ -395,8 +458,8 @@ export const apiClient = {
   /**
    * GET /vaults
    */
-  async getVaults(userId = null) {
-    const url = userId ? `${BASE_URL}/vaults?user_id=${encodeURIComponent(userId)}` : `${BASE_URL}/vaults`;
+  async getVaults() {
+    const url = `${BASE_URL}/vaults`;
     const response = await authFetch(url, {
       method: 'GET',
     });
@@ -409,15 +472,11 @@ export const apiClient = {
   /**
    * POST /vaults
    */
-  async createVault(vaultName, description, userId = 'default_user') {
+  async createVault(vaultName, description) {
     const response = await authFetch(`${BASE_URL}/vaults`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        vault_name: vaultName,
-        description,
-        user_id: userId,
-      }),
+      body: JSON.stringify({ vault_name: vaultName, description }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -650,6 +709,68 @@ export const apiClient = {
     return response.json();
   },
 
+  /** GET /models/installed: models actually present in the local runtime (top selector source). */
+  async getInstalledModels() {
+    const response = await authFetch(`${BASE_URL}/models/installed`);
+    if (!response.ok) throw await errorFrom(response, `Installed models failed (${response.status})`);
+    return response.json();
+  },
+
+  /** GET /models/active */
+  async getActiveModel() {
+    const response = await authFetch(`${BASE_URL}/models/active`);
+    if (!response.ok) throw await errorFrom(response, `Active model failed (${response.status})`);
+    return response.json();
+  },
+
+  /** POST /models/activate: verify, warm up, health-check and persist the answering model. */
+  async activateModel(model) {
+    const response = await authFetch(`${BASE_URL}/models/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model }),
+    });
+    if (!response.ok) throw await errorFrom(response, `Activation failed (${response.status})`);
+    return response.json();
+  },
+
+  /** GET /research/mode: the server-side network mode (OFFLINE/ONLINE) and allowlisted sources. */
+  async getNetworkMode() {
+    const response = await authFetch(`${BASE_URL}/research/mode`);
+    if (!response.ok) throw await errorFrom(response, `Network mode failed (${response.status})`);
+    return response.json();
+  },
+
+  /** POST /research/mode: explicit, audited switch between OFFLINE and ONLINE. */
+  async setNetworkMode(mode) {
+    const response = await authFetch(`${BASE_URL}/research/mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, reason: 'Changed from Settings' }),
+    });
+    if (!response.ok) throw await errorFrom(response, `Mode change failed (${response.status})`);
+    return response.json();
+  },
+
+  /** GET /statutes/corpus-status */
+  async getCorpusStatus() {
+    const response = await authFetch(`${BASE_URL}/statutes/corpus-status`);
+    if (!response.ok) throw await errorFrom(response, `Corpus status failed (${response.status})`);
+    return response.json();
+  },
+
+  /** GET /audit/verify: live hash-chain verification of the security ledger. */
+  async verifyAudit() {
+    const response = await authFetch(`${BASE_URL}/audit/verify`);
+    if (!response.ok) throw await errorFrom(response, `Audit verification failed (${response.status})`);
+    return response.json();
+  },
+
+  /** Authenticated telemetry stream (replaces the header-less EventSource). */
+  streamTelemetry(handlers) {
+    return openAuthedStream(`${BASE_URL}/telemetry/stream`, handlers);
+  },
+
   /**
    * GET /models/recommended
    */
@@ -664,87 +785,17 @@ export const apiClient = {
   },
 
   /**
-   * POST /models/pull with SSE streaming progress reader
-   */
-  pullModelStream(modelName, onProgress, onComplete, onError) {
-    const controller = new AbortController();
-    const headers = { 'Content-Type': 'application/json' };
-    const token = getAuthToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-
-    const streamUrl = token
-      ? `${BASE_URL}/models/pull?stream=true&token=${encodeURIComponent(token)}`
-      : `${BASE_URL}/models/pull?stream=true`;
-
-    fetch(streamUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ name: modelName, model_id: modelName }),
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          if (response.status === 401) window.dispatchEvent(new Event('dfrag:unauthorized'));
-          throw new Error(`Pull request failed: ${response.status}`);
-        }
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder('utf-8');
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          const lines = buffer.split('\n\n');
-          buffer = lines.pop() || '';
-
-          for (const block of lines) {
-            const trimmed = block.trim();
-            if (trimmed.startsWith('data:')) {
-              try {
-                const parsed = JSON.parse(trimmed.replace(/^data:\s*/, ''));
-                if (onProgress) onProgress(parsed);
-                if (parsed.status === 'success' || parsed.status === 'verified' || parsed.percent >= 100) {
-                  if (onComplete) onComplete(parsed);
-                  return;
-                }
-                if (parsed.status === 'error') {
-                  if (onError) onError(new Error(parsed.error || 'Pull failed'));
-                  return;
-                }
-              } catch (e) {
-                // Ignore parse errors for partial chunks
-              }
-            }
-          }
-        }
-        if (onComplete) onComplete({ status: 'success', percent: 100 });
-      })
-      .catch((err) => {
-        if (err.name === 'AbortError') {
-          if (onError) onError(new Error('Pull cancelled by user'));
-        } else {
-          if (onError) onError(err);
-        }
-      });
-
-    return controller;
-  },
-
-  /**
    * POST /models/provision - Triggers idempotent one-click model provisioning.
    * Single /api prefix: Vite dev proxy strips it, prod serves same-origin.
    */
-  async startProvisioning(modelId = null, auto = true) {
+  async startProvisioning(modelId = null, auto = true, activate = false) {
     const response = await authFetch(`${BASE_URL}/models/provision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model_id: modelId, auto }),
+      body: JSON.stringify({ model_id: modelId, auto, activate }),
     });
     if (!response.ok) {
-      const err = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new Error(err.detail || `Provisioning failed with status: ${response.status}`);
+      throw await errorFrom(response, `Provisioning failed with status: ${response.status}`);
     }
     return response.json();
   },
@@ -776,10 +827,8 @@ export const apiClient = {
     const controller = new AbortController();
     const headers = { Accept: 'text/event-stream' };
     const token = getAuthToken();
-    // Header auth (primary) + ?token= fallback (proxies that strip headers).
-    const streamUrl = token
-      ? `${BASE_URL}/models/provision/${jobId}/stream?token=${encodeURIComponent(token)}`
-      : `${BASE_URL}/models/provision/${jobId}/stream`;
+    // Header auth only: tokens are kept out of URLs (and therefore out of proxy/access logs).
+    const streamUrl = `${BASE_URL}/models/provision/${jobId}/stream`;
     if (token) headers.Authorization = `Bearer ${token}`;
     fetch(streamUrl, {
       signal: controller.signal,
@@ -808,7 +857,7 @@ export const apiClient = {
               try {
                 const parsed = JSON.parse(trimmed.replace(/^data:\s*/, ''));
                 if (onProgress) onProgress(parsed);
-                if (parsed.status === 'ready' || parsed.percent >= 100) {
+                if (parsed.status === 'ready') {
                   if (onComplete) onComplete(parsed);
                   return;
                 }
@@ -822,7 +871,8 @@ export const apiClient = {
             }
           }
         }
-        if (onComplete) onComplete({ status: 'ready', percent: 100 });
+        // The stream ended without a terminal status: report it instead of assuming success.
+        if (onError) onError(new Error('Progress stream ended before the download finished; reload to resume tracking.'));
       })
       .catch((err) => {
         if (err.name === 'AbortError') {

@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { apiClient, setAuthToken } from '../api/client';
 
 /**
- * LoginView — Luxury / Editorial Authentication Gate for DFrag Legal Engine.
- * Architectural precision (0px border-radius), Playfair Display serif typography,
- * grayscale-to-color Lady Justice artwork with 1800ms hover reward,
- * underline-only inputs, and sliding gold button animation.
+ * Sign-in / first-account registration.
+ * The server decides whether registration is open (/auth/status). There are no demo
+ * credentials and no token-less "guest" mode.
  */
 export default function LoginView({ onLoginSuccess, theme, setTheme }) {
-  const [mode, setMode] = useState('login'); // 'login' | 'register'
+  const [status, setStatus] = useState(null); // { accounts_exist, registration_open, password_min_length }
+  const [statusError, setStatusError] = useState('');
+  const [mode, setMode] = useState('login');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -16,484 +17,144 @@ export default function LoginView({ onLoginSuccess, theme, setTheme }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    let active = true;
+    apiClient.authStatus()
+      .then((s) => {
+        if (!active) return;
+        setStatus(s);
+        if (!s.accounts_exist) setMode('register');
+      })
+      .catch((err) => active && setStatusError(err.message || 'The workspace service is not reachable.'));
+    return () => { active = false; };
+  }, []);
+
+  const minLen = status?.password_min_length || 8;
+  const firstAccount = status && !status.accounts_exist;
+  const canRegister = !status || status.registration_open;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-
     try {
-      let result;
-      if (mode === 'login') {
-        result = await apiClient.login(username, password);
-      } else {
-        if (!email.trim()) {
-          setError('Email is required for practitioner registration.');
-          setLoading(false);
-          return;
-        }
-        result = await apiClient.register(username, email, password, fullName || undefined);
-      }
-
-      if (result && result.token) {
-        setAuthToken(result.token);
-        onLoginSuccess(result.user || { username });
-      } else {
-        setError('Authentication succeeded but no authorization token was issued.');
-      }
+      const result = mode === 'login'
+        ? await apiClient.login(username, password)
+        : await apiClient.register(username, email, password, fullName || undefined);
+      if (!result?.token) throw new Error('Sign-in succeeded but no session was issued.');
+      setAuthToken(result.token);
+      onLoginSuccess(result.user);
     } catch (err) {
-      setError(err.message || 'Authentication failed. Please verify practitioner credentials.');
+      setError(err.message || 'Sign-in failed.');
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleTheme = () => {
-    if (setTheme) {
-      setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
-    }
-  };
-
   return (
-    <div style={styles.pageContainer}>
-      {/* Top Utility Bar: Edition Marker & Theme Switcher */}
-      <div style={styles.topBar}>
-        <div style={styles.topBarLeft}>
-          <span style={styles.editionTag}>JURISPRUDENCE / VOL. 01</span>
-          <span style={styles.editionDivider}>—</span>
-          <span style={styles.systemTag}>AUTONOMOUS DEFENSIVE RAG</span>
-        </div>
-        <div style={styles.topBarRight}>
-          {setTheme && (
-            <button
-              type="button"
-              onClick={toggleTheme}
-              style={styles.themeToggleBtn}
-              title="Toggle Editorial Palette (Alabaster Paper / Rich Charcoal)"
-            >
-              {theme === 'light' ? '✦ DARK CHARCOAL' : '✦ WARM ALABASTER'}
-            </button>
+    <div style={s.page}>
+      <header style={s.top}>
+        <span style={s.brand}>DFrag</span>
+        <span style={s.brandSub}>Defensive legal research workspace</span>
+        {setTheme && (
+          <button type="button" style={s.link} onClick={() => setTheme((p) => (p === 'light' ? 'dark' : 'light'))}>
+            {theme === 'light' ? 'Dark' : 'Light'} theme
+          </button>
+        )}
+      </header>
+
+      <main style={s.main}>
+        <section style={s.card} aria-labelledby="auth-title">
+          <h1 id="auth-title" style={s.title}>
+            {firstAccount ? 'Create the workspace owner account' : mode === 'login' ? 'Sign in' : 'Create an account'}
+          </h1>
+          <p style={s.lede}>
+            {firstAccount
+              ? 'No accounts exist yet. The first account administers this workspace.'
+              : 'Answers are drawn from your indexed statutes and documents, with citations you can inspect.'}
+          </p>
+
+          {statusError && <div role="alert" style={s.error}>{statusError}</div>}
+
+          {!firstAccount && (
+            <div style={s.tabs} role="tablist">
+              <button type="button" role="tab" aria-selected={mode === 'login'} style={mode === 'login' ? s.tabOn : s.tab} onClick={() => { setMode('login'); setError(''); }}>Sign in</button>
+              {canRegister && (
+                <button type="button" role="tab" aria-selected={mode === 'register'} style={mode === 'register' ? s.tabOn : s.tab} onClick={() => { setMode('register'); setError(''); }}>Register</button>
+              )}
+            </div>
           )}
-        </div>
-      </div>
 
-      {/* Main Editorial 2-Column Split */}
-      <div style={styles.mainGrid}>
-        {/* Left Column: Lady Justice Editorial Showcase */}
-        <div style={styles.leftShowcase}>
-          <div className="editorial-image-container" style={styles.imageFrame}>
-            <div style={styles.verticalWatermark} className="editorial-vertical-label">
-              JUSTICE &bull; RATIO DECIDENDI
-            </div>
-            <img
-              src="/justice-poster.jpg"
-              alt="Lady Justice Editorial Poster"
-              className="editorial-image"
-              style={styles.heroPosterImg}
-              onError={(e) => {
-                // Fallback to landscape if poster not found
-                e.target.src = '/justice-bg.jpg';
-              }}
-            />
-            {/* Subtle Overlay Badge on Image */}
-            <div style={styles.imageCaptionBar}>
-              <span style={styles.captionLatin}>FIAT JUSTITIA RUAT CAELUM</span>
-              <span style={styles.captionSub}>Moral clarity in legal AI</span>
-            </div>
-          </div>
-
-          {/* Editorial Quote Block */}
-          <div style={styles.leftQuoteBlock}>
-            <p className="editorial-drop-cap" style={styles.dropCapParagraph}>
-              Yield not to the influence of power, but let each act rest on the unwavering balance of truth and ethical reckoning. Where algorithms parse human liberty, defense must be absolute.
-            </p>
-          </div>
-        </div>
-
-        {/* Right Column: Architectural Login Card */}
-        <div style={styles.rightCard}>
-          {/* Header Title with Mixed Italics */}
-          <div style={styles.cardHeader}>
-            <div style={styles.brandBadge}>
-              <span style={{ color: 'var(--accent-gold)', fontSize: '0.8rem' }}>✦</span>
-              <span style={styles.brandBadgeText}>LEGAL VERIFICATION GATE</span>
-            </div>
-
-            <h1 className="editorial-title" style={styles.cardTitle}>
-              JUSTICE <span className="editorial-italic">Copilot</span>
-            </h1>
-            <p style={styles.cardSubtitle}>
-              Access the high-integrity statutory research & citation engine.
-            </p>
-          </div>
-
-          {/* Mode Switcher (Underline Architectural Tabs) */}
-          <div style={styles.tabsRow}>
-            <button
-              type="button"
-              onClick={() => { setMode('login'); setError(''); }}
-              style={mode === 'login' ? styles.tabActive : styles.tab}
-            >
-              SIGN IN
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMode('register'); setError(''); }}
-              style={mode === 'register' ? styles.tabActive : styles.tab}
-            >
-              REGISTER PRACTITIONER
-            </button>
-          </div>
-
-          {/* Interactive Form */}
-          <form onSubmit={handleSubmit} style={styles.form}>
-            <div style={styles.inputGroup}>
-              <label style={styles.inputLabel}>PRACTITIONER USERNAME</label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. advocate_castelino"
-                required
-                minLength={3}
-                className="luxury-input"
-                autoComplete="username"
-              />
-            </div>
-
+          <form onSubmit={handleSubmit} style={s.form}>
+            <Field label="Username or email" hidden={mode !== 'login'}>
+              <input style={s.input} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required={mode === 'login'} />
+            </Field>
             {mode === 'register' && (
               <>
-                <div style={styles.inputGroup}>
-                  <label style={styles.inputLabel}>EMAIL ADDRESS</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="e.g. counsel@supremecourt.in"
-                    required
-                    className="luxury-input"
-                    autoComplete="email"
-                  />
-                </div>
-                <div style={styles.inputGroup}>
-                  <label style={styles.inputLabel}>FULL LEGAL NAME</label>
-                  <input
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="e.g. Advocate Dinol Castelino"
-                    className="luxury-input"
-                    autoComplete="name"
-                  />
-                </div>
+                <Field label="Username">
+                  <input style={s.input} value={username} onChange={(e) => setUsername(e.target.value)} minLength={3} maxLength={64} autoComplete="username" required />
+                </Field>
+                <Field label="Email">
+                  <input style={s.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
+                </Field>
+                <Field label="Full name (optional)">
+                  <input style={s.input} value={fullName} onChange={(e) => setFullName(e.target.value)} autoComplete="name" />
+                </Field>
               </>
             )}
-
-            <div style={styles.inputGroup}>
-              <label style={styles.inputLabel}>CONFIDENTIAL KEY / PASSWORD</label>
+            <Field label="Password">
               <input
+                style={s.input}
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={mode === 'register' ? 'Minimum 6 characters' : 'Enter passkey'}
-                required
-                minLength={mode === 'register' ? 6 : 1}
-                className="luxury-input"
+                minLength={mode === 'register' ? minLen : 1}
                 autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                required
               />
-            </div>
+              {mode === 'register' && <small style={s.hint}>At least {minLen} characters.</small>}
+            </Field>
 
-            {error && (
-              <div style={styles.errorBox}>
-                <span style={{ color: 'var(--status-red)', fontWeight: 700 }}>&sect; ERROR:</span> {error}
-              </div>
-            )}
+            {error && <div role="alert" style={s.error}>{error}</div>}
 
-            {/* Luxury Gold Slide Button */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="luxury-btn-primary"
-              style={{ marginTop: '14px', width: '100%', height: '48px' }}
-            >
-              <span>{loading ? 'AUTHENTICATING ENCRYPTED LEDGER…' : (mode === 'login' ? 'ENTER WORKSPACE ✦' : 'CREATE PRACTITIONER ACCOUNT ✦')}</span>
+            <button type="submit" disabled={loading || !!statusError} style={s.primary}>
+              {loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
             </button>
-
-            {/* Quick Demo Access Button */}
-            {mode === 'login' && (
-              <button
-                type="button"
-                onClick={() => {
-                  setUsername('admin');
-                  setPassword('AdminPass123!');
-                }}
-                className="luxury-btn-secondary"
-                style={{ width: '100%', height: '40px', marginTop: '10px' }}
-              >
-                <span>DEMO CREDENTIALS (ADMIN / ADMINPASS123!)</span>
-              </button>
-            )}
           </form>
-
-          {/* Footer Note */}
-          <div style={styles.cardFooter}>
-            <div style={styles.footerRule} />
-            <p style={styles.footerNote}>
-              {mode === 'login'
-                ? 'Statutory compliance ensured via cryptographic audit trails.'
-                : 'Account creation registers your public key in the local immutable ledger.'}
-            </p>
-          </div>
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 }
 
-const styles = {
-  pageContainer: {
-    minHeight: '100vh',
-    width: '100vw',
-    backgroundColor: 'var(--bg-app)',
-    color: 'var(--text-primary)',
-    display: 'flex',
-    flexDirection: 'column',
-    position: 'relative',
-    overflowY: 'auto',
-    overflowX: 'hidden',
-    padding: '24px 32px',
-    boxSizing: 'border-box',
-    zIndex: 10,
-  },
-  topBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: '20px',
-    borderBottom: '1px solid var(--border-subtle)',
-    maxWidth: '1400px',
-    width: '100%',
-    margin: '0 auto 32px',
-  },
-  topBarLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  editionTag: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '0.72rem',
-    letterSpacing: '0.22em',
-    color: 'var(--accent-gold)',
-    fontWeight: 600,
-  },
-  editionDivider: {
-    color: 'var(--text-dim)',
-  },
-  systemTag: {
-    fontFamily: 'var(--font-sans)',
-    fontSize: '0.72rem',
-    letterSpacing: '0.15em',
-    color: 'var(--text-muted)',
-    textTransform: 'uppercase',
-  },
-  topBarRight: {
-    display: 'flex',
-    alignItems: 'center',
-  },
-  themeToggleBtn: {
-    background: 'transparent',
-    border: '1px solid var(--border-medium)',
-    color: 'var(--text-secondary)',
-    padding: '6px 14px',
-    fontSize: '0.68rem',
-    fontFamily: 'var(--font-mono)',
-    letterSpacing: '0.18em',
-    borderRadius: '0px',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-  },
-  mainGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(320px, 1.1fr) minmax(340px, 1fr)',
-    gap: '48px',
-    maxWidth: '1400px',
-    width: '100%',
-    margin: '0 auto',
-    alignItems: 'center',
-  },
-  leftShowcase: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '24px',
-  },
-  imageFrame: {
-    position: 'relative',
-    height: '460px',
-    width: '100%',
-    backgroundColor: 'var(--bg-surface)',
-    border: '1px solid var(--border-medium)',
-  },
-  verticalWatermark: {
-    position: 'absolute',
-    left: '12px',
-    top: '20px',
-    zIndex: 5,
-    color: 'var(--accent-gold)',
-    background: 'rgba(20, 20, 20, 0.75)',
-    padding: '8px 4px',
-    borderLeft: '1px solid var(--accent-gold)',
-  },
-  heroPosterImg: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-    objectPosition: 'center 20%',
-  },
-  imageCaptionBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    background: 'linear-gradient(to top, rgba(17, 17, 17, 0.95) 0%, rgba(17, 17, 17, 0) 100%)',
-    padding: '24px 20px 14px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    zIndex: 4,
-  },
-  captionLatin: {
-    fontFamily: 'var(--font-serif)',
-    fontSize: '0.86rem',
-    letterSpacing: '0.14em',
-    color: 'var(--accent-gold)',
-    fontStyle: 'italic',
-  },
-  captionSub: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '0.64rem',
-    letterSpacing: '0.08em',
-    color: 'var(--text-muted)',
-    textTransform: 'uppercase',
-  },
-  leftQuoteBlock: {
-    borderLeft: '2px solid var(--accent-gold)',
-    paddingLeft: '20px',
-    paddingTop: '6px',
-    paddingBottom: '6px',
-  },
-  dropCapParagraph: {
-    fontFamily: 'var(--font-sans)',
-    fontSize: '0.88rem',
-    color: 'var(--text-secondary)',
-    lineHeight: 1.65,
-    margin: 0,
-  },
-  rightCard: {
-    backgroundColor: 'var(--bg-surface)',
-    border: '1px solid var(--border-subtle)',
-    borderTop: '2px solid var(--accent-gold)',
-    padding: '44px 44px 36px',
-    boxShadow: 'var(--shadow-md)',
-  },
-  cardHeader: {
-    marginBottom: '28px',
-  },
-  brandBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '8px',
-    marginBottom: '12px',
-  },
-  brandBadgeText: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '0.68rem',
-    letterSpacing: '0.22em',
-    color: 'var(--text-muted)',
-    textTransform: 'uppercase',
-  },
-  cardTitle: {
-    fontSize: '2.5rem',
-    margin: '0 0 8px 0',
-    color: 'var(--text-primary)',
-  },
-  cardSubtitle: {
-    fontFamily: 'var(--font-sans)',
-    fontSize: '0.86rem',
-    color: 'var(--text-secondary)',
-    lineHeight: 1.5,
-    margin: 0,
-  },
-  tabsRow: {
-    display: 'flex',
-    gap: '24px',
-    borderBottom: '1px solid var(--border-subtle)',
-    marginBottom: '26px',
-  },
-  tab: {
-    background: 'none',
-    border: 'none',
-    borderBottom: '2px solid transparent',
-    padding: '8px 0',
-    fontFamily: 'var(--font-sans)',
-    fontSize: '0.74rem',
-    letterSpacing: '0.18em',
-    color: 'var(--text-muted)',
-    fontWeight: 600,
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-  },
-  tabActive: {
-    background: 'none',
-    border: 'none',
-    borderBottom: '2px solid var(--accent-gold)',
-    padding: '8px 0',
-    fontFamily: 'var(--font-sans)',
-    fontSize: '0.74rem',
-    letterSpacing: '0.18em',
-    color: 'var(--accent-gold)',
-    fontWeight: 700,
-    cursor: 'pointer',
-  },
-  form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '20px',
-  },
-  inputGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  inputLabel: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '0.65rem',
-    letterSpacing: '0.18em',
-    color: 'var(--text-muted)',
-    textTransform: 'uppercase',
-  },
-  errorBox: {
-    padding: '12px 16px',
-    backgroundColor: 'rgba(239, 35, 60, 0.08)',
-    borderLeft: '2px solid var(--status-red)',
-    color: 'var(--text-primary)',
-    fontSize: '0.82rem',
-    fontFamily: 'var(--font-mono)',
-    lineHeight: 1.4,
-  },
-  cardFooter: {
-    marginTop: '28px',
-  },
-  footerRule: {
-    height: '1px',
-    backgroundColor: 'var(--border-subtle)',
-    marginBottom: '14px',
-  },
-  footerNote: {
-    fontFamily: 'var(--font-sans)',
-    fontSize: '0.74rem',
-    color: 'var(--text-muted)',
-    margin: 0,
-    textAlign: 'center',
-    letterSpacing: '0.02em',
-  },
+function Field({ label, children, hidden }) {
+  if (hidden) return null;
+  return (
+    <label style={s.field}>
+      <span style={s.label}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+const s = {
+  page: { minHeight: '100vh', background: 'var(--bg-app)', color: 'var(--text-primary)', display: 'flex', flexDirection: 'column', overflowY: 'auto' },
+  top: { display: 'flex', alignItems: 'baseline', gap: 12, padding: '20px 32px', borderBottom: '1px solid var(--border-subtle)' },
+  brand: { fontFamily: 'var(--font-serif)', fontSize: '1.25rem', fontWeight: 600 },
+  brandSub: { color: 'var(--text-muted)', fontSize: '0.85rem', flex: 1 },
+  link: { background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.82rem', textDecoration: 'underline' },
+  main: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 16px' },
+  card: { width: '100%', maxWidth: 440, borderTop: '2px solid var(--accent)', paddingTop: 28 },
+  title: { fontFamily: 'var(--font-serif)', fontWeight: 600, fontSize: '1.9rem', lineHeight: 1.2, marginBottom: 10 },
+  lede: { color: 'var(--text-secondary)', fontFamily: 'var(--font-serif)', fontSize: '1.02rem', lineHeight: 1.55, marginBottom: 24 },
+  tabs: { display: 'flex', gap: 20, borderBottom: '1px solid var(--border-subtle)', marginBottom: 20 },
+  tab: { background: 'none', border: 'none', borderBottom: '2px solid transparent', color: 'var(--text-muted)', padding: '8px 0', cursor: 'pointer', fontSize: '0.9rem' },
+  tabOn: { background: 'none', border: 'none', borderBottom: '2px solid var(--accent)', color: 'var(--text-primary)', padding: '8px 0', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 600 },
+  form: { display: 'flex', flexDirection: 'column', gap: 16 },
+  field: { display: 'flex', flexDirection: 'column', gap: 6 },
+  label: { fontSize: '0.8rem', color: 'var(--text-secondary)' },
+  input: { background: 'var(--bg-input)', border: '1px solid var(--border-medium)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', padding: '10px 12px', fontSize: '0.95rem', fontFamily: 'var(--font-sans)' },
+  hint: { color: 'var(--text-muted)', fontSize: '0.75rem' },
+  error: { border: '1px solid var(--status-red)', color: 'var(--status-red)', padding: '10px 12px', fontSize: '0.85rem', borderRadius: 'var(--radius-sm)' },
+  primary: { marginTop: 8, background: 'var(--accent)', color: 'var(--bg-app)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '12px 16px', fontSize: '0.95rem', fontWeight: 600, cursor: 'pointer' },
 };

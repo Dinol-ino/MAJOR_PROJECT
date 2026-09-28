@@ -29,12 +29,6 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
   const [backendInfo, setBackendInfo] = useState({ backend: 'in_process_sqlite', tier: 0 });
   const containerRef = useRef(null);
 
-  const seedPills = [
-    { label: '+ IT Act Sec 66', query: '66', act: 'it_act_2000' },
-    { label: '+ Companies Act Sec 166', query: '166', act: 'companies_act_2013' },
-    { label: '+ Shreya Singhal', query: 'Shreya Singhal', act: 'it_act_2000' },
-    { label: '+ Contract Sec 73', query: '73', act: 'contract_act_1872' },
-  ];
 
   const fetchGraph = async (forcedQuery = null) => {
     setLoading(true);
@@ -80,12 +74,6 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     fetchGraph();
-  };
-
-  const handleSeedClick = (pill) => {
-    setSearchQuery(pill.query);
-    setScope('global');
-    fetchGraph(pill.query);
   };
 
   const handleZoom = (delta) => {
@@ -332,34 +320,6 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
           </div>
         </div>
 
-        {/* Quick-Seed Shortcut Pills (Spec 05 §5.1) */}
-        <div style={{ padding: '8px 24px', background: 'rgba(15, 23, 42, 0.6)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto' }}>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-            Seed Shortcuts:
-          </span>
-          {seedPills.map((pill, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => handleSeedClick(pill)}
-              style={{
-                background: 'rgba(56, 189, 248, 0.08)',
-                border: '1px solid rgba(56, 189, 248, 0.25)',
-                borderRadius: '12px',
-                padding: '3px 10px',
-                color: 'var(--accent-cyan)',
-                fontSize: '0.72rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              {pill.label}
-            </button>
-          ))}
-        </div>
-
         {/* SVG Interactive Canvas */}
         <div
           ref={containerRef}
@@ -400,18 +360,20 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
                 No Citations in {scope === 'conversation' ? 'This Session' : scope === 'vault' ? 'This Vault' : 'Network'}
               </h3>
               <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: '1.5', marginBottom: '20px' }}>
-                Ask a legal question in Legal Copilot or click any Seed Shortcut above to load live statutory relationships.
+                {scope === 'global'
+                  ? 'No relationships are indexed yet. Cross-references appear when statutes are added to the corpus.'
+                  : 'Citations appear here once answers in this ' + (scope === 'vault' ? 'vault' : 'conversation') + ' cite retrieved provisions. Switch to the global scope to explore cross-references between indexed statutes.'}
               </p>
-              {onAskCopilot && (
+              {scope !== 'global' && (
                 <button
                   type="button"
-                  onClick={() => onAskCopilot("What are the key penalties and provisions under Section 66 of the IT Act, 2000?")}
+                  onClick={() => setScope('global')}
                   style={{
-                    background: 'var(--accent-gradient)',
-                    border: 'none',
-                    borderRadius: '8px',
+                    background: 'transparent',
+                    border: '1px solid var(--accent)',
+                    borderRadius: 'var(--radius-sm)',
                     padding: '8px 18px',
-                    color: 'white',
+                    color: 'var(--accent)',
                     fontSize: '0.82rem',
                     fontWeight: 600,
                     cursor: 'pointer',
@@ -420,8 +382,7 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
                     gap: '6px'
                   }}
                 >
-                  <SparklesIcon size={14} />
-                  <span>Go to Legal Copilot</span>
+                  <span>Show corpus cross-references</span>
                 </button>
               )}
             </div>
@@ -637,7 +598,7 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
                 type="button"
                 onClick={() => onAskCopilot(`Provide a rigorous legal analysis of ${selectedNode.label} including applicable statutory standards and recent case law interpretations.`)}
                 style={{
-                  background: 'var(--accent-gradient)',
+                  background: 'transparent', border: '1px solid var(--accent)',
                   border: 'none',
                   borderRadius: '8px',
                   padding: '10px 14px',

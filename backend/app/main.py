@@ -44,9 +44,21 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Background model auto-pull/warmup deferred: {exc}")
 
     app.state.warmup_task = asyncio.create_task(_background_warmup())
+
+    # Index the local statutory corpus once if the library is empty, off the event loop, so the
+    # first question is not answered against an empty index.
+    async def _background_corpus_index():
+        try:
+            from app.services.statute_sync import statute_sync_service
+            await asyncio.to_thread(statute_sync_service.auto_seed_if_empty)
+        except Exception as exc:
+            logger.warning("Statutory corpus indexing deferred: %s", type(exc).__name__)
+
+    app.state.corpus_task = asyncio.create_task(_background_corpus_index())
     logger.info("DFrag API started (network mode=%s, runtime=%s).", os.getenv("NETWORK_MODE", settings.network.default_mode), settings.MODEL_RUNTIME)
     yield
     app.state.warmup_task.cancel()
+    app.state.corpus_task.cancel()
 
 from app.security.rate_limit import limiter
 from slowapi.errors import RateLimitExceeded

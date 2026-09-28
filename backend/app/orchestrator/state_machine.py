@@ -1023,13 +1023,25 @@ class ResearchStateMachine:
         q = ctx.get("query", "").strip()
         import re
         act_match = re.search(r"(?i)\b(?:the\s+)?([a-z\s]{3,35}\s+(?:act|code|sanhita|adhiniyam)(?:\s*,?\s*\d{4})?)\b", q)
-        targeted_act_display = act_match.group(1).strip().title() if act_match else None
+        targeted_act_display = None
+        if act_match:
+            name = re.sub(r"(?i)^.*?\b(?:of|under|in|per)\s+(?:the\s+)?", "", act_match.group(1)).strip()
+            targeted_act_display = name.title() if name else None
+        indexed = self._indexed_act_matching(targeted_act_display) if targeted_act_display else None
 
-        if targeted_act_display:
+        if targeted_act_display and indexed:
+            lines = [
+                "### Insufficient verified evidence",
+                "",
+                f"*{indexed}* is indexed, but no passage in its indexed text matched this question closely enough to answer it reliably.",
+                "",
+                "**What you can do**: name the specific section, rephrase using the statute's own wording, or check the section list in the Statute Library.",
+            ]
+        elif targeted_act_display:
             lines = [
                 "### Statutory Corpus Scope Notice: Insufficient Grounded Evidence",
                 "",
-                f"The requested statute (*{targeted_act_display}*) is not currently present in the seeded statutory corpus.",
+                f"The requested statute (*{targeted_act_display}*) is not in the indexed statutory corpus.",
                 "",
                 "DFrag operates under a strict grounding policy where legal facts must reside in verified retrieval evidence rather than parametric model memory.",
                 "",
@@ -1052,6 +1064,26 @@ class ResearchStateMachine:
                 "3. **Refine Terminology**: Avoid conversational phrasing; use canonical Indian legal terminology."
             ]
         return "\n".join(lines)
+
+    @staticmethod
+    def _indexed_act_matching(name: Optional[str]) -> Optional[str]:
+        """Title of an indexed statute whose title contains all distinctive words of `name`."""
+        if not name:
+            return None
+        import re as _re
+        words = [w for w in _re.findall(r"[a-z]+", name.lower()) if w not in {"the", "act", "code", "of", "and"}]
+        if not words:
+            return None
+        try:
+            from app.db.engine import get_sync_session
+            from app.db.models import Statute
+            with get_sync_session() as session:
+                for (title,) in session.query(Statute.title).all():
+                    if all(w in title.lower() for w in words):
+                        return title
+        except Exception:
+            return None
+        return None
 
     @staticmethod
     def _indexed_acts_sentence() -> str:

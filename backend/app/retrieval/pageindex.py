@@ -54,7 +54,8 @@ class PageIndexBuilder:
                 header_text = sec_match.group(2).strip()
                 line_to_add = f"Section {current_section}"
                 if header_text:
-                    line_to_add += f" {header_text}"
+                    # "Section 66. Computer ..." must not become "Section 66 . Computer ..."
+                    line_to_add += header_text if header_text[0] in ".:-\u2013\u2014" else f" {header_text}"
                 current_section_lines = [line_to_add]
             else:
                 if current_section is not None:

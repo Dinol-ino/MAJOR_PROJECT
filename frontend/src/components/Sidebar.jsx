@@ -131,16 +131,18 @@ export default function Sidebar({
     }
   };
 
+  // Workspace = what the user does; System = how the workspace runs.
   const navItems = [
-    { key: 'chat', label: 'Legal Copilot', icon: SparklesIcon, color: 'var(--accent-blue)' },
-    { key: 'graph', label: 'Citation Graph', icon: GraphIcon, color: 'var(--accent-pink)', badge: 'BETA' },
-    { key: 'statutes', label: 'Statute Library', icon: LibraryIcon, color: 'var(--accent-blue)' },
-    { key: 'audit', label: 'Cryptographic Audit', icon: AuditIcon, color: 'var(--accent-pink)' },
+    { key: 'chat', label: 'Legal Copilot', icon: SparklesIcon, color: 'var(--accent)' },
+    { key: 'graph', label: 'Citation Graph', icon: GraphIcon, color: 'var(--accent)' },
+    { key: 'statutes', label: 'Statute Library', icon: LibraryIcon, color: 'var(--accent)' },
   ];
 
   const toolItems = [
-    { key: 'hardware', label: 'Hardware Engine', icon: CpuIcon, color: 'var(--accent-blue)' },
-    { key: 'settings', label: 'Settings', icon: EditIcon, color: 'var(--accent-blue)' },
+    { key: 'hardware', label: 'Hardware & Models', icon: CpuIcon, color: 'var(--accent)' },
+    { key: 'sources', label: 'Sources & Research', icon: CodeIcon, color: 'var(--accent)' },
+    { key: 'security', label: 'Security & Integrity', icon: AuditIcon, color: 'var(--accent)' },
+    { key: 'settings', label: 'Settings', icon: EditIcon, color: 'var(--accent)' },
   ];
 
   if (collapsed) {
@@ -256,11 +258,9 @@ export default function Sidebar({
               fontWeight: 700,
               fontSize: '1.05rem',
               color: 'var(--text-primary)',
-              letterSpacing: '0.12em',
-              textTransform: 'uppercase',
               lineHeight: 1.1
             }}>
-              JUSTICE <span style={{ color: 'var(--accent-gold)', fontSize: '0.75rem' }}>✦</span>
+              DFrag
             </span>
             <span style={{
               fontFamily: 'var(--font-mono)',
@@ -269,7 +269,7 @@ export default function Sidebar({
               letterSpacing: '0.10em',
               textTransform: 'uppercase'
             }}>
-              LEGAL VERIFICATION
+              Legal research
             </span>
           </div>
         </div>
@@ -310,7 +310,7 @@ export default function Sidebar({
           cursor: 'pointer',
         }}
       >
-        <div style={{ width: 18, height: 18, borderRadius: '0px', background: 'rgba(212, 175, 55, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 18, height: 18, borderRadius: '0px', background: 'var(--accent-blue-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <PlusIcon size={12} color="var(--accent-gold)" />
         </div>
         <span>New Inquiry</span>
@@ -334,7 +334,7 @@ export default function Sidebar({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                background: isActive ? 'rgba(212, 175, 55, 0.08)' : 'transparent',
+                background: isActive ? 'var(--accent-blue-subtle)' : 'transparent',
                 borderLeft: isActive ? '2px solid var(--accent-gold)' : '2px solid transparent',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
@@ -345,7 +345,7 @@ export default function Sidebar({
                 <span>{item.label}</span>
               </div>
               {item.badge && (
-                <span style={{ fontSize: '0.60rem', background: 'rgba(212, 175, 55, 0.15)', color: 'var(--accent-gold)', border: '1px solid var(--border-bold)', padding: '1px 5px', borderRadius: '0px', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                <span style={{ fontSize: '0.60rem', background: 'var(--accent-blue-subtle)', color: 'var(--accent-gold)', border: '1px solid var(--border-bold)', padding: '1px 5px', borderRadius: '0px', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
                   {item.badge}
                 </span>
               )}
@@ -357,7 +357,7 @@ export default function Sidebar({
       {/* Tools & System Section */}
       <div style={{ marginBottom: '16px' }}>
         <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '6px', paddingLeft: '8px', fontFamily: 'var(--font-mono)' }}>
-          SYSTEM TOOLS
+          SYSTEM
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
           {toolItems.map((item) => {
@@ -376,7 +376,7 @@ export default function Sidebar({
                   display: 'flex',
                   alignItems: 'center',
                   gap: '10px',
-                  background: isActive ? 'rgba(212, 175, 55, 0.08)' : 'transparent',
+                  background: isActive ? 'var(--accent-blue-subtle)' : 'transparent',
                   borderLeft: isActive ? '2px solid var(--accent-gold)' : '2px solid transparent',
                   cursor: 'pointer',
                   transition: 'all 0.2s ease',
@@ -593,19 +593,19 @@ export default function Sidebar({
         {/* Shield Status Badge */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-secondary)', padding: '2px 4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <CheckShieldIcon size={14} color={shieldOn ? 'var(--accent-pink)' : 'var(--defense-block)'} />
-            <span>3-Layer Shield: <strong style={{ color: shieldOn ? 'var(--accent-pink)' : 'var(--defense-block)' }}>{shieldOn ? 'Active' : 'Bypassed'}</strong></span>
+            <CheckShieldIcon size={14} color="var(--defense-pass)" />
+            <span>3-layer shield: <strong style={{ color: 'var(--defense-pass)' }}>enforced</strong></span>
           </div>
         </div>
 
         {/* User Info */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: '0.78rem' }}>
-              {user ? (user.username?.[0] || 'D').toUpperCase() : 'D'}
+            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--bg-raised)', border: '1px solid var(--border-medium)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.78rem' }}>
+              {(user?.username?.[0] || '?').toUpperCase()}
             </div>
             <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130 }}>
-              {user ? user.username || user.email || 'Dinol Castelino' : 'Dinol Castelino'}
+              {user?.username || user?.email || ''}
             </div>
           </div>
 
