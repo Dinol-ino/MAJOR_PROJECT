@@ -47,7 +47,7 @@ async def test_unseeded_act_honesty():
     assert res.failure_kind == "insufficient_evidence"
     assert "Statutory Corpus Scope Notice" in res.answer
     assert "Air Act" in res.answer or "Air Act 1981" in res.answer
-    assert "not currently present in the seeded statutory corpus" in res.answer
+    assert "is not in the indexed statutory corpus" in res.answer
     assert len(res.sources) == 0
 
 
