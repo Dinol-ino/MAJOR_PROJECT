@@ -44,45 +44,6 @@ models:
     language_support: ["en"]
     ollama_tag: "llama3.2:3b"
 
-  - model_id: "qwen2.5:7b"
-    display_name: "Qwen 2.5 7B (High Accuracy)"
-    provider: "ollama"
-    size_gb: 4.7
-    ram_required_gb: 8.0
-    vram_required_gb: 6.0
-    context_window: 8192
-    quantization: "q4_k_m"
-    tier: "standard"
-    requires_avx2: true
-    language_support: ["en", "hi"]
-    ollama_tag: "qwen2.5:7b"
-
-  - model_id: "dfrag-legal:7b"
-    display_name: "DFrag Legal 7B (Specialized Indian Law)"
-    provider: "ollama"
-    size_gb: 4.7
-    ram_required_gb: 8.0
-    vram_required_gb: 6.0
-    context_window: 8192
-    quantization: "q4_k_m"
-    tier: "standard"
-    requires_avx2: true
-    language_support: ["en", "hi"]
-    ollama_tag: "dfrag-legal:7b"
-
-  - model_id: "saullm:7b"
-    display_name: "SaulLM 7B (Legal Domain LLM)"
-    provider: "ollama"
-    size_gb: 4.7
-    ram_required_gb: 8.0
-    vram_required_gb: 6.0
-    context_window: 8192
-    quantization: "q4_k_m"
-    tier: "standard"
-    requires_avx2: true
-    language_support: ["en"]
-    ollama_tag: "saullm:7b"
-
 
   - model_id: "qwen2.5:14b"
     display_name: "Qwen 2.5 14B (Enterprise Tier 2)"

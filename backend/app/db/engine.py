@@ -20,6 +20,14 @@ def get_db_url(async_driver: bool = True) -> str:
         sqlite_path = settings.SQLITE_DB_PATH.replace("./", "")
         return f"sqlite+aiosqlite:///{sqlite_path}" if async_driver else f"sqlite:///{sqlite_path}"
 
+    if "@postgres:" in url or "://postgres:" in url:
+        import socket
+        try:
+            socket.gethostbyname("postgres")
+        except socket.gaierror:
+            sqlite_path = settings.SQLITE_DB_PATH.replace("./", "")
+            return f"sqlite+aiosqlite:///{sqlite_path}" if async_driver else f"sqlite:///{sqlite_path}"
+
     if async_driver:
         if url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+psycopg://", 1)
@@ -178,8 +186,15 @@ _async_session_factory = None
 def get_async_engine():
     global _async_engine
     if _async_engine is None:
-        url = get_db_url(async_driver=True)
-        is_sqlite = "sqlite" in url
+        sync_engine = get_sync_engine()
+        if "sqlite" in str(sync_engine.url):
+            sqlite_path = settings.SQLITE_DB_PATH.replace("./", "")
+            url = f"sqlite+aiosqlite:///{sqlite_path}"
+            is_sqlite = True
+        else:
+            url = get_db_url(async_driver=True)
+            is_sqlite = "sqlite" in url
+
         engine_kwargs = {
             "echo": False,
         }

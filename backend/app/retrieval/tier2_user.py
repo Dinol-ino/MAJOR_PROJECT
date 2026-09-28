@@ -133,7 +133,7 @@ class Tier2UserRetrieval:
                         "act": metas[i].get("act", metas[i].get("filename", "User Document")),
                         "section": metas[i].get("section", "General"),
                         "text": docs[i],
-                        "score": 1.0 - distances[i],
+                        "score": 1.0 / (1.0 + max(0.0, float(distances[i]))),
                         "doc_type": "user_document",
                         "metadata": metas[i]
                     })

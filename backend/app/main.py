@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import logging
 import time
+import httpx
 from fastapi import Depends, FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
@@ -81,6 +82,8 @@ from app.routes.auth import get_current_user
 
 PROTECTED = [Depends(get_current_user)]
 
+from app.routes import settings as settings_route
+
 app.include_router(chat.router, dependencies=PROTECTED)
 app.include_router(upload.router, dependencies=PROTECTED)
 app.include_router(recommend.router, dependencies=PROTECTED)
@@ -92,7 +95,8 @@ app.include_router(mcp.router, dependencies=PROTECTED)
 app.include_router(research.router, dependencies=PROTECTED)
 app.include_router(diagnostics.router, dependencies=PROTECTED)  # Includes cache metrics & control routes
 app.include_router(statutes.router, dependencies=PROTECTED)
-app.include_router(auth.router)         # Public: register/login/me & settings
+app.include_router(settings_route.router, dependencies=PROTECTED)
+app.include_router(auth.router)         # Public: register/login/me
 app.include_router(vaults.router, dependencies=PROTECTED)
 app.include_router(conversations.router, dependencies=PROTECTED)
 
@@ -139,3 +143,6 @@ async def health_check():
 async def db_health_check():
     return await check_db_health()
 
+@app.get("/test/ping")
+async def ping():
+    return {"ping": "pong"}

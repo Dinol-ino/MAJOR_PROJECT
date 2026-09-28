@@ -250,6 +250,26 @@ def compute_hardware_tier(gpu_data: Dict[str, Any], ram_data: Dict[str, Any]) ->
     }
 
 
+_cached_disk_info: Optional[tuple] = None
+_cached_disk_time: float = 0.0
+
+def _get_disk_usage() -> tuple:
+    global _cached_disk_info, _cached_disk_time
+    now = time.time()
+    if _cached_disk_info is not None and (now - _cached_disk_time) < 5.0:
+        return _cached_disk_info
+    try:
+        root_path = "C:\\" if sys.platform == "win32" else "/"
+        usage = psutil.disk_usage(root_path)
+        disk_free_gb = round(usage.free / (1024**3), 1)
+        disk_total_gb = round(usage.total / (1024**3), 1)
+        _cached_disk_info = (disk_free_gb, disk_total_gb)
+        _cached_disk_time = now
+        return _cached_disk_info
+    except Exception:
+        return (50.0, 500.0)
+
+
 _cached_cpu_name: Optional[str] = None
 
 def sample() -> Dict[str, Any]:
@@ -270,13 +290,7 @@ def sample() -> Dict[str, Any]:
     ram_used_percent = vm.percent
 
     # Disk metrics (safe root check across OS)
-    try:
-        root_path = "C:\\" if sys.platform == "win32" else "/"
-        disk_free_gb = round(psutil.disk_usage(root_path).free / (1024**3), 1)
-        disk_total_gb = round(psutil.disk_usage(root_path).total / (1024**3), 1)
-    except Exception:
-        disk_free_gb = 50.0
-        disk_total_gb = 500.0
+    disk_free_gb, disk_total_gb = _get_disk_usage()
 
     gpu_info = _gpu_sample()
     ram_info = {

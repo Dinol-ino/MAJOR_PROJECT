@@ -62,6 +62,18 @@ class OllamaClient:
 
                 # --- Model Not Found ---
                 if exc.response.status_code == 404:
+                    # Check if model has an underlying ollama_tag in registry
+                    try:
+                        from app.system.model_registry import ModelRegistry
+                        entry = ModelRegistry().get(target_model)
+                        if entry and entry.ollama_tag and entry.ollama_tag.lower() != target_model:
+                            try:
+                                return await self._call_ollama(prompt, entry.ollama_tag.lower())
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
                     if self.fallback_model and target_model != self.fallback_model.lower():
                         try:
                             return await self._call_ollama(prompt, self.fallback_model.lower())
@@ -97,11 +109,13 @@ class OllamaClient:
 
     async def generate_stream(self, prompt: str, model: Optional[str] = None):
         target_model = (model or self.default_model).strip().lower()
+        gen_timeout = float(getattr(settings.model, "ollama_generation_timeout_seconds", 180.0))
+        conn_timeout = float(getattr(settings.model, "ollama_connect_timeout_seconds", 30.0))
         timeout = httpx.Timeout(
-            connect=2.0,
-            read=25.0,
-            write=10.0,
-            pool=5.0,
+            connect=conn_timeout,
+            read=gen_timeout,
+            write=30.0,
+            pool=10.0,
         )
         payload: Dict[str, Any] = {
             "model": target_model,
@@ -127,11 +141,13 @@ class OllamaClient:
             yield full_text
 
     async def _call_ollama(self, prompt: str, model: str, force_cpu: bool = False) -> str:
+        gen_timeout = float(getattr(settings.model, "ollama_generation_timeout_seconds", 180.0))
+        conn_timeout = float(getattr(settings.model, "ollama_connect_timeout_seconds", 30.0))
         timeout = httpx.Timeout(
-            connect=2.0,
-            read=25.0,
-            write=10.0,
-            pool=5.0,
+            connect=conn_timeout,
+            read=gen_timeout,
+            write=30.0,
+            pool=10.0,
         )
         options = self._build_options(force_cpu=force_cpu)
         payload: Dict[str, Any] = {

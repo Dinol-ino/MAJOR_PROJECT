@@ -17,6 +17,18 @@ from app.config.settings import settings
 logger = logging.getLogger(__name__)
 
 
+def _normalize_ollama_tag(name: str) -> str:
+    """Lowercased tag with implicit ':latest' so 'qwen2.5:3b' != 'qwen2.5:7b'."""
+    tag = (name or "").strip().lower()
+    if tag and ":" not in tag:
+        tag = f"{tag}:latest"
+    return tag
+
+
+def _ollama_tags_match(wanted: str, reported: str) -> bool:
+    return _normalize_ollama_tag(wanted) == _normalize_ollama_tag(reported)
+
+
 class ProvisioningJob:
     def __init__(self, job_id: str, model_id: str, status: str = "pending",
                  percent: float = 0.0, message: str = "", error: Optional[str] = None):
@@ -53,7 +65,11 @@ class ModelProvisioningService:
         self.registry = registry or ModelRegistry()
         self.hw_detector = hardware_detector or HardwareDetector()
         self.download_manager = download_manager or ModelDownloadManager(self.registry)
-        self.db_path = db_path or os.path.join(os.path.dirname(__file__), "..", "..", "provisioning.db")
+        # PROVISIONING_DB_PATH lets Docker persist job history on the
+        # sqlite-data named volume (/workspace/db). Falls back to the legacy
+        # backend/provisioning.db location for native runs.
+        default_db = os.path.join(os.path.dirname(__file__), "..", "..", "provisioning.db")
+        self.db_path = db_path or os.getenv("PROVISIONING_DB_PATH", default_db)
         self._jobs: Dict[str, ProvisioningJob] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
         self._init_db()
@@ -314,19 +330,35 @@ class ModelProvisioningService:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(f"{settings.OLLAMA_URL}/api/tags")
                 if resp.status_code == 200:
-                    tags = [m.get("name", "").lower() for m in resp.json().get("models", [])]
-                    return model_id.lower() in tags or model_id.split(":")[0].lower() in tags
+                    reported = [m.get("name", "") for m in resp.json().get("models", [])]
+                    entry = self.registry.get(model_id)
+                    candidates = [model_id]
+                    if entry and entry.ollama_tag and entry.ollama_tag not in candidates:
+                        candidates.append(entry.ollama_tag)
+                    return any(
+                        _ollama_tags_match(cand, name)
+                        for cand in candidates
+                        for name in reported
+                    )
         except Exception as e:
             logger.debug(f"Idempotency check failed: {e}")
         return False
 
     def _check_storage(self, entry: ModelEntry) -> tuple[bool, str]:
+        # Contract: required_gb = size_gb * 2.5 + 5.0 OS headroom.
+        # The backend container cannot stat the ollama-models named volume
+        # directly, so the host-disk free space visible here is used as proxy
+        # (same Docker host disk backs both containers).
         try:
             free = shutil.disk_usage(os.getcwd()).free / (1024 ** 3)
-            required = entry.size_gb * 2.5
+            required = entry.size_gb * 2.5 + 5.0
             if free < required:
-                return False, f"Insufficient storage: {free:.1f}GB free, need {required:.1f}GB for {entry.display_name}"
-            return True, f"Storage OK: {free:.1f}GB free"
+                return False, (
+                    f"Insufficient storage: {free:.1f}GB free, need {required:.1f}GB "
+                    f"to safely download {entry.display_name} (model + extraction + 5GB OS headroom). "
+                    f"Free up space or stay on a smaller model."
+                )
+            return True, f"Storage OK: {free:.1f}GB free (requires {required:.1f}GB)"
         except Exception as e:
             logger.debug(f"Storage check error: {e}")
             return True, "Storage check skipped"
@@ -334,12 +366,13 @@ class ModelProvisioningService:
     async def _pull_model(self, job: ProvisioningJob, entry: ModelEntry) -> bool:
         tag = entry.ollama_tag or entry.model_id
         try:
-            async with httpx.AsyncClient(timeout=300.0, connect=2.0) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(3600.0, connect=5.0)) as client:
                 async with client.stream("POST", f"{settings.OLLAMA_URL}/api/pull",
                                          json={"name": tag, "stream": True}) as resp:
                     if resp.status_code != 200:
                         logger.error(f"Ollama pull failed: HTTP {resp.status_code}")
                         return False
+                    saw_success = False
                     async for line in resp.aiter_lines():
                         if not line.strip():
                             continue
@@ -355,9 +388,33 @@ class ModelProvisioningService:
                             job.message = f"Pulling {tag}: {status}"
                             self._persist_job(job)
                             if status == "success":
-                                return True
+                                saw_success = True
                         except Exception:
                             pass
+                    if not saw_success:
+                        logger.error(f"Ollama pull stream for {tag} ended without success status")
+                        return False
+
+            # If entry.model_id differs from tag (e.g. dfrag-legal:7b -> qwen2.5:7b), create alias model
+            if entry.model_id != tag:
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as create_client:
+                        await create_client.post(
+                            f"{settings.OLLAMA_URL}/api/create",
+                            json={
+                                "model": entry.model_id,
+                                "from": tag,
+                                "system": "You are DFrag Legal, specialized in Indian legal research."
+                            }
+                        )
+                except Exception as create_err:
+                    logger.warning(f"Could not create alias model {entry.model_id} from {tag}: {create_err}")
+
+            # Post-stream verification: the model must actually be listed now.
+            verify_tag = entry.model_id
+            if not await self._check_installed(verify_tag):
+                logger.error(f"Pull stream finished but {verify_tag} is not listed by Ollama")
+                return False
             return True
         except Exception as e:
             logger.error(f"Pull failed for {tag}: {e}")
@@ -365,13 +422,24 @@ class ModelProvisioningService:
 
     async def _health_check(self, model_id: str) -> bool:
         try:
+            entry = self.registry.get(model_id)
+            candidates = [model_id]
+            if entry and entry.ollama_tag and entry.ollama_tag not in candidates:
+                candidates.append(entry.ollama_tag)
+
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(
-                    f"{settings.OLLAMA_URL}/api/generate",
-                    json={"model": model_id, "prompt": "ping", "stream": False},
-                    timeout=10.0
-                )
-                return resp.status_code == 200
+                for cand in candidates:
+                    try:
+                        resp = await client.post(
+                            f"{settings.OLLAMA_URL}/api/generate",
+                            json={"model": cand, "prompt": "ping", "stream": False},
+                            timeout=10.0
+                        )
+                        if resp.status_code == 200:
+                            return True
+                    except Exception:
+                        pass
+                return False
         except Exception as e:
             logger.warning(f"Health check failed for {model_id}: {e}")
             return False

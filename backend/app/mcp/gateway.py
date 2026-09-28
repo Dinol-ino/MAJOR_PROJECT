@@ -59,7 +59,14 @@ class MCPGateway:
         Synchronously executes a tool call through all defensive gates.
         """
         start_time = time.time()
-        mode = (network_mode or settings.network.default_mode).upper()
+        if network_mode:
+            mode = network_mode.upper()
+        else:
+            try:
+                from app.network.mode_enforcer import mode_enforcer
+                mode = mode_enforcer.get_mode().upper()
+            except Exception:
+                mode = settings.network.default_mode.upper()
 
         # Step 1: Policy Engine Evaluation
         decision: PolicyDecision = policy_engine.evaluate(

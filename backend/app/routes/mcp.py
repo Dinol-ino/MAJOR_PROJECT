@@ -43,9 +43,11 @@ def get_mcp_status():
     active_servers = mcp_server_manager.get_all_servers_status()
     all_tools = tool_registry.list_tools()
 
+    from app.network.mode_enforcer import mode_enforcer
+
     return MCPStatusResponse(
         enabled=policy_engine._policy_data.get("global", {}).get("enabled", True),
-        current_network_mode=settings.network.default_mode,
+        current_network_mode=mode_enforcer.get_mode(),
         categories=categories,
         active_servers=active_servers,
         total_registered_tools=len(all_tools),

@@ -18,19 +18,21 @@ services:
     restart: unless-stopped
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.11.3
     container_name: dfrag-ollama
     ports:
       - "11434:11434"
     volumes:
       - ollama-models:/root/.ollama
-    restart: always
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      # ollama/ollama image has no curl; use the bundled CLI for health.
+      # start_period extended: first multi-GB pull can keep the daemon busy.
+      test: ["CMD-SHELL", "ollama ps || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 120s
 
   redis:
     image: redis:7-alpine
@@ -62,6 +64,8 @@ services:
       - ANONYMIZED_TELEMETRY=False
       - CHROMA_PERSIST_DIR=/workspace/chroma_db
       - SQLITE_DB_PATH=/workspace/db/audit_log.db
+      # Persisted via the sqlite-data named volume (survives `down`, lost only on `down -v`).
+      - PROVISIONING_DB_PATH=/workspace/db/provisioning.db
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -76,7 +80,8 @@ services:
       interval: 20s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      # Cold imports (torch/transformers/spacy) take minutes on slow/full disks.
+      start_period: 180s
     restart: unless-stopped
 
   frontend:

@@ -203,11 +203,13 @@ class VaultDocumentIngestionService:
             res = col.query(query_texts=[query_text], n_results=top_k)
             results = []
             if res and res.get("documents") and res["documents"][0]:
-                for doc_text, meta in zip(res["documents"][0], res["metadatas"][0]):
+                distances = res.get("distances", [[]])[0] if "distances" in res and res["distances"] else [0.0] * len(res["documents"][0])
+                for i, (doc_text, meta) in enumerate(zip(res["documents"][0], res["metadatas"][0])):
+                    dist = distances[i] if i < len(distances) else 0.0
                     results.append({
                         "text": doc_text,
                         "metadata": meta,
-                        "score": 0.85,  # dense distance converted
+                        "score": 1.0 / (1.0 + max(0.0, float(dist))),
                     })
             return results
         except Exception as e:
@@ -222,6 +224,13 @@ class VaultDocumentIngestionService:
             col.delete(where={"doc_id": doc_id})
         except Exception as e:
             logger.warning(f"Error purging vectors for doc {doc_id} from vault {vault_id}: {e}")
+
+        try:
+            matching_ids = [cid for cid, m in zip(self.bm25_index.doc_ids, self.bm25_index.metadatas) if m.get("doc_id") == doc_id or cid.startswith(f"{doc_id}_")]
+            for mid in matching_ids:
+                self.bm25_index.delete_document(mid)
+        except Exception as e:
+            logger.debug(f"BM25 doc purge notice for doc {doc_id}: {e}")
 
 
 ingest_service = VaultDocumentIngestionService()

@@ -116,7 +116,7 @@ class Tier1LawRetrieval:
                         "act": metas[i].get("act", "General Law"),
                         "section": metas[i].get("section", "General"),
                         "text": docs[i],
-                        "score": 1.0 - distances[i],
+                        "score": 1.0 / (1.0 + max(0.0, float(distances[i]))),
                         "doc_type": "statutory_law",
                         "metadata": metas[i]
                     })

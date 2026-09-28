@@ -1,7 +1,8 @@
 import time
 import logging
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Query
+from app.routes.auth import get_current_user
 
 from app.schemas import ChatRequest, ChatResponse
 from app.config import settings
@@ -97,11 +98,12 @@ def _synthesize_grounded_legal_answer(query: str, evidence: List[Dict[str, Any]]
 
 
 @router.get("/chat/sessions")
-def list_sessions(user_id: str = "default_user"):
+def list_sessions(user_id: Optional[str] = Query(None), current_user: Dict = Depends(get_current_user)):
     """
     Returns list of past task sessions for the sidebar navigation from durable memory.
     """
-    conversations = durable_memory.get_user_conversations(user_id=user_id)
+    uid = user_id or current_user.get("id") or "default_user"
+    conversations = durable_memory.get_user_conversations(user_id=uid)
     sessions = []
     for conv in conversations:
         sessions.append({
@@ -114,36 +116,41 @@ def list_sessions(user_id: str = "default_user"):
 
 
 @router.get("/chat/sessions/{session_id}/messages")
-def get_session_messages(session_id: str, user_id: str = "default_user"):
+def get_session_messages(session_id: str, user_id: Optional[str] = Query(None), current_user: Dict = Depends(get_current_user)):
     """
     Returns full transcript message history for a specific conversation.
     """
-    messages = durable_memory.get_conversation_messages(session_id, user_id=user_id)
+    uid = user_id or current_user.get("id") or "default_user"
+    messages = durable_memory.get_conversation_messages(session_id, user_id=uid)
     return {"session_id": session_id, "messages": messages}
 
 
 @router.delete("/chat/sessions/{session_id}")
-def delete_session(session_id: str, user_id: str = "default_user"):
-    durable_memory.delete_conversation(session_id, user_id=user_id)
+def delete_session(session_id: str, user_id: Optional[str] = Query(None), current_user: Dict = Depends(get_current_user)):
+    uid = user_id or current_user.get("id") or "default_user"
+    durable_memory.delete_conversation(session_id, user_id=uid)
     return {"status": "ok", "deleted": session_id}
 
 
 @router.get("/chat/memory/semantic")
-def list_semantic_memories(user_id: str = "default_user", category: Optional[str] = None):
+def list_semantic_memories(user_id: Optional[str] = Query(None), category: Optional[str] = None, current_user: Dict = Depends(get_current_user)):
     """Lists structured semantic facts and preferences for a user."""
-    return {"memories": durable_memory.get_semantic_memories(user_id=user_id, category=category)}
+    uid = user_id or current_user.get("id") or "default_user"
+    return {"memories": durable_memory.get_semantic_memories(user_id=uid, category=category)}
 
 
 @router.post("/chat/memory/semantic")
-def create_semantic_memory(user_id: str = "default_user", category: str = "preference", key: str = "", value: str = ""):
+def create_semantic_memory(user_id: Optional[str] = Query(None), category: str = "preference", key: str = "", value: str = "", current_user: Dict = Depends(get_current_user)):
     """Stores a contextual fact or preference in persistent semantic memory."""
-    mem = durable_memory.save_semantic_memory(user_id=user_id, category=category, key=key, value=value)
+    uid = user_id or current_user.get("id") or "default_user"
+    mem = durable_memory.save_semantic_memory(user_id=uid, category=category, key=key, value=value)
     return {"status": "ok", "memory": mem}
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_current_user)):
     start_time = time.time()
+    current_uid = current_user.get("id") or "default_user"
     req_memory = RequestMemory(
         session_id=request.session_id,
         raw_query=request.message,
@@ -153,7 +160,7 @@ async def chat_endpoint(request: ChatRequest):
     # Write-through persistence: record user turn
     durable_memory.create_conversation_if_not_exists(
         conversation_id=request.session_id,
-        user_id="default_user",
+        user_id=current_uid,
         title=request.message[:35] + ("..." if len(request.message) > 35 else "")
     )
     if request.vault_id:
@@ -169,7 +176,7 @@ async def chat_endpoint(request: ChatRequest):
         conversation_id=request.session_id,
         role="user",
         content=request.message,
-        user_id="default_user"
+        user_id=current_uid
     )
 
     # --- SHIELD ON PIPELINE (Defensive RAG Mode) ---
@@ -180,7 +187,7 @@ async def chat_endpoint(request: ChatRequest):
             orch_res = await research_orchestrator.execute(
                 query=request.message,
                 session_id=request.session_id,
-                user_id="default_user",
+                user_id=current_uid,
                 model=request.model,
                 shield_on=True,
                 vault_id=request.vault_id,
@@ -192,7 +199,7 @@ async def chat_endpoint(request: ChatRequest):
                 content=orch_res.answer,
                 citations=orch_res.sources,
                 reasoning_trace=orch_res.reasoning_trace,
-                user_id="default_user"
+                user_id=current_uid
             )
             conf_score = None
             halluc_flags = []
@@ -218,7 +225,9 @@ async def chat_endpoint(request: ChatRequest):
                 correlation_id=orch_res.correlation_id or orch_res.request_id,
                 confidence_score=conf_score,
                 hallucination_flags=halluc_flags,
-                reasoning_trace=orch_res.reasoning_trace
+                reasoning_trace=orch_res.reasoning_trace,
+                model_used=getattr(orch_res, "model_used", None) or request.model or settings.DEFAULT_MODEL,
+                runtime_used=getattr(orch_res, "runtime_used", None) or settings.MODEL_RUNTIME
             )
 
         # Direct Fallback Pipeline (Rollback Mode)
@@ -241,7 +250,7 @@ async def chat_endpoint(request: ChatRequest):
                 conversation_id=request.session_id,
                 role="assistant",
                 content=blocked_msg,
-                user_id="default_user"
+                user_id=current_uid
             )
             return ChatResponse(
                 answer=blocked_msg,
@@ -417,6 +426,9 @@ async def chat_endpoint(request: ChatRequest):
         hallucination_report = hallucination_detector.detect(final_answer, fitted_chunks)
         confidence = confidence_scorer.score(final_answer, fitted_chunks, hallucination_report)
 
+        model_used = request.model or settings.DEFAULT_MODEL
+        runtime_used = settings.MODEL_RUNTIME
+
         audit_logger.log(
             action="chat_success",
             layer=None,
@@ -424,7 +436,7 @@ async def chat_endpoint(request: ChatRequest):
             retrieval_hits=len(retrieved_chunks),
             citations_used=len(sources),
             validation_pass_fail="pass",
-            model_tier_used=request.model or settings.DEFAULT_MODEL,
+            model_tier_used=model_used,
             latency_ms=latency_ms
         )
 
@@ -433,7 +445,7 @@ async def chat_endpoint(request: ChatRequest):
             role="assistant",
             content=final_answer,
             citations=citations_parsed if citations_parsed else sources_dict,
-            user_id="default_user",
+            user_id=current_uid,
             model_used=model_used,
             runtime_used=runtime_used,
             reasoning_trace=reasoning_trace,
@@ -447,7 +459,7 @@ async def chat_endpoint(request: ChatRequest):
             event = ChatResponseFinalized(
                 conversation_id=request.session_id,
                 message_id=msg_id,
-                user_id="default_user",
+                user_id=current_uid,
                 query=request.message,
                 answer=final_answer,
                 citations=citations_parsed if citations_parsed else [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in sources],
@@ -523,7 +535,10 @@ async def chat_endpoint(request: ChatRequest):
             blocked_by=None,
             block_reason=None,
             confidence_score=confidence,
-            hallucination_flags=hallucination_report.signals
+            hallucination_flags=hallucination_report.signals,
+            correlation_id=request.session_id,
+            model_used=request.model or settings.DEFAULT_MODEL,
+            runtime_used=settings.MODEL_RUNTIME
         )
 
 
@@ -541,7 +556,7 @@ def get_message_grounding(message_id: str):
 
         cits = msg.citations_json or msg.citations or []
         total_citations = len(cits)
-        resolved_citations = sum(1 for c in cits if c.get("quote") or c.get("source_chunk_id") or c.get("resolved", True))
+        resolved_citations = sum(1 for c in cits if c.get("quote") or c.get("source_chunk_id") or c.get("resolved") is True)
         unresolved = total_citations - resolved_citations
 
         return {

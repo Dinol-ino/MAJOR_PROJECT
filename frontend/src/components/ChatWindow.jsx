@@ -80,29 +80,73 @@ export default function ChatWindow({
             }}
             className="view-container"
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
               <div
                 style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 'var(--radius-md)',
-                  background: 'rgba(79, 140, 255, 0.12)',
-                  border: '1px solid rgba(79, 140, 255, 0.25)',
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  justifyContent: 'center'
+                  gap: '8px',
+                  padding: '4px 14px',
+                  borderRadius: '999px',
+                  background: 'rgba(230, 57, 70, 0.12)',
+                  border: '1px solid rgba(230, 57, 70, 0.35)',
+                  fontSize: '0.72rem',
+                  fontFamily: 'var(--font-mono)',
+                  letterSpacing: '0.08em',
+                  color: 'var(--accent-pink)',
+                  textTransform: 'uppercase',
+                  boxShadow: '0 0 14px rgba(230, 57, 70, 0.2)'
                 }}
               >
-                <SparklesIcon size={22} color="var(--accent)" />
+                <span>✦</span>
+                <span>FIAT JUSTITIA RUAT CAELUM</span>
+                <span>✦</span>
+              </div>
+
+              <div
+                style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: 'var(--radius-md)',
+                  background: 'linear-gradient(135deg, rgba(230, 57, 70, 0.25) 0%, rgba(26, 8, 14, 0.8) 100%)',
+                  border: '1px solid rgba(230, 57, 70, 0.5)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 0 24px rgba(230, 57, 70, 0.35)',
+                  marginTop: '4px'
+                }}
+              >
+                <span style={{ fontSize: '24px' }}>⚖️</span>
               </div>
             </div>
 
-            <h1 style={{ fontSize: '2.1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '8px', letterSpacing: '-0.02em' }}>
-              Legal AI Research Copilot
+            <h1 style={{
+              fontSize: '2.4rem',
+              fontWeight: 900,
+              color: 'var(--text-primary)',
+              marginBottom: '10px',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              textShadow: '0 2px 20px rgba(230, 57, 70, 0.3)'
+            }}>
+              JUSTICE <span style={{ color: 'var(--accent)' }}>COPILOT</span>
             </h1>
 
-            <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', maxWidth: '540px', marginBottom: '28px', lineHeight: '1.5' }}>
-              Ask questions on Indian statutes, examine case evidence with citation grounding, and verify procedural requirements with multi-tier defense.
+            <p style={{
+              fontSize: '0.85rem',
+              fontStyle: 'italic',
+              color: 'var(--text-secondary)',
+              maxWidth: '580px',
+              marginBottom: '24px',
+              lineHeight: '1.6',
+              borderLeft: '2px solid rgba(230, 57, 70, 0.4)',
+              borderRight: '2px solid rgba(230, 57, 70, 0.4)',
+              padding: '4px 16px',
+              background: 'rgba(230, 57, 70, 0.04)',
+              borderRadius: '4px'
+            }}>
+              "Yield not to the influence of power, but let each act rest on the unwavering balance of truth and ethical reckoning."
             </p>
 
             <CommandInput

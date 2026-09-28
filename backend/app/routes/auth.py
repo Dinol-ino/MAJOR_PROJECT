@@ -6,7 +6,7 @@ import secrets
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends, Header, Request
+from fastapi import APIRouter, HTTPException, Depends, Header, Query, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, func
 
@@ -15,12 +15,33 @@ from app.db.models import User
 from app.defense.audit_log import AuditLogger
 from app.security.rate_limit import limiter
 
+import jwt
+
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["auth", "settings"])
-from .settings import router as settings_router
-router.include_router(settings_router)
+router = APIRouter(tags=["auth"])
 
 audit_logger = AuditLogger()
+
+AUTH_SECRET = os.getenv("SECRET_KEY") or "dfrag-jwt-auth-secret-session-key-2026"
+AUTH_ALGORITHM = "HS256"
+AUTH_TOKEN_EXPIRE_SECONDS = 7 * 86400  # 7 days
+
+
+def _generate_token(user_id: str) -> str:
+    payload = {
+        "sub": user_id,
+        "iat": int(time.time()),
+        "exp": int(time.time()) + AUTH_TOKEN_EXPIRE_SECONDS,
+    }
+    return jwt.encode(payload, AUTH_SECRET, algorithm=AUTH_ALGORITHM)
+
+
+def _decode_token(token: str) -> Optional[str]:
+    try:
+        payload = jwt.decode(token, AUTH_SECRET, algorithms=[AUTH_ALGORITHM])
+        return payload.get("sub")
+    except Exception:
+        return None
 
 # Token storage in memory (bounded cache for active sessions)
 _ACTIVE_TOKENS: Dict[str, Dict[str, Any]] = {}
@@ -125,21 +146,42 @@ class AuthResponse(BaseModel):
     user: Dict[str, Any]
 
 
-def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None),
+) -> Dict[str, Any]:
     """
     Enforced authentication dependency for all protected routes.
 
-    - Valid Bearer token -> session user.
+    - Valid Bearer token (header) -> session user.
+    - Valid ?token= query param -> session user (SSE/EventSource fallback;
+      browsers cannot set headers on EventSource, so streaming endpoints
+      accept the same session token as a query param over HTTP/S).
     - Invalid token -> 401.
     - No token, but zero registered accounts -> first-run setup mode (default
       practitioner) so a brand-new install is never locked out of registration.
     - No token, accounts exist -> 401.
     """
+    bearer = None
     if authorization and authorization.startswith("Bearer "):
-        token = authorization[len("Bearer "):].strip()
-        user = _ACTIVE_TOKENS.get(token)
+        bearer = authorization[len("Bearer "):].strip()
+    candidate = bearer or (token.strip() if token else None)
+    if candidate:
+        user = _ACTIVE_TOKENS.get(candidate)
         if user:
             return user
+        # Try decoding as persistent signed JWT
+        sub_user_id = _decode_token(candidate)
+        if sub_user_id:
+            try:
+                with get_sync_session() as session:
+                    db_user = session.execute(select(User).where(User.id == sub_user_id)).scalar_one_or_none()
+                    if db_user:
+                        user_dict = db_user.to_dict()
+                        _ACTIVE_TOKENS[candidate] = user_dict
+                        return user_dict
+            except Exception as e:
+                logger.error(f"Error restoring user from token: {e}")
         raise HTTPException(status_code=401, detail="Invalid or expired session. Please log in again.")
 
     if _auth_disabled_for_tests():
@@ -185,7 +227,7 @@ def register(request: Request, req: RegisterRequest):
         session.refresh(user)
 
         user_dict = user.to_dict()
-        token = secrets.token_hex(24)
+        token = _generate_token(user.id)
         _ACTIVE_TOKENS[token] = user_dict
         audit_logger.log(action=f"account_registered:{user.username}", layer="security")
 
@@ -211,7 +253,7 @@ def login(request: Request, req: LoginRequest):
 
         _clear_failed_logins(throttle_key)
         user_dict = user.to_dict()
-        token = secrets.token_hex(24)
+        token = _generate_token(user.id)
         _ACTIVE_TOKENS[token] = user_dict
         audit_logger.log(action=f"login_success:{user.username}", layer="security")
 

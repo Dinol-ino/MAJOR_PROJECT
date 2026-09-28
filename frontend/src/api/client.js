@@ -1,4 +1,4 @@
-const BASE_URL = '/api';
+export const BASE_URL = '/api';
 
 const TOKEN_KEY = 'dfrag_auth_token';
 
@@ -32,6 +32,8 @@ export async function authFetch(url, opts = {}) {
 }
 
 export const apiClient = {
+  /** Base prefix for all API calls (Vite dev proxy strips it; prod serves same-origin). */
+  BASE_URL,
   /**
    * POST /auth/login
    */
@@ -393,8 +395,9 @@ export const apiClient = {
   /**
    * GET /vaults
    */
-  async getVaults(userId = 'default_user') {
-    const response = await authFetch(`${BASE_URL}/vaults?user_id=${encodeURIComponent(userId)}`, {
+  async getVaults(userId = null) {
+    const url = userId ? `${BASE_URL}/vaults?user_id=${encodeURIComponent(userId)}` : `${BASE_URL}/vaults`;
+    const response = await authFetch(url, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -526,7 +529,7 @@ export const apiClient = {
    */
   async getConversations(vaultId = null) {
     const url = vaultId ? `${BASE_URL}/conversations?vault_id=${encodeURIComponent(vaultId)}` : `${BASE_URL}/conversations`;
-    const response = await fetch(url, {
+    const response = await authFetch(url, {
       method: 'GET',
     });
     if (!response.ok) {
@@ -665,15 +668,23 @@ export const apiClient = {
    */
   pullModelStream(modelName, onProgress, onComplete, onError) {
     const controller = new AbortController();
+    const headers = { 'Content-Type': 'application/json' };
+    const token = getAuthToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
 
-    fetch(`${BASE_URL}/models/pull?stream=true`, {
+    const streamUrl = token
+      ? `${BASE_URL}/models/pull?stream=true&token=${encodeURIComponent(token)}`
+      : `${BASE_URL}/models/pull?stream=true`;
+
+    fetch(streamUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: modelName }),
+      headers,
+      body: JSON.stringify({ name: modelName, model_id: modelName }),
       signal: controller.signal,
     })
       .then(async (response) => {
         if (!response.ok) {
+          if (response.status === 401) window.dispatchEvent(new Event('dfrag:unauthorized'));
           throw new Error(`Pull request failed: ${response.status}`);
         }
         const reader = response.body.getReader();
@@ -694,7 +705,7 @@ export const apiClient = {
               try {
                 const parsed = JSON.parse(trimmed.replace(/^data:\s*/, ''));
                 if (onProgress) onProgress(parsed);
-                if (parsed.status === 'success' || parsed.percent >= 100) {
+                if (parsed.status === 'success' || parsed.status === 'verified' || parsed.percent >= 100) {
                   if (onComplete) onComplete(parsed);
                   return;
                 }
@@ -722,10 +733,11 @@ export const apiClient = {
   },
 
   /**
-   * POST /api/models/provision - Triggers idempotent one-click model provisioning
+   * POST /models/provision - Triggers idempotent one-click model provisioning.
+   * Single /api prefix: Vite dev proxy strips it, prod serves same-origin.
    */
   async startProvisioning(modelId = null, auto = true) {
-    const response = await authFetch(`${BASE_URL}/api/models/provision`, {
+    const response = await authFetch(`${BASE_URL}/models/provision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model_id: modelId, auto }),
@@ -738,19 +750,19 @@ export const apiClient = {
   },
 
   /**
-   * GET /api/models/provision/active - Returns currently running or recent provisioning job
+   * GET /models/provision/active - Returns currently running or recent provisioning job
    */
   async getActiveProvisioningJob() {
-    const response = await authFetch(`${BASE_URL}/api/models/provision/active`);
+    const response = await authFetch(`${BASE_URL}/models/provision/active`);
     if (!response.ok) return null;
     return response.json();
   },
 
   /**
-   * GET /api/models/provision/{job_id} - Polls job metrics
+   * GET /models/provision/{job_id} - Polls job metrics
    */
   async getProvisioningStatus(jobId) {
-    const response = await authFetch(`${BASE_URL}/api/models/provision/${jobId}`);
+    const response = await authFetch(`${BASE_URL}/models/provision/${jobId}`);
     if (!response.ok) {
       throw new Error(`Failed to fetch job status: ${response.status}`);
     }
@@ -758,16 +770,24 @@ export const apiClient = {
   },
 
   /**
-   * GET /api/models/provision/{job_id}/stream - SSE live progress stream
+   * GET /models/provision/{job_id}/stream - SSE live progress stream (authenticated).
    */
   streamProvisioningProgress(jobId, onProgress, onComplete, onError) {
     const controller = new AbortController();
-    fetch(`${BASE_URL}/api/models/provision/${jobId}/stream`, {
+    const headers = { Accept: 'text/event-stream' };
+    const token = getAuthToken();
+    // Header auth (primary) + ?token= fallback (proxies that strip headers).
+    const streamUrl = token
+      ? `${BASE_URL}/models/provision/${jobId}/stream?token=${encodeURIComponent(token)}`
+      : `${BASE_URL}/models/provision/${jobId}/stream`;
+    if (token) headers.Authorization = `Bearer ${token}`;
+    fetch(streamUrl, {
       signal: controller.signal,
-      headers: { Accept: 'text/event-stream' },
+      headers,
     })
       .then(async (response) => {
         if (!response.ok) {
+          if (response.status === 401) window.dispatchEvent(new Event('dfrag:unauthorized'));
           throw new Error(`SSE request failed: ${response.status}`);
         }
         const reader = response.body.getReader();
@@ -819,7 +839,7 @@ export const apiClient = {
    * POST /api/models/provision/{job_id}/cancel
    */
   async cancelProvisioningJob(jobId) {
-    const response = await authFetch(`${BASE_URL}/api/models/provision/${jobId}/cancel`, {
+    const response = await authFetch(`${BASE_URL}/models/provision/${jobId}/cancel`, {
       method: 'POST',
     });
     if (!response.ok) {
@@ -832,7 +852,7 @@ export const apiClient = {
    * GET /api/models/hf/search
    */
   async searchHfModels(query = 'legal gguf') {
-    const response = await authFetch(`${BASE_URL}/api/models/hf/search?query=${encodeURIComponent(query)}`);
+    const response = await authFetch(`${BASE_URL}/models/hf/search?query=${encodeURIComponent(query)}`);
     if (!response.ok) return [];
     return response.json();
   },

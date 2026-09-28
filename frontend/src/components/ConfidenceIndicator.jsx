@@ -8,7 +8,8 @@ export default function ConfidenceIndicator({ confidenceScore, sourcesCount = 0,
     return null;
   }
 
-  const scorePct = Math.round(confidenceScore * 100);
+  const normalizedScore = confidenceScore > 1.0 ? confidenceScore : confidenceScore * 100;
+  const scorePct = Math.min(100, Math.max(0, Math.round(normalizedScore)));
   const isHighConfidence = scorePct >= 70;
 
   return (

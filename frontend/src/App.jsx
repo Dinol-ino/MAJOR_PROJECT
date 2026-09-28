@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import ManusHeader from './components/ManusHeader';
 import ChatWindow from './components/ChatWindow';
@@ -8,7 +8,8 @@ import AuditLedgerView from './components/AuditLedgerView';
 import HardwareForm from './components/HardwareForm';
 import McpToolsView from './components/McpToolsView';
 import SettingsView from './components/SettingsView';
-import { apiClient } from './api/client';
+import LoginView from './components/LoginView';
+import { apiClient, getAuthToken, setAuthToken } from './api/client';
 
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('dfrag_theme') || 'dark');
@@ -20,9 +21,78 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [hardwareDrawerOpen, setHardwareDrawerOpen] = useState(false);
   const [activeView, setActiveView] = useState('chat'); // chat | graph | statutes | audit | hardware | mcp | settings
-  const [user, setUser] = useState({ username: 'Dinol Castelino', email: 'dinol@dfrag.ai' });
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(!!getAuthToken());
+  const [authChecked, setAuthChecked] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeVaultId, setActiveVaultId] = useState(null);
+  const [graphInitialQuery, setGraphInitialQuery] = useState(null);
+
+  // Sync theme with HTML data-theme attribute
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('dfrag_theme', theme);
+  }, [theme]);
+
+  // On mount: verify stored token, listen for 401 events
+  useEffect(() => {
+    const token = getAuthToken();
+    if (token) {
+      apiClient.me()
+        .then((userData) => {
+          setUser(userData);
+          setIsAuthenticated(true);
+        })
+        .catch(() => {
+          // Token is invalid or expired — clear it
+          setAuthToken(null);
+          setIsAuthenticated(false);
+          setUser(null);
+        })
+        .finally(() => setAuthChecked(true));
+    } else {
+      // No stored token — check if first-run (no accounts exist)
+      apiClient.getHealth()
+        .then(() => {
+          // Backend is reachable. Try calling /auth/me without token.
+          // If no accounts exist, backend returns default user.
+          return apiClient.me();
+        })
+        .then((userData) => {
+          // First-run mode: backend returned default user without token
+          setUser(userData);
+          setIsAuthenticated(true);
+        })
+        .catch(() => {
+          // Backend requires login
+          setIsAuthenticated(false);
+          setUser(null);
+        })
+        .finally(() => setAuthChecked(true));
+    }
+
+    // Listen for 401 events from authFetch
+    const handleUnauthorized = () => {
+      setAuthToken(null);
+      setIsAuthenticated(false);
+      setUser(null);
+    };
+    window.addEventListener('dfrag:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('dfrag:unauthorized', handleUnauthorized);
+  }, []);
+
+  // Handle successful login/register
+  const handleLoginSuccess = useCallback((userData) => {
+    setUser(userData);
+    setIsAuthenticated(true);
+  }, []);
+
+  // Handle logout
+  const handleLogout = useCallback(() => {
+    setAuthToken(null);
+    setIsAuthenticated(false);
+    setUser(null);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('dfrag_theme', theme);
@@ -34,22 +104,26 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     // Initial fetch of hardware-recommended local models
-    apiClient.recommend().then((data) => {
+    apiClient.getRecommendedModels().then((data) => {
       if (data && data.recommended && data.recommended.length > 0) {
         setRecommendedModels(data.recommended);
-        // Default to specialized legal model or highest accuracy model if available
-        const preferred = data.recommended.find(m => m.model_id === 'dfrag-legal:7b' || m.model_id === 'qwen2.5:7b');
-        if (preferred) {
-          setSelectedModel(preferred.model_id);
-        } else {
-          setSelectedModel(data.recommended[0].model_id);
+        // Default to installed model, or safe legal model that fits memory, or tier default
+        const installed = data.recommended.find(m => m.installed);
+        const preferred = data.recommended.find(m => (m.model_id === 'dfrag-legal:7b' || m.model_id === 'qwen2.5:7b') && m.fits_memory && m.safety_tier !== 'UNSUPPORTED');
+        const fallback = data.recommended.find(m => m.recommended_for_tier && m.fits_memory) || data.recommended[0];
+        const selected = installed || preferred || fallback;
+        if (selected) {
+          setSelectedModel(selected.model_id);
         }
       }
     }).catch((err) => {
       console.warn("Initial models fetch fallback:", err);
     });
-  }, []);
+  }, [isAuthenticated]);
+
+
 
   // Handle New Task Session
   const handleNewTask = () => {
@@ -146,8 +220,44 @@ export default function App() {
     setSelectedModel(m);
   }, []);
 
+  if (!authChecked) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100vw', height: '100vh', background: 'var(--bg-app)', color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: 36, height: 36, border: '3px solid var(--border-subtle)', borderTopColor: 'var(--accent-primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 14px' }} />
+          <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: 600 }}>DFrag Legal Workspace</div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px' }}>Verifying secure session...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <>
+        <div className="editorial-paper-noise" />
+        <div className="editorial-grid-overlay">
+          <div className="editorial-grid-line" />
+          <div className="editorial-grid-line" />
+          <div className="editorial-grid-line" />
+          <div className="editorial-grid-line" />
+        </div>
+        <LoginView onLoginSuccess={handleLoginSuccess} theme={theme} setTheme={setTheme} />
+      </>
+    );
+  }
+
   return (
-    <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden', background: 'var(--bg-app)', color: 'var(--text-primary)' }}>
+    <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden', background: 'var(--bg-app)', color: 'var(--text-primary)', position: 'relative' }}>
+      {/* Paper grain and architectural grid */}
+      <div className="editorial-paper-noise" />
+      <div className="editorial-grid-overlay">
+        <div className="editorial-grid-line" />
+        <div className="editorial-grid-line" />
+        <div className="editorial-grid-line" />
+        <div className="editorial-grid-line" />
+      </div>
+
       {/* Consensus Left Sidebar Navigation */}
       <Sidebar
         activeSessionId={sessionId}
@@ -156,6 +266,7 @@ export default function App() {
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         user={user}
+        onLogout={handleLogout}
         activeView={activeView}
         setActiveView={setActiveView}
         shieldOn={shieldOn}
@@ -164,7 +275,7 @@ export default function App() {
       />
 
       {/* Main Consensus Workspace Container */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', position: 'relative', zIndex: 10 }}>
         {/* Top Consensus Navigation Header */}
         <ManusHeader
           selectedModel={selectedModel}
@@ -175,6 +286,8 @@ export default function App() {
           onToggleHardwareDrawer={() => setHardwareDrawerOpen(!hardwareDrawerOpen)}
           activeView={activeView}
           onClearThread={handleClearThread}
+          theme={theme}
+          setTheme={setTheme}
         />
 
         {/* Dynamic View Canvas */}
@@ -196,6 +309,7 @@ export default function App() {
               onAskCopilot={handleAskCopilotFromView}
               sessionId={sessionId}
               activeVaultId={activeVaultId}
+              initialQuery={graphInitialQuery}
             />
           )}
 
@@ -203,6 +317,7 @@ export default function App() {
             <StatuteLibraryView
               onAskCopilot={handleAskCopilotFromView}
               onViewInGraph={(statuteSlug) => {
+                setGraphInitialQuery(statuteSlug);
                 setActiveView('graph');
               }}
             />
@@ -222,11 +337,7 @@ export default function App() {
             />
           )}
 
-          {activeView === 'mcp' && (
-            <McpToolsView />
-          )}
-
-          {activeView === 'settings' && (
+          {(activeView === 'settings' || activeView === 'mcp') && (
             <SettingsView
               theme={theme}
               setTheme={setTheme}

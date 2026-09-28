@@ -16,11 +16,11 @@ import {
 } from './Icons';
 import { apiClient } from '../api/client';
 
-export default function CitationGraphView({ onAskCopilot, sessionId, activeVaultId }) {
+export default function CitationGraphView({ onAskCopilot, sessionId, activeVaultId, initialQuery }) {
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const [loading, setLoading] = useState(true);
-  const [scope, setScope] = useState('conversation'); // conversation | vault | global
-  const [searchQuery, setSearchQuery] = useState('');
+  const [scope, setScope] = useState(initialQuery ? 'global' : 'conversation'); // conversation | vault | global
+  const [searchQuery, setSearchQuery] = useState(initialQuery || '');
   const [selectedNode, setSelectedNode] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -68,8 +68,14 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
   };
 
   useEffect(() => {
-    fetchGraph();
-  }, [scope, sessionId, activeVaultId]);
+    if (initialQuery && searchQuery !== initialQuery) {
+      setSearchQuery(initialQuery);
+      setScope('global');
+      fetchGraph(initialQuery);
+    } else {
+      fetchGraph();
+    }
+  }, [scope, sessionId, activeVaultId, initialQuery]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();

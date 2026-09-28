@@ -33,12 +33,17 @@ export default function SettingsView({
   const handleSaveKey = async () => {
     if (!inputKey.trim()) return;
     try {
-      const res = await apiClient.updateFallbackSettings({
-        provider: selectedProvider,
-        api_key: inputKey.trim(),
-        auto_fallback_enabled: fallbackSettings.auto_fallback_enabled
-      });
-      setFallbackSettings(res);
+      const payload = {
+        active_provider: selectedProvider,
+        auto_fallback: fallbackSettings.auto_fallback_enabled,
+      };
+      if (selectedProvider === 'grok') {
+        payload.grok_key = inputKey.trim();
+      } else {
+        payload.zai_key = inputKey.trim();
+      }
+      const res = await apiClient.updateFallbackSettings(payload);
+      setFallbackSettings(res.settings || res);
       setInputKey('');
       setSaveStatus('Key saved securely in encrypted vault.');
       setTimeout(() => setSaveStatus(null), 3000);
@@ -64,10 +69,10 @@ export default function SettingsView({
     const nextVal = !fallbackSettings.auto_fallback_enabled;
     try {
       const res = await apiClient.updateFallbackSettings({
-        provider: selectedProvider,
-        auto_fallback_enabled: nextVal
+        active_provider: selectedProvider,
+        auto_fallback: nextVal
       });
-      setFallbackSettings(res);
+      setFallbackSettings(res.settings || res);
     } catch (err) {
       console.error('Failed to toggle auto fallback:', err);
     }
@@ -286,7 +291,7 @@ export default function SettingsView({
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                 <input
                   type="checkbox"
-                  checked={fallbackSettings.auto_fallback_enabled}
+                  checked={Boolean(fallbackSettings.auto_fallback_enabled ?? fallbackSettings.auto_fallback ?? true)}
                   onChange={handleToggleAutoFallback}
                 />
                 <span>Automatically engage cloud fallback on 3 consecutive local failures</span>
@@ -316,17 +321,96 @@ export default function SettingsView({
                   fontSize: '0.78rem'
                 }}
               >
-                <option value="qwen2.5:3b">qwen2.5:3b (Standard Floor — Tier 0/1)</option>
-                <option value="gemma2:2b">gemma2:2b (Lightweight Floor — Tier 0)</option>
-                <option value="llama3.2:3b">llama3.2:3b (3B Compact)</option>
-                <option value="qwen2.5:7b">qwen2.5:7b (High Accuracy — Tier 1)</option>
-                <option value="dfrag-legal:7b">dfrag-legal:7b (Specialized Indian Law)</option>
+                <option value="qwen2.5:3b">qwen2.5:3b (Standard Floor — Recommended)</option>
+                <option value="gemma2:2b">gemma2:2b (Lightweight Floor — 1.6 GB)</option>
+                <option value="llama3.2:3b">llama3.2:3b (Compact 3B)</option>
               </select>
             </div>
           </div>
         </div>
 
-        {/* Section 4: System & About */}
+        {/* Section 4: MCP Subsystems & API Gateways */}
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+            <h3 style={{ fontSize: '0.98rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+              MCP Subsystems & API Gateways
+            </h3>
+            <span style={{ fontSize: '0.72rem', padding: '3px 10px', borderRadius: '12px', background: 'rgba(56, 189, 248, 0.12)', color: 'var(--accent-blue)', fontWeight: 600 }}>
+              Model Context Protocol Active
+            </span>
+          </div>
+          <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '2px', marginBottom: '16px' }}>
+            Canonical legal MCP servers and REST API endpoints providing verified statutory context to the model on-demand.
+          </p>
+
+          {/* Primary Connected MCP Servers */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px', marginBottom: '18px' }}>
+            {[
+              { name: 'India Law MCP', id: 'ansvar-systems-india-law-mcp', desc: 'Central statutory acts: IT Act, DPDPA, Companies Act' },
+              { name: 'Themis Criminal MCP', id: 'themis-mcp', desc: 'BNS, BNSS, BSA & IPC cross-walk mapping' },
+              { name: 'Nyaya Judicial MCP', id: 'nyaya-mcp', desc: 'Constitution of India & Supreme Court precedents' },
+              { name: 'Tax & Commercial MCP', id: 'taxbykk-mcp', desc: 'GST, CGST & indirect tax provisions' },
+            ].map((srv) => (
+              <div
+                key={srv.id}
+                style={{
+                  background: 'var(--bg-raised)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '12px 14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)' }}>{srv.name}</span>
+                  <span style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '10px', background: 'rgba(63, 185, 80, 0.12)', color: 'var(--status-green)', fontWeight: 600 }}>
+                    ● Ready
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>{srv.desc}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Core Endpoints List */}
+          <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Primary REST & Inference Endpoints
+            </span>
+            <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {[
+                { method: 'POST', path: '/chat', label: 'Chat Inference & Citation Grounding' },
+                { method: 'POST', path: '/mcp/tool-call', label: 'MCP Defensive Tool Dispatch' },
+                { method: 'GET', path: '/statutes', label: 'Indian Statutory Knowledge Service' },
+                { method: 'GET', path: '/vaults', label: 'Private Document & Evidence Vaults' },
+                { method: 'GET', path: '/audit/verify', label: 'Cryptographic SHA-256 Ledger Audit' },
+              ].map((ep) => (
+                <div
+                  key={ep.path}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    fontSize: '0.76rem',
+                    padding: '6px 10px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-raised)',
+                  }}
+                >
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: ep.method === 'POST' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(63, 185, 80, 0.15)', color: ep.method === 'POST' ? 'var(--accent-blue)' : 'var(--status-green)' }}>
+                    {ep.method}
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', fontWeight: 600 }}>{ep.path}</span>
+                  <span style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>{ep.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Section 5: System & About */}
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: '20px' }}>
           <h3 style={{ fontSize: '0.98rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
             About DFrag Enterprise

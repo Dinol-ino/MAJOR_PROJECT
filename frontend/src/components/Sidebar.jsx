@@ -38,6 +38,7 @@ export default function Sidebar({
   const [loading, setLoading] = useState(false);
   const [isCreatingVault, setIsCreatingVault] = useState(false);
   const [newVaultName, setNewVaultName] = useState('');
+  const [vaultError, setVaultError] = useState('');
   const [editingChatId, setEditingChatId] = useState(null);
   const [editingChatTitle, setEditingChatTitle] = useState('');
 
@@ -139,7 +140,6 @@ export default function Sidebar({
 
   const toolItems = [
     { key: 'hardware', label: 'Hardware Engine', icon: CpuIcon, color: 'var(--accent-blue)' },
-    { key: 'mcp', label: 'API & MCP Tools', icon: CodeIcon, color: 'var(--accent-pink)' },
     { key: 'settings', label: 'Settings', icon: EditIcon, color: 'var(--accent-blue)' },
   ];
 
@@ -237,17 +237,46 @@ export default function Sidebar({
       {/* Consensus-style Brand Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--accent-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <ShieldIcon size={16} color="white" />
+          <div style={{
+            width: 32,
+            height: 32,
+            borderRadius: '0px',
+            background: 'var(--bg-card)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: 'var(--shadow-sm)',
+            border: '1px solid var(--accent-gold)'
+          }}>
+            <span style={{ fontSize: '15px', lineHeight: 1 }}>⚖️</span>
           </div>
-          <span style={{ fontFamily: 'var(--font-title)', fontWeight: 800, fontSize: '1.2rem', color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
-            dfrag<span style={{ color: 'var(--accent-pink)' }}>.ai</span>
-          </span>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{
+              fontFamily: 'var(--font-serif)',
+              fontWeight: 700,
+              fontSize: '1.05rem',
+              color: 'var(--text-primary)',
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              lineHeight: 1.1
+            }}>
+              JUSTICE <span style={{ color: 'var(--accent-gold)', fontSize: '0.75rem' }}>✦</span>
+            </span>
+            <span style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.60rem',
+              color: 'var(--text-muted)',
+              letterSpacing: '0.10em',
+              textTransform: 'uppercase'
+            }}>
+              LEGAL VERIFICATION
+            </span>
+          </div>
         </div>
         <button
           type="button"
           onClick={onToggleCollapse}
-          style={{ background: 'none', border: 'none', color: 'var(--text-muted)' }}
+          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
           title="Collapse sidebar"
         >
           <SidebarIcon size={16} />
@@ -262,28 +291,33 @@ export default function Sidebar({
           setActiveView('chat');
         }}
         style={{
-          background: 'rgba(255, 255, 255, 0.04)',
+          background: 'var(--bg-card)',
           border: '1px solid var(--border-medium)',
-          borderRadius: '8px',
+          borderLeft: '2px solid var(--accent-gold)',
+          borderRadius: '0px',
           padding: '10px 14px',
           color: 'var(--text-primary)',
           fontWeight: 600,
-          fontSize: '0.88rem',
+          fontSize: '0.78rem',
+          fontFamily: 'var(--font-mono)',
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
           display: 'flex',
           alignItems: 'center',
           gap: '10px',
           marginBottom: '18px',
           boxShadow: 'var(--shadow-sm)',
+          cursor: 'pointer',
         }}
       >
-        <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(0, 132, 255, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <PlusIcon size={14} color="var(--accent-blue)" />
+        <div style={{ width: 18, height: 18, borderRadius: '0px', background: 'rgba(212, 175, 55, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <PlusIcon size={12} color="var(--accent-gold)" />
         </div>
-        <span>New Task</span>
+        <span>New Inquiry</span>
       </button>
 
       {/* Main Navigation Items */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '20px' }}>
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeView === item.key;
@@ -293,25 +327,25 @@ export default function Sidebar({
               onClick={() => setActiveView(item.key)}
               style={{
                 padding: '9px 12px',
-                borderRadius: '8px',
-                color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                fontSize: '0.85rem',
-                fontWeight: isActive ? 600 : 500,
+                borderRadius: '0px',
+                color: isActive ? 'var(--accent-gold)' : 'var(--text-secondary)',
+                fontSize: '0.84rem',
+                fontWeight: isActive ? 600 : 400,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                background: isActive ? 'rgba(0, 132, 255, 0.12)' : 'transparent',
-                borderLeft: isActive ? `3px solid ${item.color}` : '3px solid transparent',
+                background: isActive ? 'rgba(212, 175, 55, 0.08)' : 'transparent',
+                borderLeft: isActive ? '2px solid var(--accent-gold)' : '2px solid transparent',
                 cursor: 'pointer',
-                transition: 'all 0.15s ease',
+                transition: 'all 0.2s ease',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Icon size={16} color={isActive ? item.color : 'var(--text-muted)'} />
+                <Icon size={16} color={isActive ? 'var(--accent-gold)' : 'var(--text-muted)'} />
                 <span>{item.label}</span>
               </div>
               {item.badge && (
-                <span style={{ fontSize: '0.62rem', background: 'rgba(255, 0, 127, 0.15)', color: 'var(--accent-pink)', border: '1px solid rgba(255, 0, 127, 0.35)', padding: '1px 6px', borderRadius: '10px', fontWeight: 700 }}>
+                <span style={{ fontSize: '0.60rem', background: 'rgba(212, 175, 55, 0.15)', color: 'var(--accent-gold)', border: '1px solid var(--border-bold)', padding: '1px 5px', borderRadius: '0px', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
                   {item.badge}
                 </span>
               )}
@@ -322,8 +356,8 @@ export default function Sidebar({
 
       {/* Tools & System Section */}
       <div style={{ marginBottom: '16px' }}>
-        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px', paddingLeft: '8px' }}>
-          Tools
+        <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '6px', paddingLeft: '8px', fontFamily: 'var(--font-mono)' }}>
+          SYSTEM TOOLS
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
           {toolItems.map((item) => {
@@ -335,18 +369,20 @@ export default function Sidebar({
                 onClick={() => setActiveView(item.key)}
                 style={{
                   padding: '8px 12px',
-                  borderRadius: '8px',
-                  color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  borderRadius: '0px',
+                  color: isActive ? 'var(--accent-gold)' : 'var(--text-secondary)',
                   fontSize: '0.82rem',
-                  fontWeight: isActive ? 600 : 500,
+                  fontWeight: isActive ? 600 : 400,
                   display: 'flex',
                   alignItems: 'center',
                   gap: '10px',
-                  background: isActive ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
+                  background: isActive ? 'rgba(212, 175, 55, 0.08)' : 'transparent',
+                  borderLeft: isActive ? '2px solid var(--accent-gold)' : '2px solid transparent',
                   cursor: 'pointer',
+                  transition: 'all 0.2s ease',
                 }}
               >
-                <Icon size={15} color={isActive ? item.color : 'var(--text-muted)'} />
+                <Icon size={15} color={isActive ? 'var(--accent-gold)' : 'var(--text-muted)'} />
                 <span>{item.label}</span>
               </div>
             );

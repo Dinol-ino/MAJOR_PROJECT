@@ -95,6 +95,8 @@ class OrchestrationResult(BaseModel):
     steps_trace: List[StateStepTrace] = Field(default_factory=list)
     budget_snapshot: Dict[str, Any] = Field(default_factory=dict)
     latency_ms: float = 0.0
+    model_used: Optional[str] = None
+    runtime_used: Optional[str] = None
 
 
 class ResearchStateMachine:
@@ -382,7 +384,27 @@ class ResearchStateMachine:
                 details={"intent": "adversarial_probe"}
             )
 
-        if is_explicit_non_legal or (not has_legal_terms and len(q.split()) > 3):
+        # Check for conversational greetings, capability questions, and chatbot interaction
+        conversational_patterns = [
+            r"(?i)^(?:hi|hello|hey|heya|howdy|namaste|greetings)\b",
+            r"(?i)\b(?:how\s+are\s+you|are\s+you\s+(?:working|online|there|alive|ok|alright|ready))\b",
+            r"(?i)\b(?:who\s+are\s+you|what\s+is\s+your\s+name|what\s+can\s+you\s+do|introduce\s+yourself|tell\s+me\s+about\s+yourself)\b",
+            r"(?i)\b(?:good\s+(?:morning|afternoon|evening|day|night))\b",
+            r"(?i)^(?:test|testing|check|help|can\s+you\s+help|start|info)\b",
+        ]
+        is_conversational = any(re.search(pat, q.strip()) for pat in conversational_patterns)
+        if is_conversational and not has_legal_terms:
+            ctx["intent"] = "conversational"
+            ctx["is_conversational"] = True
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.CLASSIFY.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="success",
+                details={"intent": "conversational"}
+            )
+
+        if is_explicit_non_legal or (not has_legal_terms and len(q.split()) > 5):
             ctx["is_out_of_scope"] = True
             ctx["intent"] = "out_of_scope"
             ctx["failure_kind"] = "out_of_scope"
@@ -460,12 +482,21 @@ class ResearchStateMachine:
     async def _run_plan(self, ctx: Dict[str, Any], budget: ExecutionBudget) -> StateStepTrace:
         t0 = time.time()
         budget.record_step()
-        # Code-controlled planning: determine if tools should be invoked
+        # Dynamic planning: determine if tools should be invoked based on query intent
         q = ctx["query"].lower()
-        if "amendment" in q or "in force" in q or "live status" in q:
+        import re
+
+        if any(term in q for term in ["amendment", "in force", "live status", "repealed", "validity", "currency check"]):
             ctx["requires_tool_call"] = True
             ctx["planned_tool"] = "live_statute_checker"
-        elif "lookup provision" in q or "specific section" in q:
+        elif any(term in q for term in ["case law", "precedent", "judgment", "court ruling", "kanoon", " landmark "]):
+            ctx["requires_tool_call"] = True
+            ctx["planned_tool"] = "kanoon_case_search"
+        elif any(term in q for term in ["gazette", "official publication", "indiacode", "enactment date", "registry"]):
+            ctx["requires_tool_call"] = True
+            ctx["planned_tool"] = "indiacode_fetcher"
+        elif re.search(r"\b(?:section|sec\.?)\s*\d+[a-z]*\b", q) and any(act in q for act in ["act", "code", "sanhita", "adhiniyam", "ipc", "crpc", "bns", "it"]):
+            # Specific section lookup via MCP tool
             ctx["requires_tool_call"] = True
             ctx["planned_tool"] = "local_provision_lookup"
         else:
@@ -483,6 +514,17 @@ class ResearchStateMachine:
     async def _run_retrieve(self, ctx: Dict[str, Any], budget: ExecutionBudget) -> StateStepTrace:
         t0 = time.time()
         budget.record_step()
+
+        if ctx.get("is_conversational"):
+            ctx["retrieved_chunks"] = []
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.RETRIEVE.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="success",
+                details={"chunks_found": 0, "conversational": True}
+            )
+
         t1_results = self.tier1_retriever.query(ctx["query"])
         t2_results = self.tier2_retriever.query(ctx["session_id"], ctx["query"])
 
@@ -560,7 +602,7 @@ class ResearchStateMachine:
                 tool_name=tool_name,
                 arguments=tool_args,
                 session_id=ctx["session_id"],
-                network_mode=settings.network.default_mode
+                network_mode=None
             )
             if res.success:
                 circuit_breaker.record_success("TOOL_CALL")
@@ -584,8 +626,53 @@ class ResearchStateMachine:
     async def _run_evidence_validation(self, ctx: Dict[str, Any], budget: ExecutionBudget) -> StateStepTrace:
         t0 = time.time()
         budget.record_step()
-        # Consolidate retrieved chunks and tool results
+        # Consolidate retrieved chunks and MCP tool results
         valid_chunks = list(ctx.get("retrieved_chunks", []))
+        
+        # Incorporate verified MCP tool results directly into model evidence context
+        for tr in ctx.get("tool_results", []):
+            if isinstance(tr, dict):
+                if "results" in tr and isinstance(tr["results"], list):
+                    for r in tr["results"]:
+                        if isinstance(r, dict):
+                            r_copy = dict(r)
+                            r_copy["doc_type"] = "mcp_tool_result"
+                            valid_chunks.append(r_copy)
+                elif tr.get("found") and tr.get("text"):
+                    valid_chunks.append({
+                        "act": tr.get("act", "Statutory Provision"),
+                        "section": tr.get("section", ""),
+                        "text": tr.get("text", ""),
+                        "doc_type": "mcp_tool_result",
+                        "source": "mcp_provision_lookup"
+                    })
+                elif "cases" in tr and isinstance(tr["cases"], list):
+                    for c in tr["cases"]:
+                        if isinstance(c, dict):
+                            valid_chunks.append({
+                                "act": c.get("title", "Case Precedent"),
+                                "section": c.get("citation", ""),
+                                "text": f"Judicial Precedent: {c.get('title')} ({c.get('citation')}). Relevance: {c.get('relevance', 'High')}.",
+                                "doc_type": "mcp_tool_result",
+                                "source": "mcp_case_search"
+                            })
+                elif tr.get("details"):
+                    valid_chunks.append({
+                        "act": tr.get("act_name", "Statutory Authority"),
+                        "section": tr.get("section") or "Enactment Status",
+                        "text": f"Status: {tr.get('status', 'In Force')}. {tr.get('details')}",
+                        "doc_type": "mcp_tool_result",
+                        "source": "mcp_statute_checker"
+                    })
+                elif tr.get("official_title"):
+                    valid_chunks.append({
+                        "act": tr.get("official_title", "Official Gazette"),
+                        "section": tr.get("gazette_ref") or "Gazette Reference",
+                        "text": f"Official Enactment Date: {tr.get('enactment_date', 'N/A')}. Gazette Reference: {tr.get('gazette_ref', 'N/A')}",
+                        "doc_type": "mcp_tool_result",
+                        "source": "mcp_indiacode"
+                    })
+
         query_text = ctx.get("query", "").lower()
         
         # Statutory enactment relevancy gate (Task 1.2.1)
@@ -622,12 +709,27 @@ class ResearchStateMachine:
 
                 matched_act_chunks = []
                 for c in valid_chunks:
+                    # Preserve user, vault documents, and verified MCP tool results from pure statutory enactment pruning
+                    if c.get("doc_type") in ("user_document", "vault_document", "mcp_tool_result"):
+                        matched_act_chunks.append(c)
+                        continue
                     chunk_act = (c.get("act") or "").lower()
                     chunk_words = set(re.findall(r"\b[a-z]+\b", chunk_act))
                     if any(tok in chunk_act or tok in chunk_words for tok in expanded_tokens):
                         matched_act_chunks.append(c)
                 valid_chunks = matched_act_chunks
         
+        if ctx.get("is_conversational"):
+            ctx["validated_evidence"] = []
+            ctx["sources"] = []
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.EVIDENCE_VALIDATION.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="success",
+                details={"conversational": True}
+            )
+
         # Numeric threshold gate (Task 1.2.1): Require valid retrieved evidence
         if not valid_chunks:
             ctx["insufficient_evidence"] = True
@@ -660,6 +762,41 @@ class ResearchStateMachine:
     async def _run_synthesis(self, ctx: Dict[str, Any], budget: ExecutionBudget, retry_note: Optional[str] = None) -> StateStepTrace:
         t0 = time.time()
         budget.record_step()
+
+        if ctx.get("is_conversational"):
+            runtime = RuntimeManager.get()
+            target_model = ctx["model"]
+            conversational_prompt = (
+                f"You are DFrag Legal Copilot, an AI legal workspace assistant specializing in Indian Law. "
+                f"Respond to the user in a warm, polite, and natural human-to-human conversational tone. "
+                f"Acknowledge their greeting or query, confirm that you are running and ready to help, "
+                f"and guide them on how you can assist with Indian statutory research, case precedents, contract clauses, or legal drafting.\n\n"
+                f"User: {ctx['query']}\n\nAssistant:"
+            )
+            ctx["prompt"] = conversational_prompt
+            prompt_token_estimate = len(conversational_prompt) // 4
+            budget.record_tokens(prompt_token_estimate)
+            try:
+                raw_answer = await runtime.generate(conversational_prompt, model=target_model)
+            except Exception as exc:
+                logger.warning(f"Conversational generation fallback: {exc}")
+                raw_answer = (
+                    "Hello! I am **DFrag Legal Copilot**, your enterprise Indian legal research assistant.\n\n"
+                    "I am active, healthy, and ready to assist you. You can ask me to:\n"
+                    "- **Research Statutes**: Lookup provisions under Bharatiya Nyaya Sanhita (BNS 2023), Information Technology Act 2000, Companies Act 2013, Indian Contract Act 1872, and more.\n"
+                    "- **Analyze Case Precedents**: Explore judicial interpretations and legal benchmarks.\n"
+                    "- **Examine Private Documents**: Ingest legal briefs or agreements in your Project Vault for grounded evidence extraction.\n\n"
+                    "How can I assist you with your legal research or drafting today?"
+                )
+            ctx["raw_answer"] = raw_answer
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.SYNTHESIS.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="success",
+                details={"raw_length": len(raw_answer), "model": target_model, "conversational": True}
+            )
+
         # Build secure prompt
         evidence = ctx.get("validated_evidence", [])
         prompt = self.trusted_context.build_prompt(
@@ -730,6 +867,17 @@ class ResearchStateMachine:
         budget.record_step()
         evidence = ctx.get("validated_evidence", [])
         raw_ans = ctx.get("raw_answer", "")
+
+        if ctx.get("is_conversational"):
+            ctx["verification_passed"] = True
+            ctx["clean_answer"] = raw_ans
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.LEGAL_VERIFICATION.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="success",
+                details={"is_valid": True, "conversational": True}
+            )
 
         is_valid, error_reason = self.output_guard.validate(raw_ans, evidence, ctx["prompt"])
         ctx["verification_passed"] = is_valid
@@ -914,7 +1062,9 @@ class ResearchStateMachine:
             reasoning_trace=reasoning_trace,
             steps_trace=traces,
             budget_snapshot=budget.snapshot(),
-            latency_ms=latency_ms
+            latency_ms=latency_ms,
+            model_used=ctx.get("model", settings.DEFAULT_MODEL),
+            runtime_used=settings.MODEL_RUNTIME
         )
 
 

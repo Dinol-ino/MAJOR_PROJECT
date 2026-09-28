@@ -1,63 +1,72 @@
 /* ==========================================================================
-   DFrag Design System — Tokens (Spec 06)
-   High-contrast legal-tech design tokens (inspired by Linear / Consensus / Claude)
-   Strictly NO purple hues, NO decorative gradients.
+   DFrag Design System — Tokens (Luxury / Editorial Theme)
+   Emulating high-end editorial magazines & luxury design with architectural
+   precision (0px radius), rich typography (Playfair Display + Inter),
+   sophisticated monochrome palette (#1A1A1A Charcoal / #F9F8F6 Alabaster),
+   metallic gold (#D4AF37) accents, and cinematic motion.
    ========================================================================== */
 
 :root {
-  /* Color Palette — Solid Pitch/Obsidian Black Base */
-  --bg-app: #060709;
-  --bg-surface: #0c0d12;
-  --bg-raised: #12141a;
-  --bg-card: #101218;
-  --bg-card-hover: #161822;
-  --bg-sidebar: #060709;
-  --bg-input: #0a0b0f;
-  --bg-modal: #101218;
+  /* Dark Luxury (Primary Default) — Rich Charcoal Palette */
+  --bg-app: #141414;
+  --bg-surface: #1A1A1A;
+  --bg-raised: #222222;
+  --bg-card: #1c1c1c;
+  --bg-card-hover: #262626;
+  --bg-sidebar: #111111;
+  --bg-input: #171717;
+  --bg-modal: #1e1e1e;
 
-  /* Borders & Dividers — Crisp Solid Lines */
-  --border-subtle: #1c1f28;
-  --border-medium: #272c3a;
-  --border-active: #0084ff;
-  --border-pink: #ff007f;
+  /* Borders & Architectural 1px Dividers */
+  --border-subtle: rgba(249, 248, 246, 0.10);
+  --border-medium: rgba(249, 248, 246, 0.18);
+  --border-active: #D4AF37;
+  --border-bold: rgba(212, 175, 55, 0.45);
+  --border-pink: #D4AF37;
 
-  /* Typography Colors — High-Contrast Pure White & Cool Silver */
-  --text-primary: #ffffff;
-  --text-secondary: #a3aab8;
-  --text-muted: #6e7587;
-  --text-dim: #494e5d;
+  /* Typography Colors — Warm Alabaster & Taupe */
+  --text-primary: #F9F8F6;       /* Warm Alabaster */
+  --text-secondary: #EBE5DE;     /* Pale Taupe */
+  --text-muted: #8E8A85;         /* Warm Grey */
+  --text-dim: #5C5854;
 
-  /* Solid Professional Duotone: Electric Blue & Vivid Magenta Pink */
-  --accent: #0084ff;              /* Solid Electric Blue — Primary Actions, Links, Controls */
-  --accent-hover: #0073e6;
-  --accent-blue: #0084ff;
-  --accent-blue-subtle: rgba(0, 132, 255, 0.12);
-  --accent-blue-border: rgba(0, 132, 255, 0.35);
+  /* Metallic Gold Accent (#D4AF37) — Used sparingly for luxury details */
+  --accent: #D4AF37;
+  --accent-gold: #D4AF37;
+  --accent-hover: #E5C158;
+  
+  /* Compatibility Aliases to ensure 0 code breaks in existing components */
+  --accent-blue: #D4AF37;
+  --accent-blue-subtle: rgba(212, 175, 55, 0.12);
+  --accent-blue-border: rgba(212, 175, 55, 0.35);
 
-  --accent-pink: #ff007f;         /* Solid Vivid Magenta Pink — Security Shield, Key Highlights, Emblem */
-  --accent-pink-hover: #e60072;
-  --accent-pink-subtle: rgba(255, 0, 127, 0.12);
-  --accent-pink-border: rgba(255, 0, 127, 0.35);
+  --accent-pink: #E5C158;
+  --accent-pink-hover: #F2D27A;
+  --accent-pink-subtle: rgba(229, 193, 88, 0.12);
+  --accent-pink-border: rgba(229, 193, 88, 0.35);
 
-  --accent-cyan: #0084ff;         /* Replaced AI-teal with solid Electric Blue */
-  --accent-indigo: #0084ff;
-  --accent-amber: #ffaa00;        /* Warning / Review */
+  --accent-cyan: #D4AF37;
+  --accent-indigo: #B8860B;
+  --accent-amber: #D4AF37;
 
-  --status-green: #00e599;        /* Solid Mint for healthy system signals */
-  --status-red: #ff2a55;          /* Circuit open / Security errors */
-  --defense-pass: #0084ff;        /* Electric Blue for verified citations */
-  --defense-review: #ffaa00;
-  --defense-block: #ff007f;       /* Magenta Pink for security blocks */
+  /* Status Colors */
+  --status-green: #34d399;
+  --status-red: #f87171;
+  --defense-pass: #34d399;
+  --defense-review: #D4AF37;
+  --defense-block: #f87171;
 
-  /* Distinctive Solid Duotone Logo / Hero Accent */
-  --accent-gradient: linear-gradient(135deg, #ff007f 0%, #0084ff 100%);
-  --accent-pink-gradient: linear-gradient(135deg, #ff007f 0%, #ff3399 100%);
-  --accent-blue-gradient: linear-gradient(135deg, #0084ff 0%, #00b4d8 100%);
+  /* Editorial Gradients */
+  --accent-gradient: linear-gradient(135deg, #D4AF37 0%, #8C7322 100%);
+  --accent-pink-gradient: linear-gradient(135deg, #E5C158 0%, #A68326 100%);
+  --accent-blue-gradient: linear-gradient(135deg, #D4AF37 0%, #6E5714 100%);
+  --gold-glow: 0 0 20px rgba(212, 175, 55, 0.3);
 
-  /* Typography */
+  /* Typography Hierarchy */
+  --font-serif: "Playfair Display", Georgia, "Times New Roman", serif;
   --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
-  --font-title: var(--font-sans);
+  --font-title: var(--font-serif);
 
   /* Spacing Scale */
   --space-1: 4px;
@@ -67,58 +76,80 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+  --space-12: 48px;
 
-  /* Radii — Clean, professional geometry */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  /* Radius — Strictly 0px Architectural Rectangles (Spec Mandate) */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-full: 0px;
 
-  /* Shadows — Minimal, crisp depth (No murky neon AI glow) */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.65);
+  /* Shadows — Subtle, Layered, Soft Depth */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 1px rgba(212, 175, 55, 0.2);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(212, 175, 55, 0.15);
+  --shadow-image: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 
   /* Layout */
-  --max-content-width: 780px;
+  --max-content-width: 860px;
 }
 
 /* ==========================================================================
-   Light Mode Overrides (WCAG AA Compliant)
+   Warm Alabaster Light Mode — Editorial Paper Aesthetic
    ========================================================================== */
 body.light-theme,
 [data-theme="light"] {
-  --bg-app: #f8f9fa;
-  --bg-surface: #ffffff;
-  --bg-raised: #f0f1f3;
-  --bg-card: #ffffff;
-  --bg-card-hover: #f3f4f6;
-  --bg-sidebar: #f1f3f5;
-  --bg-input: #ffffff;
-  --bg-modal: #ffffff;
+  --bg-app: #F9F8F6;              /* Warm Alabaster Paper */
+  --bg-surface: #FFFFFF;
+  --bg-raised: #EBE5DE;           /* Pale Taupe */
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F3EFEA;
+  --bg-sidebar: #F4EFEB;
+  --bg-input: #FFFFFF;
+  --bg-modal: #FFFFFF;
 
-  --border-subtle: #e2e5e9;
-  --border-medium: #cbd0d6;
-  --border-active: #9ca3af;
+  --border-subtle: rgba(26, 26, 26, 0.10);
+  --border-medium: rgba(26, 26, 26, 0.20);
+  --border-active: #997A15;
+  --border-bold: rgba(153, 122, 21, 0.45);
+  --border-pink: #997A15;
 
-  --text-primary: #1a1d21;
-  --text-secondary: #525b68;
-  --text-muted: #6b7280;
-  --text-dim: #9ca3af;
+  --text-primary: #1A1A1A;        /* Rich Charcoal */
+  --text-secondary: #6C6863;      /* Warm Grey */
+  --text-muted: #8E8A85;
+  --text-dim: #B3ADA6;
 
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-cyan: #0d9488;
-  --accent-blue: #2563eb;
-  --accent-amber: #b45309;
+  --accent: #997A15;              /* Deeper Gold for AAA contrast on paper */
+  --accent-gold: #997A15;
+  --accent-hover: #7D630E;
+
+  --accent-blue: #997A15;
+  --accent-blue-subtle: rgba(153, 122, 21, 0.10);
+  --accent-blue-border: rgba(153, 122, 21, 0.30);
+
+  --accent-pink: #B8860B;
+  --accent-pink-hover: #997A15;
+  --accent-pink-subtle: rgba(184, 134, 11, 0.10);
+  --accent-pink-border: rgba(184, 134, 11, 0.30);
+
+  --accent-cyan: #997A15;
+  --accent-indigo: #7D630E;
+  --accent-amber: #997A15;
+
   --status-green: #15803d;
   --status-red: #b91c1c;
   --defense-pass: #15803d;
-  --defense-review: #b45309;
+  --defense-review: #997A15;
   --defense-block: #b91c1c;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.12);
+  --accent-gradient: linear-gradient(135deg, #B8860B 0%, #6E5714 100%);
+  --accent-pink-gradient: linear-gradient(135deg, #997A15 0%, #544109 100%);
+  --accent-blue-gradient: linear-gradient(135deg, #B8860B 0%, #544109 100%);
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08), 0 0 1px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.12);
+  --shadow-image: 0 8px 32px rgba(0, 0, 0, 0.12), inset 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 
 /* ==========================================================================

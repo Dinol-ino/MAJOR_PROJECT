@@ -109,18 +109,7 @@ export default function AuditLedgerView({ sessionId }) {
             type="button"
             onClick={fetchLogs}
             disabled={loading}
-            style={{
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border-medium)',
-              borderRadius: '8px',
-              padding: '8px 14px',
-              color: 'var(--text-secondary)',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
+            className="luxury-btn-primary"
           >
             <RefreshIcon size={14} className={loading ? 'pulse-text' : ''} />
             <span>Refresh Logs</span>
@@ -187,7 +176,7 @@ export default function AuditLedgerView({ sessionId }) {
 
       {/* Defense Stats Overview Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '24px' }}>
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '16px' }}>
+        <div className="luxury-card">
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
             Total Audit Records
           </div>
@@ -196,7 +185,7 @@ export default function AuditLedgerView({ sessionId }) {
           </div>
         </div>
 
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '16px' }}>
+        <div className="luxury-card">
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
             Legal Queries Executed
           </div>
@@ -205,7 +194,7 @@ export default function AuditLedgerView({ sessionId }) {
           </div>
         </div>
 
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '16px' }}>
+        <div className="luxury-card">
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
             Shield Block Events
           </div>

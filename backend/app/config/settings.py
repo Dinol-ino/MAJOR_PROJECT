@@ -104,7 +104,7 @@ class OrchestratorConfig(BaseModel):
     max_steps: int = Field(default_factory=lambda: int(os.getenv("MAX_STEPS_PER_REQUEST", "8")))
     max_tool_calls: int = Field(default_factory=lambda: int(os.getenv("MAX_TOOL_CALLS_PER_REQUEST", "5")))
     max_tokens: int = Field(default_factory=lambda: int(os.getenv("MAX_TOKENS_PER_REQUEST", "8192")))
-    max_execution_time_seconds: float = Field(default_factory=lambda: float(os.getenv("MAX_EXECUTION_TIME_SECONDS", "60.0")))
+    max_execution_time_seconds: float = Field(default_factory=lambda: float(os.getenv("MAX_EXECUTION_TIME_SECONDS", "180.0")))
     max_retrieved_docs: int = Field(default_factory=lambda: int(os.getenv("MAX_RETRIEVED_DOCS_PER_REQUEST", "15")))
     max_network_requests: int = Field(default_factory=lambda: int(os.getenv("MAX_NETWORK_REQUESTS_PER_REQUEST", "5")))
     retry_budget: int = Field(default_factory=lambda: int(os.getenv("RETRY_BUDGET", "2")))
@@ -158,7 +158,14 @@ class Settings(BaseModel):
     # Flat backward-compatible aliases
     @property
     def OLLAMA_URL(self) -> str:
-        return self.model.ollama_url
+        url = self.model.ollama_url
+        if "://ollama:" in url:
+            import socket
+            try:
+                socket.gethostbyname("ollama")
+            except Exception:
+                return url.replace("://ollama:", "://127.0.0.1:")
+        return url
 
     @property
     def HF_TOKEN(self) -> str:

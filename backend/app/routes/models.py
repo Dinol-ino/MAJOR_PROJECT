@@ -115,11 +115,22 @@ async def get_recommended_models():
     all_models = registry.all_models()
     recommended_list = []
 
+    def _norm_tag(name: str) -> str:
+        tag = (name or "").strip().lower()
+        if tag and ":" not in tag:
+            tag = f"{tag}:latest"
+        return tag
+
+    # Normalized installed set: exact tags only. Bare prefixes stored above
+    # (e.g. "qwen2.5") normalize to "qwen2.5:latest" and can never equal a
+    # versioned tag, so "qwen2.5:3b" no longer matches "qwen2.5:7b".
+    normalized_installed = {_norm_tag(t) for t in installed_tags}
+
     for entry in all_models:
         model_name = entry.ollama_tag or entry.model_id
         is_installed = (
-            model_name.lower() in installed_tags
-            or entry.model_id.lower() in installed_tags
+            _norm_tag(model_name) in normalized_installed
+            or _norm_tag(entry.model_id) in normalized_installed
         )
 
         # Parameter size heuristics from display name or id
@@ -222,7 +233,8 @@ async def pull_model_endpoint(req: ModelPullRequest, stream: bool = Query(True))
                 break
 
     if model_entry:
-        required_storage_gb = model_entry.size_gb * 2.0
+        # Storage safety contract: required_gb = size_gb * 2.5 + 5.0 OS headroom.
+        required_storage_gb = model_entry.size_gb * 2.5 + 5.0
         try:
             import shutil
             total, used, free = shutil.disk_usage(os.getcwd())
@@ -230,7 +242,7 @@ async def pull_model_endpoint(req: ModelPullRequest, stream: bool = Query(True))
             if free_gb < required_storage_gb:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"Insufficient storage to pull '{model_entry.display_name}'. Requires {required_storage_gb:.1f} GB free space (download + cache overhead), but only {free_gb:.1f} GB is available on disk."
+                    detail=f"Insufficient storage to pull '{model_entry.display_name}'. Requires {required_storage_gb:.1f} GB free space (model + extraction + 5GB OS headroom), but only {free_gb:.1f} GB is available on disk. Free up space or stay on a smaller model."
                 )
         except HTTPException:
             raise
@@ -238,6 +250,8 @@ async def pull_model_endpoint(req: ModelPullRequest, stream: bool = Query(True))
             logger.debug(f"Storage check notice: {err}")
 
     ollama_url = settings.OLLAMA_URL
+
+    tag_to_pull = model_entry.ollama_tag if model_entry and model_entry.ollama_tag else model_name
 
     # If streaming is requested (standard v4 behavior), yield SSE events
     if stream:
@@ -247,7 +261,7 @@ async def pull_model_endpoint(req: ModelPullRequest, stream: bool = Query(True))
                     async with client.stream(
                         "POST",
                         f"{ollama_url}/api/pull",
-                        json={"name": model_name, "stream": True}
+                        json={"name": tag_to_pull, "stream": True}
                     ) as resp:
                         if resp.status_code != 200:
                             err_body = await resp.aread()
@@ -268,15 +282,38 @@ async def pull_model_endpoint(req: ModelPullRequest, stream: bool = Query(True))
                                 else:
                                     data["percent"] = 100.0 if data.get("status") == "success" else 0.0
 
-                                # Task 3.2.2: Post-pull inference smoke test verification
+                                # Task 3.2.2: Post-pull alias creation and inference smoke test verification
                                 if data.get("status") == "success":
                                     data["percent"] = 100.0
+                                    # Create alias if requested model_name differs from tag_to_pull (e.g. dfrag-legal:7b -> qwen2.5:7b)
+                                    if model_name != tag_to_pull:
+                                        try:
+                                            await client.post(
+                                                f"{ollama_url}/api/create",
+                                                json={
+                                                    "model": model_name,
+                                                    "from": tag_to_pull,
+                                                    "system": "You are DFrag Legal, specialized in Indian statutory analysis and legal research."
+                                                },
+                                                timeout=30.0
+                                            )
+                                        except Exception as create_err:
+                                            logger.warning(f"Could not create alias model {model_name} from {tag_to_pull}: {create_err}")
+
+                                    # Run smoke test
                                     try:
+                                        smoke_target = model_name
                                         smoke_resp = await client.post(
                                             f"{ollama_url}/api/generate",
-                                            json={"model": model_name, "prompt": "Legal engine smoke test ping", "stream": False},
+                                            json={"model": smoke_target, "prompt": "Legal engine smoke test ping", "stream": False},
                                             timeout=15.0
                                         )
+                                        if smoke_resp.status_code != 200 and model_name != tag_to_pull:
+                                            smoke_resp = await client.post(
+                                                f"{ollama_url}/api/generate",
+                                                json={"model": tag_to_pull, "prompt": "Legal engine smoke test ping", "stream": False},
+                                                timeout=15.0
+                                            )
                                         if smoke_resp.status_code == 200:
                                             data["smoke_test"] = "passed"
                                             data["status"] = "verified"
