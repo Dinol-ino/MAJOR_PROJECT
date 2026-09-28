@@ -28,6 +28,7 @@ from app.memory.request_memory import RequestMemory
 from app.services.ingest import ingest_service
 from app.db.engine import get_sync_session
 from app.db.models import Conversation, Message
+from app.security.ownership import current_user_id, conversation_accessible, require_vault, owns
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
@@ -98,11 +99,11 @@ def _synthesize_grounded_legal_answer(query: str, evidence: List[Dict[str, Any]]
 
 
 @router.get("/chat/sessions")
-def list_sessions(user_id: Optional[str] = Query(None), current_user: Dict = Depends(get_current_user)):
+def list_sessions(current_user: Dict = Depends(get_current_user)):
     """
     Returns list of past task sessions for the sidebar navigation from durable memory.
     """
-    uid = user_id or current_user.get("id") or "default_user"
+    uid = current_user_id(current_user)
     conversations = durable_memory.get_user_conversations(user_id=uid)
     sessions = []
     for conv in conversations:
@@ -116,33 +117,33 @@ def list_sessions(user_id: Optional[str] = Query(None), current_user: Dict = Dep
 
 
 @router.get("/chat/sessions/{session_id}/messages")
-def get_session_messages(session_id: str, user_id: Optional[str] = Query(None), current_user: Dict = Depends(get_current_user)):
+def get_session_messages(session_id: str, current_user: Dict = Depends(get_current_user)):
     """
     Returns full transcript message history for a specific conversation.
     """
-    uid = user_id or current_user.get("id") or "default_user"
+    uid = current_user_id(current_user)
     messages = durable_memory.get_conversation_messages(session_id, user_id=uid)
     return {"session_id": session_id, "messages": messages}
 
 
 @router.delete("/chat/sessions/{session_id}")
-def delete_session(session_id: str, user_id: Optional[str] = Query(None), current_user: Dict = Depends(get_current_user)):
-    uid = user_id or current_user.get("id") or "default_user"
+def delete_session(session_id: str, current_user: Dict = Depends(get_current_user)):
+    uid = current_user_id(current_user)
     durable_memory.delete_conversation(session_id, user_id=uid)
     return {"status": "ok", "deleted": session_id}
 
 
 @router.get("/chat/memory/semantic")
-def list_semantic_memories(user_id: Optional[str] = Query(None), category: Optional[str] = None, current_user: Dict = Depends(get_current_user)):
-    """Lists structured semantic facts and preferences for a user."""
-    uid = user_id or current_user.get("id") or "default_user"
+def list_semantic_memories(category: Optional[str] = None, current_user: Dict = Depends(get_current_user)):
+    """Lists structured semantic facts and preferences for the authenticated user."""
+    uid = current_user_id(current_user)
     return {"memories": durable_memory.get_semantic_memories(user_id=uid, category=category)}
 
 
 @router.post("/chat/memory/semantic")
-def create_semantic_memory(user_id: Optional[str] = Query(None), category: str = "preference", key: str = "", value: str = "", current_user: Dict = Depends(get_current_user)):
+def create_semantic_memory(category: str = "preference", key: str = "", value: str = "", current_user: Dict = Depends(get_current_user)):
     """Stores a contextual fact or preference in persistent semantic memory."""
-    uid = user_id or current_user.get("id") or "default_user"
+    uid = current_user_id(current_user)
     mem = durable_memory.save_semantic_memory(user_id=uid, category=category, key=key, value=value)
     return {"status": "ok", "memory": mem}
 
@@ -150,7 +151,19 @@ def create_semantic_memory(user_id: Optional[str] = Query(None), category: str =
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_current_user)):
     start_time = time.time()
-    current_uid = current_user.get("id") or "default_user"
+    current_uid = current_user_id(current_user)
+
+    # Isolation: the session id and vault id are client-supplied, so bind them to the caller.
+    with get_sync_session() as session:
+        if not conversation_accessible(session, request.session_id, current_user):
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        if request.vault_id:
+            require_vault(session, request.vault_id, current_user)
+
+    # Layers 1-3 are mandatory. The unshielded baseline exists only for offline evaluation.
+    if not request.shield_on and not settings.security.allow_unshielded_baseline:
+        request.shield_on = True
+
     req_memory = RequestMemory(
         session_id=request.session_id,
         raw_query=request.message,
@@ -293,6 +306,7 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
         )
 
         sources = citation_builder.build(fitted_chunks)
+        sources_dict = [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in sources]
 
         # Layer 2: Secure Prompt Construction (with Presidio PII anonymization & System Prompt v4)
         prompt = trusted_context.build_prompt(
@@ -387,13 +401,12 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
                 latency_ms=latency_ms
             )
             quarantine_msg = f"Response quarantined: {error_reason}"
-            sources_dict = [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in sources]
             durable_memory.add_message(
                 conversation_id=request.session_id,
                 role="assistant",
                 content=quarantine_msg,
                 citations=sources_dict,
-                user_id="default_user"
+                user_id=current_uid
             )
             return ChatResponse(
                 answer=quarantine_msg,
@@ -411,14 +424,8 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
         from app.services.response_parser import response_parser
         parsed = response_parser.parse(clean_answer, evidence_chunks=fitted_chunks)
         final_answer = parsed.content if parsed.content else formatted_answer
+        # Only a trace actually emitted by the model is shown; none is fabricated.
         reasoning_trace = parsed.reasoning_trace
-        if not reasoning_trace and request.reasoning_effort == "high":
-            reasoning_trace = (
-                f"1. Classified intent: statutory_analysis\n"
-                f"2. Evaluated {len(fitted_chunks)} statutory evidence chunks for relevance.\n"
-                f"3. Validated legal boundaries against Indian jurisdiction and current enactments.\n"
-                f"4. Synthesized authoritative grounded response with strict section-level citations."
-            )
         grounding_score = parsed.grounding_score
         citations_parsed = [c.to_dict() for c in parsed.citations]
 
@@ -545,13 +552,16 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
 @router.get("/messages/{message_id}/grounding")
 @router.get("/api/messages/{message_id}/grounding")
 @router.get("/chat/messages/{message_id}/grounding")
-def get_message_grounding(message_id: str):
+def get_message_grounding(message_id: str, current_user: Dict = Depends(get_current_user)):
     """
     Returns authentic grounding score breakdown for a specific assistant message (Spec 03 §6.3).
     """
     with get_sync_session() as session:
         msg = session.query(Message).filter_by(message_id=message_id).first()
         if not msg:
+            raise HTTPException(status_code=404, detail="Message not found")
+        conv = session.query(Conversation).filter_by(conversation_id=msg.conversation_id).first()
+        if not conv or not owns(conv.user_id, current_user):
             raise HTTPException(status_code=404, detail="Message not found")
 
         cits = msg.citations_json or msg.citations or []

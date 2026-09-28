@@ -23,6 +23,9 @@ class ModelEntry:
     ollama_tag: Optional[str] = None
     hf_repo: Optional[str] = None
     gguf_filename: Optional[str] = None
+    parameter_size: Optional[str] = None
+    license: Optional[str] = None
+    source: Optional[str] = None
 
 class ModelRegistry:
     def __init__(self, yaml_path: Optional[str] = None):
@@ -67,7 +70,10 @@ class ModelRegistry:
                     language_support=item.get("language_support", ["en"]),
                     ollama_tag=item.get("ollama_tag"),
                     hf_repo=item.get("hf_repo"),
-                    gguf_filename=item.get("gguf_filename")
+                    gguf_filename=item.get("gguf_filename"),
+                    parameter_size=item.get("parameter_size"),
+                    license=item.get("license"),
+                    source=item.get("source"),
                 )
                 self._entries[entry.model_id] = entry
             logger.info(f"Loaded {len(self._entries)} models into registry from {self.yaml_path}")
@@ -116,9 +122,12 @@ class ModelRegistry:
         - VRAM limit: model must fit in 80% of detected VRAM (overhead for driver + KV cache)
         - Storage limit: model download size * 2 must be less than free disk space
         """
-        ram_budget = hw.ram_available_gb * 0.60
-        vram_budget = (hw.gpu_vram_gb * 0.80) if (hw.gpu_available and hw.gpu_vram_gb) else 0.0
-        storage_required = model.size_gb * 2.0
+        ram_fraction = float(os.getenv("MODEL_FIT_RAM_FRACTION", "0.60"))
+        vram_fraction = float(os.getenv("MODEL_FIT_VRAM_FRACTION", "0.80"))
+        storage_factor = float(os.getenv("MODEL_FIT_STORAGE_FACTOR", "2.0"))
+        ram_budget = hw.ram_available_gb * ram_fraction
+        vram_budget = (hw.gpu_vram_gb * vram_fraction) if (hw.gpu_available and hw.gpu_vram_gb) else 0.0
+        storage_required = model.size_gb * storage_factor
         fits_storage = hw.storage_free_gb >= storage_required
 
         fits_vram = False
@@ -135,10 +144,10 @@ class ModelRegistry:
             fit_reason = f"Fits in available RAM ({model.ram_required_gb} GB <= {ram_budget:.1f} GB usable RAM)"
         elif hw.gpu_available and model.vram_required_gb and model.vram_required_gb <= hw.gpu_vram_gb:
             safety_tier = "CAUTION"
-            fit_reason = f"High VRAM pressure ({model.vram_required_gb} GB requires >80% of {hw.gpu_vram_gb} GB VRAM)"
+            fit_reason = f"High VRAM pressure ({model.vram_required_gb} GB requires >{int(vram_fraction*100)}% of {hw.gpu_vram_gb} GB VRAM)"
         elif model.ram_required_gb <= hw.ram_available_gb:
             safety_tier = "CAUTION"
-            fit_reason = f"High RAM pressure ({model.ram_required_gb} GB requires >60% of available RAM)"
+            fit_reason = f"High RAM pressure ({model.ram_required_gb} GB requires >{int(ram_fraction*100)}% of available RAM)"
         else:
             safety_tier = "UNSUPPORTED"
             fit_reason = f"Exceeds memory capacity (Requires {model.ram_required_gb} GB RAM / {model.vram_required_gb or 0} GB VRAM)"
@@ -148,6 +157,7 @@ class ModelRegistry:
             "fits_vram": fits_vram,
             "fits_ram": fits_ram,
             "fits_storage": fits_storage,
+            "storage_required_gb": round(storage_required, 1),
             "safety_tier": safety_tier,
             "fit_reason": fit_reason
         }

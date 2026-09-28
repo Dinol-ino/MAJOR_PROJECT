@@ -55,13 +55,16 @@ def test_l3_embedding_cache_memory_guard():
     mock_vm = MagicMock()
     mock_vm.total = 8 * (1024 ** 3)  # 8 GB
 
+    l3_embedding_cache._ram_ok = None
     with patch("psutil.virtual_memory", return_value=mock_vm):
         assert l3_embedding_cache.enabled is False
 
     mock_vm_16 = MagicMock()
     mock_vm_16.total = 16 * (1024 ** 3)  # 16 GB
+    l3_embedding_cache._ram_ok = None
     with patch("psutil.virtual_memory", return_value=mock_vm_16):
         assert l3_embedding_cache.enabled is True
+    l3_embedding_cache._ram_ok = None
 
 
 def test_fsm_fast_path_detection():

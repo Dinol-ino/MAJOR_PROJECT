@@ -158,7 +158,7 @@ class ModelLifecycleManager:
         except Exception as exc:
             error_msg = str(exc)
             # Self-heal: if the model is simply missing, auto-pull it and retry once.
-            if settings.model.auto_pull_on_startup and self._is_model_missing_error(error_msg):
+            if settings.model.auto_pull_on_demand and self._is_model_missing_error(error_msg):
                 logger.info(f"Model '{target_model}' missing on first use. Auto-pulling (self-heal)...")
                 pulled = await self._pull_and_wait(target_model)
                 if pulled:
@@ -295,7 +295,7 @@ class ModelLifecycleManager:
             circuit_breaker.record_success(target_model)
         except Exception as exc:
             # Self-heal: auto-pull missing model mid-stream and retry once.
-            if settings.model.auto_pull_on_startup and self._is_model_missing_error(str(exc)):
+            if settings.model.auto_pull_on_demand and self._is_model_missing_error(str(exc)):
                 logger.info(f"Model '{target_model}' missing during stream. Auto-pulling (self-heal)...")
                 pulled = await self._pull_and_wait(target_model)
                 if pulled:

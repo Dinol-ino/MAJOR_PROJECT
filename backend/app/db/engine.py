@@ -1,6 +1,8 @@
 import os
+import time
 import logging
-from typing import AsyncGenerator, Generator, Optional
+import threading
+from typing import Any, AsyncGenerator, Dict, Generator, Optional
 from contextlib import asynccontextmanager, contextmanager
 
 from sqlalchemy import create_engine, text
@@ -13,20 +15,32 @@ from app.db.models import Base
 
 logger = logging.getLogger(__name__)
 
+class DatabaseUnavailableError(RuntimeError):
+    """Raised when the configured database cannot be reached and fallback is not permitted."""
+
+
+def _sqlite_url(async_driver: bool) -> str:
+    sqlite_path = settings.SQLITE_DB_PATH.replace("./", "")
+    return f"sqlite+aiosqlite:///{sqlite_path}" if async_driver else f"sqlite:///{sqlite_path}"
+
+
+def _redact_url(url: str) -> str:
+    """Never log credentials embedded in a database URL."""
+    import re
+    return re.sub(r"://([^:/@]+):[^@]*@", r"://\1:***@", url)
+
+
 # Determine active database URL
 def get_db_url(async_driver: bool = True) -> str:
+    """Normalizes the configured DATABASE_URL for the requested driver.
+
+    An empty DATABASE_URL selects the local SQLite store explicitly. A configured
+    PostgreSQL URL is never silently swapped for SQLite here; see get_sync_engine()
+    and DB_ALLOW_SQLITE_FALLBACK for the (opt-in, logged) fallback policy.
+    """
     url = settings.memory.postgres_url.strip()
     if not url:
-        sqlite_path = settings.SQLITE_DB_PATH.replace("./", "")
-        return f"sqlite+aiosqlite:///{sqlite_path}" if async_driver else f"sqlite:///{sqlite_path}"
-
-    if "@postgres:" in url or "://postgres:" in url:
-        import socket
-        try:
-            socket.gethostbyname("postgres")
-        except socket.gaierror:
-            sqlite_path = settings.SQLITE_DB_PATH.replace("./", "")
-            return f"sqlite+aiosqlite:///{sqlite_path}" if async_driver else f"sqlite:///{sqlite_path}"
+        return _sqlite_url(async_driver)
 
     if async_driver:
         if url.startswith("postgresql://"):
@@ -36,6 +50,8 @@ def get_db_url(async_driver: bool = True) -> str:
     else:
         if url.startswith("postgresql+psycopg://"):
             url = url.replace("postgresql+psycopg://", "postgresql://", 1)
+        elif url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
         elif url.startswith("sqlite+aiosqlite://"):
             url = url.replace("sqlite+aiosqlite://", "sqlite://", 1)
     return url
@@ -44,116 +60,148 @@ def get_db_url(async_driver: bool = True) -> str:
 # Sync Engine & Session (for migrations, local dev, synchronous tasks)
 _sync_engine = None
 _sync_session_factory = None
+_active_backend: Dict[str, Any] = {"backend": None, "fallback": False, "url": None}
+_last_connect_failure: float = 0.0
+_connect_lock = threading.Lock()
+
+
+def _db_policy() -> Dict[str, Any]:
+    return {
+        "allow_sqlite_fallback": os.getenv("DB_ALLOW_SQLITE_FALLBACK", "false").lower() == "true",
+        "connect_retries": max(1, int(os.getenv("DB_CONNECT_RETRIES", "3"))),
+        "retry_backoff_seconds": float(os.getenv("DB_RETRY_BACKOFF_SECONDS", "1.0")),
+        "retry_cooldown_seconds": float(os.getenv("DB_RETRY_COOLDOWN_SECONDS", "5.0")),
+        "connect_timeout": int(os.getenv("POSTGRES_CONNECT_TIMEOUT", "3")),
+    }
+
+
+def get_db_backend_info() -> Dict[str, Any]:
+    """Which store is actually serving requests (surfaced by /health so a fallback is never silent)."""
+    return dict(_active_backend)
+
 
 def get_sync_engine():
-    global _sync_engine
-    if _sync_engine is None:
+    global _sync_engine, _last_connect_failure
+    if _sync_engine is not None:
+        return _sync_engine
+
+    with _connect_lock:
+        if _sync_engine is not None:
+            return _sync_engine
+
+        policy = _db_policy()
+        now = time.time()
+        if _last_connect_failure and now - _last_connect_failure < policy["retry_cooldown_seconds"]:
+            raise DatabaseUnavailableError("Database unavailable (retry cooling down).")
+
         url = get_db_url(async_driver=False)
-        is_sqlite = "sqlite" in url
-        engine_kwargs = {
-            "echo": False,
-        }
-        if is_sqlite:
-            engine_kwargs["connect_args"] = {"check_same_thread": False}
-            _sync_engine = create_engine(url, **engine_kwargs)
+        engine = None
+        if "sqlite" in url:
+            engine = create_engine(url, connect_args={"check_same_thread": False}, echo=False)
+            _active_backend.update({"backend": "sqlite", "fallback": False, "url": _redact_url(url)})
         else:
-            engine_kwargs.update({
-                "pool_size": 10,
-                "max_overflow": 5,
+            engine_kwargs = {
+                "echo": False,
+                "pool_size": int(os.getenv("DB_POOL_SIZE", "10")),
+                "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "5")),
                 "pool_timeout": 3.0,
                 "pool_pre_ping": True,
                 "pool_recycle": 1800,
-                "connect_args": {"connect_timeout": 2},
-            })
-            try:
-                candidate = create_engine(url, **engine_kwargs)
-                with candidate.connect() as conn:
-                    conn.execute(text("SELECT 1"))
-                _sync_engine = candidate
-            except Exception as exc:
-                logger.warning(f"PostgreSQL connection to {url} failed: {exc}. Falling back to SQLite local storage.")
-                sqlite_path = settings.SQLITE_DB_PATH.replace("./", "")
-                fallback_url = f"sqlite:///{sqlite_path}"
-                _sync_engine = create_engine(fallback_url, connect_args={"check_same_thread": False}, echo=False)
-        
+                "connect_args": {"connect_timeout": policy["connect_timeout"]},
+            }
+            last_exc: Optional[Exception] = None
+            for attempt in range(policy["connect_retries"]):
+                try:
+                    candidate = create_engine(url, **engine_kwargs)
+                    with candidate.connect() as conn:
+                        conn.execute(text("SELECT 1"))
+                    engine = candidate
+                    _active_backend.update({"backend": "postgresql", "fallback": False, "url": _redact_url(url)})
+                    break
+                except Exception as exc:  # bounded retry with backoff
+                    last_exc = exc
+                    if attempt < policy["connect_retries"] - 1:
+                        time.sleep(policy["retry_backoff_seconds"] * (2 ** attempt))
+
+            if engine is None:
+                if policy["allow_sqlite_fallback"]:
+                    fallback_url = _sqlite_url(async_driver=False)
+                    logger.error(
+                        "PostgreSQL at %s is unreachable (%s). DB_ALLOW_SQLITE_FALLBACK=true: serving from LOCAL SQLITE %s. "
+                        "Data written now will NOT be in PostgreSQL.",
+                        _redact_url(url), type(last_exc).__name__, fallback_url,
+                    )
+                    engine = create_engine(fallback_url, connect_args={"check_same_thread": False}, echo=False)
+                    _active_backend.update({"backend": "sqlite", "fallback": True, "url": _redact_url(fallback_url)})
+                else:
+                    _last_connect_failure = time.time()
+                    logger.error(
+                        "PostgreSQL at %s is unreachable after %d attempt(s) (%s). Requests needing the database will return 503. "
+                        "Fix DATABASE_URL, start PostgreSQL, or set DB_ALLOW_SQLITE_FALLBACK=true for local development.",
+                        _redact_url(url), policy["connect_retries"], type(last_exc).__name__,
+                    )
+                    raise DatabaseUnavailableError("Configured PostgreSQL database is unreachable.") from last_exc
+
         # Ensure schema tables exist
         try:
-            Base.metadata.create_all(bind=_sync_engine)
-            _auto_migrate_schema(_sync_engine)
+            Base.metadata.create_all(bind=engine)
+            _auto_migrate_schema(engine)
         except Exception as e:
-            logger.debug(f"Schema verification deferred: {e}")
+            logger.warning("Schema verification deferred: %s", type(e).__name__)
+        _last_connect_failure = 0.0
+        _sync_engine = engine
     return _sync_engine
 
 
+# Additive, idempotent column upgrades for databases created before a column existed.
+# (create_all() creates missing tables but never adds columns to existing ones.)
+_ADDITIVE_COLUMNS: Dict[str, Dict[str, str]] = {
+    "conversations": {"project_vault_id": "VARCHAR(64)"},
+    "messages": {
+        "citations_json": "JSON",
+        "reasoning_trace": "TEXT",
+        "model_used": "VARCHAR(64)",
+        "runtime_used": "VARCHAR(16)",
+        "token_count": "INTEGER",
+        "grounding_score": "FLOAT",
+    },
+    "project_vaults": {"deleted_at": "TIMESTAMP"},
+    "document_memory": {
+        "project_vault_id": "VARCHAR(64)",
+        "file_hash": "VARCHAR(64)",
+        "vector_ns": "VARCHAR(128)",
+        "ingest_status": "VARCHAR(32) DEFAULT 'ready'",
+        "ingest_error": "TEXT",
+        "ingest_progress": "INTEGER DEFAULT 100",
+    },
+    "citation_edges": {"derivation_method": "VARCHAR(64) DEFAULT 'curated_legal_relationship'"},
+    "statute_sections": {"cited_in_conversations": "INTEGER DEFAULT 0"},
+    "statutes": {
+        "source_url": "VARCHAR(512)",
+        "source_version": "VARCHAR(256)",
+        "publication_date": "VARCHAR(32)",
+        "legal_status": "VARCHAR(32)",
+        "content_hash": "VARCHAR(64)",
+        "verified_at": "VARCHAR(32)",
+    },
+}
+
+
 def _auto_migrate_schema(engine):
-    """Ensures columns added in Phase 01 exist even if the SQLite database was already initialized."""
-    with engine.connect() as conn:
-        try:
-            # Check conversations table
-            res = conn.execute(text("PRAGMA table_info(conversations)")).fetchall()
-            conv_cols = {row[1] for row in res}
-            if conv_cols and "project_vault_id" not in conv_cols:
-                conn.execute(text("ALTER TABLE conversations ADD COLUMN project_vault_id VARCHAR(64)"))
-                conn.commit()
+    """Adds missing columns on both SQLite and PostgreSQL (dialect-neutral via the inspector)."""
+    from sqlalchemy import inspect as sa_inspect
 
-            # Check messages table
-            res = conn.execute(text("PRAGMA table_info(messages)")).fetchall()
-            msg_cols = {row[1] for row in res}
-            if msg_cols:
-                if "citations_json" not in msg_cols:
-                    conn.execute(text("ALTER TABLE messages ADD COLUMN citations_json JSON"))
-                if "reasoning_trace" not in msg_cols:
-                    conn.execute(text("ALTER TABLE messages ADD COLUMN reasoning_trace TEXT"))
-                if "model_used" not in msg_cols:
-                    conn.execute(text("ALTER TABLE messages ADD COLUMN model_used VARCHAR(64)"))
-                if "runtime_used" not in msg_cols:
-                    conn.execute(text("ALTER TABLE messages ADD COLUMN runtime_used VARCHAR(16)"))
-                if "token_count" not in msg_cols:
-                    conn.execute(text("ALTER TABLE messages ADD COLUMN token_count INTEGER"))
-                if "grounding_score" not in msg_cols:
-                    conn.execute(text("ALTER TABLE messages ADD COLUMN grounding_score FLOAT"))
-                conn.commit()
-
-            # Check project_vaults table
-            res = conn.execute(text("PRAGMA table_info(project_vaults)")).fetchall()
-            vault_cols = {row[1] for row in res}
-            if vault_cols and "deleted_at" not in vault_cols:
-                conn.execute(text("ALTER TABLE project_vaults ADD COLUMN deleted_at DATETIME"))
-                conn.commit()
-
-            # Check document_memory table
-            res = conn.execute(text("PRAGMA table_info(document_memory)")).fetchall()
-            doc_cols = {row[1] for row in res}
-            if doc_cols:
-                if "project_vault_id" not in doc_cols:
-                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN project_vault_id VARCHAR(64)"))
-                if "file_hash" not in doc_cols:
-                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN file_hash VARCHAR(64)"))
-                if "vector_ns" not in doc_cols:
-                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN vector_ns VARCHAR(128)"))
-                if "ingest_status" not in doc_cols:
-                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN ingest_status VARCHAR(32) DEFAULT 'ready'"))
-                if "ingest_error" not in doc_cols:
-                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN ingest_error TEXT"))
-                if "ingest_progress" not in doc_cols:
-                    conn.execute(text("ALTER TABLE document_memory ADD COLUMN ingest_progress INTEGER DEFAULT 100"))
-                conn.commit()
-
-            # Check citation_edges table
-            res = conn.execute(text("PRAGMA table_info(citation_edges)")).fetchall()
-            edge_cols = {row[1] for row in res}
-            if edge_cols and "derivation_method" not in edge_cols:
-                conn.execute(text("ALTER TABLE citation_edges ADD COLUMN derivation_method VARCHAR(64) DEFAULT 'curated_legal_relationship'"))
-                conn.commit()
-
-            # Check statute_sections table
-            res = conn.execute(text("PRAGMA table_info(statute_sections)")).fetchall()
-            sec_cols = {row[1] for row in res}
-            if sec_cols and "cited_in_conversations" not in sec_cols:
-                conn.execute(text("ALTER TABLE statute_sections ADD COLUMN cited_in_conversations INTEGER DEFAULT 0"))
-                conn.commit()
-        except Exception as e:
-            logger.debug(f"Auto-migration check non-fatal notice: {e}")
+    inspector = sa_inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table, columns in _ADDITIVE_COLUMNS.items():
+            if table not in existing_tables:
+                continue
+            present = {c["name"] for c in inspector.get_columns(table)}
+            for name, ddl in columns.items():
+                if name not in present:
+                    conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {ddl}'))
+                    logger.info("Schema upgrade: added %s.%s", table, name)
 
 
 def get_sync_sessionmaker():
@@ -188,8 +236,7 @@ def get_async_engine():
     if _async_engine is None:
         sync_engine = get_sync_engine()
         if "sqlite" in str(sync_engine.url):
-            sqlite_path = settings.SQLITE_DB_PATH.replace("./", "")
-            url = f"sqlite+aiosqlite:///{sqlite_path}"
+            url = _sqlite_url(async_driver=True)
             is_sqlite = True
         else:
             url = get_db_url(async_driver=True)

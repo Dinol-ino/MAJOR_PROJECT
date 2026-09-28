@@ -121,11 +121,13 @@ def test_mock_runtime_hard_safety_check(client):
     """
     Section 6.5: Verify MockRuntime cannot be switched to outside test/CI environments.
     """
+    from tests.auth_helpers import register_user
+    _, headers = register_user(client, "rt_guard")
     env_copy = os.environ.copy()
     env_copy.pop("PYTEST_CURRENT_TEST", None)
     env_copy["TESTING"] = "0"
     with patch.dict(os.environ, env_copy, clear=True):
-        resp = client.post("/runtime/switch", json={"runtime_name": "mock"})
+        resp = client.post("/runtime/switch", json={"runtime_name": "mock"}, headers=headers)
         assert resp.status_code == 403
         assert "MockRuntime is restricted" in resp.json()["detail"]
 

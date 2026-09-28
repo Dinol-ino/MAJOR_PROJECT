@@ -19,7 +19,8 @@ from app.system.hardware_detector import HardwareDetector
 from app.system.model_registry import ModelRegistry
 
 from app.db.health import check_db_health
-from app.db.engine import init_db_schema
+from app.db.engine import init_db_schema, DatabaseUnavailableError, get_db_backend_info
+from fastapi.responses import JSONResponse
 from app.runtime.manager import runtime_manager
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,15 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+@app.exception_handler(DatabaseUnavailableError)
+async def _database_unavailable_handler(request: Request, exc: DatabaseUnavailableError):
+    """Fail closed with a safe message instead of silently switching data stores."""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "The workspace database is not reachable. Please try again shortly."},
+    )
+
 # Correlation Tracking Middleware (Phase 11)
 app.add_middleware(CorrelationMiddleware)
 
@@ -71,8 +81,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
     allow_credentials="*" not in _origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Correlation-ID"],
 )
 
 
@@ -123,9 +133,10 @@ async def health_check():
         ollama_ok = False
 
     db_status = await check_db_health()
+    db_status["backend"] = get_db_backend_info()
 
     return {
-        "status": "healthy" if db_status["status"] != "offline" else "degraded",
+        "status": "healthy" if db_status["status"] != "offline" and ollama_ok else "degraded",
         "runtime": settings.MODEL_RUNTIME,
         "database": db_status,
         "model_warmup": {
@@ -143,6 +154,4 @@ async def health_check():
 async def db_health_check():
     return await check_db_health()
 
-@app.get("/test/ping")
-async def ping():
-    return {"ping": "pong"}
+

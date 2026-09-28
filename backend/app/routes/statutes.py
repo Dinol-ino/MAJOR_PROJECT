@@ -2,8 +2,11 @@ import os
 import re
 import logging
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
+
+from app.routes.auth import get_current_user
+from app.security.ownership import current_user_id, conversation_accessible, require_vault, is_admin
 
 from app.db.engine import get_sync_session
 from app.db.models import Statute, StatuteSection, CitationEdge
@@ -111,14 +114,17 @@ def get_corpus_completeness_status():
         ids, metadatas = [], []
 
     bm25_count = tier1_bm25_index.count()
+    if not metadatas and bm25_count:
+        # The lexical index is authoritative when no embedding model is loaded.
+        metadatas = list(tier1_bm25_index.metadatas)
 
     acts_summary = {}
     for meta in metadatas:
         act = meta.get("act", "Unknown Act")
         sec = meta.get("section", "Unknown")
         domain = meta.get("domain", "statutory")
-        trust_level = meta.get("trust_level", "LOCAL_VERIFIED_CORPUS")
-        version = meta.get("document_version", "Official Gazette")
+        trust_level = meta.get("trust_level", "LOCAL_CORPUS")
+        version = meta.get("document_version") or None
         source_url = meta.get("source_url", "")
         
         if act not in acts_summary:
@@ -129,7 +135,9 @@ def get_corpus_completeness_status():
                 "sections": set(),
                 "trust_level": trust_level,
                 "version": version,
-                "source_url": source_url
+                "source_url": source_url,
+                "legal_status": meta.get("legal_status", "unverified"),
+                "verified_at": meta.get("verified_at", ""),
             }
         acts_summary[act]["chunks_count"] += 1
         acts_summary[act]["sections"].add(sec)
@@ -145,19 +153,26 @@ def get_corpus_completeness_status():
             "trust_level": info["trust_level"],
             "version": info["version"],
             "source_url": info["source_url"],
-            "provenance_verified": True
+            "legal_status": info.get("legal_status", "unverified"),
+            "verified_at": info.get("verified_at") or None,
+            # Provenance is complete only when the manifest records a source and a verification date.
+            "provenance_verified": bool(info["source_url"]) and bool(info.get("verified_at")),
         })
 
     distinct_sections_count = sum(len(info["sections"]) for info in acts_summary.values())
 
+    verified_acts = sum(1 for a in acts_list if a["provenance_verified"])
+    total_chunks = max(len(ids), bm25_count)
+    from app.retrieval.client import dense_retrieval_status
     return {
-        "status": "healthy" if len(ids) > 0 else "unseeded",
-        "total_chunks": len(ids),
+        "status": "healthy" if total_chunks > 0 else "unseeded",
+        "total_chunks": total_chunks,
         "total_distinct_acts": len(acts_summary),
         "total_distinct_sections": distinct_sections_count,
         "chromadb_chunks_count": len(ids),
         "bm25_indexed_count": bm25_count,
-        "provenance_coverage_pct": 100.0 if len(ids) > 0 else 0.0,
+        "provenance_coverage_pct": round(100.0 * verified_acts / len(acts_list), 1) if acts_list else 0.0,
+        "dense_retrieval": dense_retrieval_status(),
         "acts": acts_list
     }
 
@@ -167,38 +182,49 @@ def get_statutes_graph(
     scope: str = Query(default="conversation", description="Graph scope: conversation | vault | global"),
     conversation_id: Optional[str] = Query(default=None, description="Active conversation session ID"),
     vault_id: Optional[str] = Query(default=None, description="Active project vault ID"),
-    q: Optional[str] = Query(default=None, description="Node search query")
+    q: Optional[str] = Query(default=None, max_length=200, description="Node search query"),
+    current_user: dict = Depends(get_current_user),
 ):
     """
-    Spec 04 §4.3: Real dynamic legal citation graph endpoint.
-    Default scope is active conversation — nodes reflect real LLM citations.
-    Zero mock arrays.
+    Citation graph built only from persisted relationships: corpus cross-references plus
+    citations from the caller's own conversations. Another user's conversations and vaults are never visible.
     """
-    # Auto-seed cross-statute edges if needed
     statute_sync_service.auto_seed_if_empty()
+    with get_sync_session() as session:
+        if scope == "conversation" and conversation_id and not conversation_accessible(session, conversation_id, current_user):
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        if scope == "vault" and vault_id:
+            require_vault(session, vault_id, current_user)
+        allowed = _owned_conversation_ids(session, current_user)
     return citation_graph_service.get_graph(
         scope=scope,
         conversation_id=conversation_id,
         vault_id=vault_id,
-        search_query=q
+        search_query=q,
+        allowed_conversation_ids=None if is_admin(current_user) else allowed + ([conversation_id] if conversation_id else []),
     )
 
 
+def _owned_conversation_ids(session, current_user) -> List[str]:
+    from app.db.models import Conversation
+    uid = current_user_id(current_user)
+    return [c for (c,) in session.query(Conversation.conversation_id).filter(Conversation.user_id == uid).all()]
+
+
 @router.post("/graph/expand")
-def expand_graph_node(request: GraphExpandRequest):
-    """
-    Spec 04 §4.3: Lazy neighborhood expansion on node click.
-    """
-    return citation_graph_service.expand_node(request.node_id, depth=request.depth)
+def expand_graph_node(request: GraphExpandRequest, current_user: dict = Depends(get_current_user)):
+    """Lazy neighborhood expansion on node click (tenant-scoped)."""
+    with get_sync_session() as session:
+        allowed = _owned_conversation_ids(session, current_user)
+    return citation_graph_service.expand_node(
+        request.node_id, depth=request.depth, allowed_conversation_ids=None if is_admin(current_user) else allowed
+    )
 
 
 @router.post("/sync")
 def trigger_statute_sync():
-    """
-    Spec 04 §3.2: Manually triggers the statute sync pipeline from MCP servers and canonical datasets.
-    """
-    result = statute_sync_service.sync_all_statutes()
-    return result
+    """Re-indexes the local statutory corpus (data/acts_raw + manifest.yaml)."""
+    return statute_sync_service.sync_all_statutes()
 
 
 @router.get("/{slug}")

@@ -1,7 +1,13 @@
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from typing import Dict
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+
+from app.config import settings
+from app.routes.auth import get_current_user
+from app.security.ownership import current_user_id, conversation_accessible
+from app.db.engine import get_sync_session
 
 from app.orchestrator.cancellation import cancellation_manager
 from app.orchestrator.state_machine import research_orchestrator, OrchestrationResult
@@ -14,7 +20,6 @@ router = APIRouter(prefix="/research", tags=["research"])
 class ResearchQueryRequest(BaseModel):
     query: str
     session_id: str
-    user_id: Optional[str] = "default_user"
     model: Optional[str] = None
     shield_on: Optional[bool] = True
     request_id: Optional[str] = None
@@ -43,23 +48,27 @@ async def cancel_research(request_id: str, reason: Optional[str] = "User request
 
 
 @router.post("/query", response_model=OrchestrationResult)
-async def execute_research_query(req: ResearchQueryRequest):
+async def execute_research_query(req: ResearchQueryRequest, current_user: Dict = Depends(get_current_user)):
     """
     Executes a bounded multi-step research query through the Research State Machine.
     """
+    with get_sync_session() as db:
+        if not conversation_accessible(db, req.session_id, current_user):
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+    shield_on = True if not settings.security.allow_unshielded_baseline else (req.shield_on is not False)
     try:
         result = await research_orchestrator.execute(
             query=req.query,
             session_id=req.session_id,
-            user_id=req.user_id or "default_user",
+            user_id=current_user_id(current_user),
             model=req.model,
-            shield_on=req.shield_on if req.shield_on is not None else True,
+            shield_on=shield_on,
             request_id=req.request_id
         )
         return result
     except Exception as exc:
-        logger.error(f"Research query execution failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.error("Research query execution failed: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=500, detail="Research execution failed. See server logs with the request correlation id.")
 
 
 @router.get("/circuit-breaker/status")
@@ -101,13 +110,17 @@ class ModeUpdateRequest(BaseModel):
 
 
 @router.post("/mode")
-async def update_system_network_mode(req: ModeUpdateRequest):
+async def update_system_network_mode(req: ModeUpdateRequest, current_user: Dict = Depends(get_current_user)):
     """
-    Explicitly changes the system network mode ('OFFLINE' or 'ONLINE').
+    Explicitly changes the system network mode ('OFFLINE' or 'ONLINE'). The change is audited with the acting user.
     """
     from app.network.mode_enforcer import mode_enforcer
     try:
-        updated = mode_enforcer.set_mode(req.mode, reason=req.reason or "API update")
+        updated = mode_enforcer.set_mode(
+            req.mode,
+            user_id=current_user_id(current_user),
+            reason=(req.reason or "API update")[:200],
+        )
         return {
             "status": "ok",
             "mode": updated,
@@ -118,15 +131,18 @@ async def update_system_network_mode(req: ModeUpdateRequest):
 
 
 @router.post("/pipeline")
-async def run_research_pipeline(req: ResearchQueryRequest):
+async def run_research_pipeline(req: ResearchQueryRequest, current_user: Dict = Depends(get_current_user)):
     """
     Executes the 10-step bounded online/offline legal research pipeline (Phase 10).
     """
     from app.research.pipeline import research_pipeline
+    with get_sync_session() as db:
+        if not conversation_accessible(db, req.session_id, current_user):
+            raise HTTPException(status_code=404, detail="Conversation not found.")
     res = await research_pipeline.execute_research(
         query=req.query,
         session_id=req.session_id,
-        user_id=req.user_id or "default_user",
+        user_id=current_user_id(current_user),
         model=req.model
     )
     return res.model_dump()

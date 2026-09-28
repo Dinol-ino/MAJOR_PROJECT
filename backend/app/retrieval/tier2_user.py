@@ -2,7 +2,7 @@ import os
 import logging
 from typing import List, Dict, Any, Optional
 
-from app.retrieval.client import get_shared_chroma_client
+from app.retrieval.client import get_shared_chroma_client, DenseRetrievalUnavailable
 from app.retrieval.hybrid_rank import fuse_bm25_dense
 from app.retrieval.bm25_index import PersistentBM25Index
 from app.retrieval.fusion_router import deduplicate_chunks
@@ -69,25 +69,16 @@ class Tier2UserRetrieval:
             metadatas.append(meta)
             ids.append(doc_id)
 
+        # Lexical index first: it is authoritative and never depends on the embedding model.
+        self.bm25_index.add_documents_batch(doc_ids=ids, documents=documents, metadatas=metadatas)
         try:
-            self.collection.add(
-                documents=documents,
-                metadatas=metadatas,
-                ids=ids
-            )
-            # Sync to persistent BM25 index
-            self.bm25_index.add_documents_batch(doc_ids=ids, documents=documents, metadatas=metadatas)
+            self.collection.add(documents=documents, metadatas=metadatas, ids=ids)
+        except DenseRetrievalUnavailable:
+            pass
         except Exception as exc:
-            if "InvalidDimensionException" in type(exc).__name__ or "dimensionality" in str(exc):
-                self.client.delete_collection("tier2_user")
-                self._collection = self.client.get_or_create_collection(
-                    name="tier2_user",
-                    embedding_function=self.emb_fn
-                )
-                self.collection.add(documents=documents, metadatas=metadatas, ids=ids)
-                self.bm25_index.add_documents_batch(doc_ids=ids, documents=documents, metadatas=metadatas)
-            else:
-                raise
+            # Never drop the shared collection (it holds other sessions' vectors). Dense indexing of this
+            # upload is skipped and the mismatch is logged for an operator to re-index deliberately.
+            logger.error("Dense indexing skipped for session upload (%s); BM25 index updated.", type(exc).__name__)
         return len(chunks)
 
     def query(self, session_id: str, text: str, top_k: Optional[int] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -110,14 +101,13 @@ class Tier2UserRetrieval:
         try:
             count = self.collection.count()
         except Exception:
-            return []
+            count = 0
 
-        if count == 0:
-            return []
-
-        # 1. Dense query filtering by session_id
+        # 1. Dense query filtering by session_id (skipped when no embedding model is loaded)
         dense_docs = []
         try:
+            if count == 0:
+                raise DenseRetrievalUnavailable("empty dense index")
             dense_results = self.collection.query(
                 query_texts=[text],
                 where={"session_id": session_id},
@@ -138,8 +128,10 @@ class Tier2UserRetrieval:
                         "metadata": metas[i]
                     })
 
+        except DenseRetrievalUnavailable:
+            pass
         except Exception as exc:
-            logger.warning(f"ChromaDB tier2 query warning: {exc}")
+            logger.warning("ChromaDB tier2 query warning: %s", type(exc).__name__)
 
         # 2. Fast Sparse (BM25) query filtering by session_id
         bm25_docs = self.bm25_index.search(

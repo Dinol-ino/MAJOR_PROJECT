@@ -9,6 +9,7 @@ from app.db.engine import get_sync_session
 from app.db.models import Conversation, Message, ProjectVault
 from app.defense.audit_log import AuditLogger
 from app.routes.auth import get_current_user
+from app.security.ownership import current_user_id, owns, require_vault
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -16,15 +17,14 @@ audit_logger = AuditLogger()
 
 
 def _verify_conversation_access(conv: Conversation, current_user: Dict[str, Any]) -> None:
-    user_id = current_user.get("id")
-    if conv.user_id and user_id and conv.user_id != user_id and user_id != "default_user" and current_user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Access denied to this conversation.")
+    # 404 (not 403) so another user's conversation ids are not disclosed.
+    if not owns(conv.user_id, current_user):
+        raise HTTPException(status_code=404, detail="Conversation not found.")
 
 
 class CreateConversationRequest(BaseModel):
     project_vault_id: Optional[str] = Field(None, description="Optional Vault ID to bind this chat to")
     title: Optional[str] = Field("New Legal Chat", max_length=255)
-    user_id: Optional[str] = Field(None)
 
 
 class UpdateConversationRequest(BaseModel):
@@ -35,12 +35,10 @@ class UpdateConversationRequest(BaseModel):
 @router.post("", status_code=201)
 def create_conversation(req: CreateConversationRequest, current_user: Dict = Depends(get_current_user)):
     """Creates a new durable conversation, optionally associated with a project vault."""
-    effective_user_id = req.user_id or current_user.get("id") or "default_user"
+    effective_user_id = current_user_id(current_user)
     with get_sync_session() as session:
         if req.project_vault_id:
-            vault = session.query(ProjectVault).filter(ProjectVault.id == req.project_vault_id).first()
-            if not vault:
-                raise HTTPException(status_code=404, detail="Specified project vault does not exist.")
+            require_vault(session, req.project_vault_id, current_user)
 
         conv = Conversation(
             conversation_id=str(uuid.uuid4()),
@@ -61,13 +59,12 @@ def create_conversation(req: CreateConversationRequest, current_user: Dict = Dep
 @router.get("")
 def list_conversations(
     vault_id: Optional[str] = Query(None, description="Filter chats by Project Vault ID"),
-    user_id: Optional[str] = Query(None, description="Filter by user ID"),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=50, ge=1, le=100),
     current_user: Dict = Depends(get_current_user),
 ):
     """Lists conversations, ordered by updated_at desc, with server-side pagination."""
-    effective_uid = user_id or current_user.get("id") or "default_user"
+    effective_uid = current_user_id(current_user)
     with get_sync_session() as session:
         query = session.query(Conversation).filter(Conversation.user_id == effective_uid)
         if vault_id is not None:
@@ -123,9 +120,7 @@ def update_conversation(conversation_id: str, req: UpdateConversationRequest, cu
             conv.title = req.title.strip()
         if req.project_vault_id is not None:
             if req.project_vault_id != "":
-                vault = session.query(ProjectVault).filter(ProjectVault.id == req.project_vault_id).first()
-                if not vault:
-                    raise HTTPException(status_code=404, detail="Target project vault does not exist.")
+                require_vault(session, req.project_vault_id, current_user)
                 conv.project_vault_id = req.project_vault_id
             else:
                 conv.project_vault_id = None
@@ -149,5 +144,10 @@ def delete_conversation(conversation_id: str, current_user: Dict = Depends(get_c
 
         session.delete(conv)
 
+    try:
+        from app.services.citation_graph_service import citation_graph_service
+        citation_graph_service.delete_conversation_edges(conversation_id)
+    except Exception as exc:
+        logger.warning("Graph purge for deleted conversation failed: %s", type(exc).__name__)
     audit_logger.log(action=f"conversation_deleted:{conversation_id}", layer="persistence")
     return {"status": "deleted", "conversation_id": conversation_id}

@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 import httpx
 import logging
 from dataclasses import asdict
@@ -39,6 +40,7 @@ class ProvisionModelRequest(BaseModel):
     model_id: Optional[str] = None
     auto: bool = True
     hf_api_key: Optional[str] = None
+    activate: bool = False
 
 
 class HardwareOverrideRequest(BaseModel):
@@ -77,110 +79,93 @@ def get_model_catalog():
     return [asdict(m) for m in models]
 
 
+def _registry_entry_for(tag: str):
+    from app.runtime.model_state import normalize_tag
+    entry = registry.get(tag)
+    if entry:
+        return entry
+    for m in registry.all_models():
+        if normalize_tag(m.ollama_tag) == normalize_tag(tag) or normalize_tag(m.model_id) == normalize_tag(tag):
+            return m
+    return None
+
+
+@router.get("/models/installed")
+async def get_installed_models():
+    """Models actually present in the local runtime (source for the top model selector)."""
+    from app.runtime.model_state import model_state
+    tags = await model_state.list_installed()
+    active = await model_state.get_active()
+    hw = await asyncio.to_thread(HardwareDetector.detect)
+    models = []
+    for m in tags["models"]:
+        entry = _registry_entry_for(m["name"] or "")
+        fit = registry.evaluate_model_fit(entry, hw) if entry else None
+        models.append({
+            **m,
+            "display_name": entry.display_name if entry else m["name"],
+            "context_window": entry.context_window if entry else None,
+            "in_registry": entry is not None,
+            "safety_tier": fit["safety_tier"] if fit else "UNKNOWN",
+            "fit_reason": fit["fit_reason"] if fit else "No registry metadata for this model.",
+            "is_active": bool(active["model"]) and m["name"] == active["model"],
+        })
+    return {
+        "runtime_online": tags["online"],
+        "runtime_error": tags.get("error"),
+        "checked_at": tags["checked_at"],
+        "active_model": active["model"] if active["available"] else None,
+        "models": models,
+    }
+
+
+@router.get("/models/active")
+async def get_active_model():
+    from app.runtime.model_state import model_state
+    return await model_state.get_active()
+
+
+class ActivateModelRequest(BaseModel):
+    model: str
+
+
+@router.post("/models/activate")
+async def activate_model(req: ActivateModelRequest):
+    """Validate -> warm -> health check -> persist. The conversation is unaffected by a switch."""
+    from app.runtime.model_state import model_state, ModelNotAvailable
+    try:
+        return await model_state.activate(req.model)
+    except ModelNotAvailable as exc:
+        status = 503 if exc.code == "runtime_offline" else 409
+        raise HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+
 @router.get("/models/recommended")
 @router.get("/api/models/recommended")
 async def get_recommended_models():
     """
-    Dynamically computes model recommendations:
-    1. Queries live Ollama (/api/tags) for installed models.
-    2. Takes current telemetry snapshot and hardware tier.
-    3. Evaluates per-model fit against available VRAM/RAM.
-    4. Returns actionable status: 'Installed ✓' or 'Pull (~X GB)'.
+    Hardware-aware recommendations computed from the registry + detected resources + live runtime state.
+    Probes run off the event loop; nothing here is estimated or hardcoded per model.
     """
-    hw_sample = sample()
+    from app.runtime.model_state import model_state, normalize_tag
+    hw_sample = await asyncio.to_thread(sample)
+    hw_profile = await asyncio.to_thread(HardwareDetector.detect)
+    tags = await model_state.list_installed()
+    active = await model_state.get_active()
+    installed = {normalize_tag(m["name"]) for m in tags["models"]}
     tier_info = hw_sample["tier"]
-    vram_available = hw_sample["gpu"].get("vram_total_gb", 0.0)
-    ram_available = hw_sample["ram"].get("available_gb", 8.0)
-    gpu_detected = hw_sample["gpu"].get("detected", False)
 
-    ollama_url = settings.OLLAMA_URL
-    installed_tags = set()
-    ollama_online = False
-
-    try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            resp = await client.get(f"{ollama_url}/api/tags")
-            if resp.status_code == 200:
-                ollama_online = True
-                tags_data = resp.json()
-                for m in tags_data.get("models", []):
-                    name = m.get("name", "")
-                    installed_tags.add(name.lower())
-                    if ":" in name:
-                        installed_tags.add(name.split(":")[0].lower())
-    except Exception as e:
-        logger.debug(f"Ollama tags query failed ({e}). Treating as offline/unreachable.")
-
-    hw_profile = HardwareDetector.detect()
-    all_models = registry.all_models()
     recommended_list = []
-
-    def _norm_tag(name: str) -> str:
-        tag = (name or "").strip().lower()
-        if tag and ":" not in tag:
-            tag = f"{tag}:latest"
-        return tag
-
-    # Normalized installed set: exact tags only. Bare prefixes stored above
-    # (e.g. "qwen2.5") normalize to "qwen2.5:latest" and can never equal a
-    # versioned tag, so "qwen2.5:3b" no longer matches "qwen2.5:7b".
-    normalized_installed = {_norm_tag(t) for t in installed_tags}
-
-    for entry in all_models:
-        model_name = entry.ollama_tag or entry.model_id
-        is_installed = (
-            _norm_tag(model_name) in normalized_installed
-            or _norm_tag(entry.model_id) in normalized_installed
-        )
-
-        # Parameter size heuristics from display name or id
-        param_size = "Unknown"
-        for p in ["2b", "3b", "7b", "8b", "13b", "14b", "32b", "70b"]:
-            if p in entry.model_id.lower() or p in entry.display_name.lower():
-                param_size = p.upper()
-                break
-
-        # Dynamic safety and memory fit calculation (Spec 00)
+    for entry in registry.all_models():
+        tag = entry.ollama_tag or entry.model_id
+        is_installed = normalize_tag(tag) in installed or normalize_tag(entry.model_id) in installed
         fit_eval = registry.evaluate_model_fit(entry, hw_profile)
-        fits_memory = fit_eval["fits_memory"]
         safety_tier = fit_eval["safety_tier"]
-        fit_reason = fit_eval["fit_reason"]
-
-        # Determine if recommended for current tier
-        current_tier_code = tier_info.get("tier_code", "tier_0")
-        if current_tier_code == "tier_0":
-            rec_for_tier = (entry.size_gb <= 3.0 or entry.tier == "minimum") and safety_tier in ("SAFE", "CAUTION")
-            est_tokens = 14.5 if fits_memory else 6.0
-        elif current_tier_code == "tier_1":
-            rec_for_tier = (entry.size_gb <= 6.5 or entry.tier in ["minimum", "standard"]) and safety_tier in ("SAFE", "CAUTION")
-            est_tokens = 28.0 if fits_memory else 12.0
-        elif current_tier_code == "tier_2":
-            rec_for_tier = (entry.size_gb <= 12.0 or entry.tier in ["minimum", "standard", "premium"]) and safety_tier in ("SAFE", "CAUTION")
-            est_tokens = 45.0 if fits_memory else 22.0
-        else:
-            rec_for_tier = safety_tier in ("SAFE", "CAUTION")
-            est_tokens = 60.0
-
-        action_label = "Installed ✓" if is_installed else f"Pull (~{entry.size_gb} GB)"
-
-        # Determine status state (Task 6.3.1)
-        active_runtime_model = settings.DEFAULT_MODEL
-        if is_installed:
-            status_state = "ACTIVE" if (
-                entry.model_id.lower() == active_runtime_model.lower()
-                or (entry.ollama_tag and entry.ollama_tag.lower() == active_runtime_model.lower())
-            ) else "PULLED_INACTIVE"
-        else:
-            status_state = "NOT_PULLED"
-
-        specialization_tag = (
-            "Fine-tuned for Indian Law"
-            if "dfrag" in entry.model_id.lower()
-            else ("Legal Domain Model" if "saul" in entry.model_id.lower() else None)
-        )
-
+        is_active = bool(active["model"]) and normalize_tag(active["model"]) in (normalize_tag(tag), normalize_tag(entry.model_id))
+        status_state = "ACTIVE" if (is_installed and is_active) else ("PULLED_INACTIVE" if is_installed else "NOT_PULLED")
         recommended_list.append({
             "model_id": entry.model_id,
+            "ollama_tag": tag,
             "display_name": entry.display_name,
             "provider": entry.provider,
             "size_gb": entry.size_gb,
@@ -188,29 +173,31 @@ async def get_recommended_models():
             "vram_required_gb": entry.vram_required_gb,
             "context_window": entry.context_window,
             "quantization": entry.quantization,
-            "parameter_size": param_size,
-            "fits_memory": fits_memory,
+            "parameter_size": entry.parameter_size,
+            "license": entry.license,
+            "source": entry.source,
+            "fits_memory": fit_eval["fits_memory"],
+            "fits_storage": fit_eval["fits_storage"],
+            "storage_required_gb": fit_eval.get("storage_required_gb"),
             "safety_tier": safety_tier,
-            "fit_reason": fit_reason,
+            "fit_reason": fit_eval["fit_reason"],
             "installed": is_installed,
-            "recommended_for_tier": rec_for_tier,
-            "action_label": action_label,
-            "est_tokens_sec": est_tokens,
+            # Recommended = fits this machine's memory AND storage policy; the smallest such model sorts first.
+            "recommended_for_tier": safety_tier == "SAFE" and fit_eval["fits_storage"],
+            "downloadable": (not is_installed) and safety_tier != "UNSUPPORTED" and fit_eval["fits_storage"],
+            "action_label": "Installed" if is_installed else f"Download (~{entry.size_gb} GB)",
             "status_state": status_state,
-            "specialization": specialization_tag,
-            "is_fine_tuned": "dfrag" in entry.model_id.lower() or "saul" in entry.model_id.lower()
         })
 
-    # Sort so recommended, safe, and installed models come first
     recommended_list.sort(key=lambda x: (not x["recommended_for_tier"], x["safety_tier"] != "SAFE", not x["installed"], x["size_gb"]))
 
     return {
         "tier": tier_info,
-        "ollama_online": ollama_online,
-        "ollama_url": ollama_url,
+        "ollama_online": tags["online"],
         "detected_hardware": hw_sample,
+        "active_model": active["model"] if active["available"] else None,
         "recommended": recommended_list,
-        "installed_count": len(installed_tags)
+        "installed_count": len(tags["models"]),
     }
 
 
@@ -218,139 +205,30 @@ async def get_recommended_models():
 @router.post("/api/models/pull")
 async def pull_model_endpoint(req: ModelPullRequest, stream: bool = Query(True)):
     """
-    Streams model pulling progress directly from Ollama via SSE with pre-download storage validation.
+    Backwards-compatible entry point. Delegates to the single idempotent provisioning pipeline
+    (storage/RAM checks, bounded retries, verification, one download at a time).
     """
     model_name = req.name or req.model_id
     if not model_name:
         raise HTTPException(status_code=400, detail="Model name or model_id is required")
-
-    # Storage Pre-check per Spec 00: model download size * 2 must be available
-    model_entry = registry.get(model_name)
-    if not model_entry:
-        for m in registry.all_models():
-            if m.ollama_tag == model_name or m.model_id == model_name:
-                model_entry = m
-                break
-
-    if model_entry:
-        # Storage safety contract: required_gb = size_gb * 2.5 + 5.0 OS headroom.
-        required_storage_gb = model_entry.size_gb * 2.5 + 5.0
-        try:
-            import shutil
-            total, used, free = shutil.disk_usage(os.getcwd())
-            free_gb = free / (1024 ** 3)
-            if free_gb < required_storage_gb:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Insufficient storage to pull '{model_entry.display_name}'. Requires {required_storage_gb:.1f} GB free space (model + extraction + 5GB OS headroom), but only {free_gb:.1f} GB is available on disk. Free up space or stay on a smaller model."
-                )
-        except HTTPException:
-            raise
-        except Exception as err:
-            logger.debug(f"Storage check notice: {err}")
-
-    ollama_url = settings.OLLAMA_URL
-
-    tag_to_pull = model_entry.ollama_tag if model_entry and model_entry.ollama_tag else model_name
-
-    # If streaming is requested (standard v4 behavior), yield SSE events
-    if stream:
-        async def stream_progress():
-            try:
-                async with httpx.AsyncClient(timeout=3600.0) as client:
-                    async with client.stream(
-                        "POST",
-                        f"{ollama_url}/api/pull",
-                        json={"name": tag_to_pull, "stream": True}
-                    ) as resp:
-                        if resp.status_code != 200:
-                            err_body = await resp.aread()
-                            err_text = err_body.decode("utf-8", errors="ignore")
-                            yield f"data: {json.dumps({'status': 'error', 'error': f'Ollama error: {err_text}'})}\n\n"
-                            return
-
-                        async for line in resp.aiter_lines():
-                            if not line.strip():
-                                continue
-                            try:
-                                data = json.loads(line)
-                                # Compute percent if total and completed are present
-                                total = data.get("total", 0)
-                                completed = data.get("completed", 0)
-                                if total > 0:
-                                    data["percent"] = round((completed / total) * 100, 1)
-                                else:
-                                    data["percent"] = 100.0 if data.get("status") == "success" else 0.0
-
-                                # Task 3.2.2: Post-pull alias creation and inference smoke test verification
-                                if data.get("status") == "success":
-                                    data["percent"] = 100.0
-                                    # Create alias if requested model_name differs from tag_to_pull (e.g. dfrag-legal:7b -> qwen2.5:7b)
-                                    if model_name != tag_to_pull:
-                                        try:
-                                            await client.post(
-                                                f"{ollama_url}/api/create",
-                                                json={
-                                                    "model": model_name,
-                                                    "from": tag_to_pull,
-                                                    "system": "You are DFrag Legal, specialized in Indian statutory analysis and legal research."
-                                                },
-                                                timeout=30.0
-                                            )
-                                        except Exception as create_err:
-                                            logger.warning(f"Could not create alias model {model_name} from {tag_to_pull}: {create_err}")
-
-                                    # Run smoke test
-                                    try:
-                                        smoke_target = model_name
-                                        smoke_resp = await client.post(
-                                            f"{ollama_url}/api/generate",
-                                            json={"model": smoke_target, "prompt": "Legal engine smoke test ping", "stream": False},
-                                            timeout=15.0
-                                        )
-                                        if smoke_resp.status_code != 200 and model_name != tag_to_pull:
-                                            smoke_resp = await client.post(
-                                                f"{ollama_url}/api/generate",
-                                                json={"model": tag_to_pull, "prompt": "Legal engine smoke test ping", "stream": False},
-                                                timeout=15.0
-                                            )
-                                        if smoke_resp.status_code == 200:
-                                            data["smoke_test"] = "passed"
-                                            data["status"] = "verified"
-                                        else:
-                                            data["smoke_test"] = "skipped"
-                                    except Exception as smoke_err:
-                                        logger.warning(f"Post-pull smoke test skipped: {smoke_err}")
-                                        data["smoke_test"] = "skipped"
-
-                                yield f"data: {json.dumps(data)}\n\n"
-                            except Exception:
-                                yield f"data: {json.dumps({'status': 'downloading', 'raw': line})}\n\n"
-
-            except Exception as e:
-                logger.error(f"Error during model pull stream for {model_name}: {e}")
-                yield f"data: {json.dumps({'status': 'error', 'error': str(e)})}\n\n"
-
-        return StreamingResponse(
-            stream_progress(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"
-            }
-        )
-
-    # Legacy background task fallback
-    try:
-        task_id = await download_manager.pull(model_name)
-        return {"status": "started", "task_id": task_id}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    service = get_provisioning_service()
+    started = await service.provision(model_id=model_name, auto=False)
+    if not started.get("job_id"):
+        raise HTTPException(status_code=409, detail=started.get("message", "Provisioning rejected"))
+    if not stream:
+        return {"status": "started", "task_id": started["job_id"], "job_id": started["job_id"]}
+    return StreamingResponse(
+        service.stream_job_progress(started["job_id"]),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/models/pull/progress/{task_id}")
 def get_pull_progress(task_id: str):
+    job = get_provisioning_service().get_job(task_id)
+    if job:
+        return job
     progress = download_manager.get_progress(task_id)
     if not progress:
         raise HTTPException(status_code=404, detail="Task ID not found")
@@ -397,8 +275,11 @@ async def start_provisioning(req: ProvisionModelRequest):
     res = await service.provision(
         model_id=req.model_id,
         auto=req.auto,
-        hf_api_key=req.hf_api_key
+        hf_api_key=req.hf_api_key,
+        activate=req.activate,
     )
+    if res.get("status") == "rejected":
+        raise HTTPException(status_code=409, detail=res.get("message"))
     return res
 
 

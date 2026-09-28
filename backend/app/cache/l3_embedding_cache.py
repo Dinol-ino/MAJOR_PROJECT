@@ -19,20 +19,26 @@ class L3EmbeddingCache:
         max_size = settings.performance.l3_embedding_cache_max_size
         ttl = settings.performance.l3_embedding_cache_ttl_seconds
         self._cache = BaseCache(max_size=max_size, default_ttl_seconds=ttl)
+        self._ram_ok: Optional[bool] = None
+
+    def _ram_allows_cache(self) -> bool:
+        # Low-RAM machines skip the dense-vector cache to prevent RAM exhaustion (Fault 01).
+        # Total RAM does not change at runtime, so this is measured once.
+        if self._ram_ok is None:
+            import os
+            min_ram_gb = float(os.getenv("L3_EMBEDDING_CACHE_MIN_RAM_GB", "8.5"))
+            try:
+                import psutil
+                self._ram_ok = psutil.virtual_memory().total / (1024 ** 3) > min_ram_gb
+            except Exception:
+                self._ram_ok = True
+        return self._ram_ok
 
     @property
     def enabled(self) -> bool:
         if not settings.performance.cache_enabled:
             return False
-        # For <= 8GB RAM systems, disable L3 dense vector cache to prevent RAM exhaustion (Fault 01)
-        try:
-            import psutil
-            total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
-            if total_ram_gb <= 8.5:
-                return False
-        except Exception:
-            pass
-        return True
+        return self._ram_allows_cache()
 
     def get_embedding(self, text: str, model_name: str) -> Optional[List[float]]:
         if not self.enabled or not text:

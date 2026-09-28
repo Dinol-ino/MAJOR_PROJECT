@@ -8,41 +8,36 @@ from app.mcp.server_manager import mcp_server_manager
 client = TestClient(app)
 
 
-def test_statute_sync_canonical_minimum_17_acts():
+def test_statute_sync_indexes_only_the_local_corpus():
     """
-    Spec 04 §3.5: Verify statute sync registers at minimum 17 Indian statutes
-    spanning all required domains (criminal, cyber, corporate, tax, civil, constitutional, procedural, commercial).
+    The library reflects exactly the files in the corpus directory: no built-in acts,
+    and every act carries its manifest provenance (unverified unless a date was recorded).
     """
-    result = statute_sync_service.sync_all_statutes()
-    assert result["status"] == "success"
-    assert result["statutes_synced"] >= 17
+    import os
+    from app.ingestion.statutory_corpus import acts_dir
 
-    # Verify catalog endpoint
-    resp = client.get("/statutes/catalog")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total_acts"] >= 17
-    assert data["sync_warning"] is False
-    assert "domain_counts" in data
-    assert data["domain_counts"]["Cyber"] >= 2
-    assert data["domain_counts"]["Tax"] >= 2
-    assert data["domain_counts"]["Criminal"] >= 2
+    corpus_files = [f for f in os.listdir(acts_dir()) if f.endswith(".txt")]
+    result = statute_sync_service.sync_all_statutes()
+    assert result["statutes_synced"] == len(corpus_files)
+
+    data = client.get("/statutes/catalog").json()
+    assert data["total_acts"] == len(corpus_files)
+    for item in data["catalog"]:
+        assert item["source"] == "local_corpus"
+        assert item["legal_status"] in ("in_force", "amended", "repealed", "unverified")
+        assert item["indexed_sections_count"] == item["nominal_sections_count"]
 
 
 def test_statutes_catalog_search_and_domain_filter():
-    # Filter by domain
-    resp_tax = client.get("/statutes?domain=tax")
-    assert resp_tax.status_code == 200
-    data_tax = resp_tax.json()
-    assert all(s["domain"] == "tax" for s in data_tax["catalog"])
-    tax_slugs = [s["slug"] for s in data_tax["catalog"]]
-    assert "cgst_act_2017" in tax_slugs
+    data = client.get("/statutes/catalog").json()
+    assert data["catalog"], "corpus fixture must provide at least one act"
+    first = data["catalog"][0]
 
-    # Search by keyword
-    resp_search = client.get("/statutes?q=Data%20Protection")
-    assert resp_search.status_code == 200
-    data_search = resp_search.json()
-    assert any("dpdpa" in s["slug"] for s in data_search["catalog"])
+    by_domain = client.get(f"/statutes?domain={first['domain']}").json()
+    assert all(s["domain"] == first["domain"] for s in by_domain["catalog"])
+    assert first["slug"] in [s["slug"] for s in by_domain["catalog"]]
+
+    assert client.get("/statutes?q=zz-no-such-act-zz").json()["catalog"] == []
 
 
 def test_statute_detail_and_section_endpoint():
@@ -78,7 +73,7 @@ def test_citation_graph_empty_state_and_real_edges():
     # 2. Record real LLM citations
     sample_citations = [
         {"act": "Information Technology Act, 2000", "act_slug": "it_act_2000", "section": "66"},
-        {"act": "Central Goods and Services Tax (CGST) Act, 2017", "act_slug": "cgst_act_2017", "section": "16"}
+        {"act": "Information Technology Act, 2000", "act_slug": "it_act_2000", "section": "43"}
     ]
     edges_added = citation_graph_service.record_citations(
         conversation_id="active_conv_999",

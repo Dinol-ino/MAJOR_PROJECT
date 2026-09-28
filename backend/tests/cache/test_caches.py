@@ -82,6 +82,8 @@ class TestCaches(unittest.TestCase):
         text = "Information Technology Act 2000"
         model_name = "BAAI/bge-small-en"
         mock_vec = [0.12, -0.45, 0.88, 0.05]
+        # Hermetic: the cache self-disables on low-RAM hosts; force the RAM gate open for this unit test.
+        l3_embedding_cache._ram_ok = True
 
         self.assertIsNone(l3_embedding_cache.get_embedding(text, model_name))
 

@@ -10,6 +10,7 @@ from app.db.models import ProjectVault, Conversation, DocumentMemory, DocumentPa
 from app.services.ingest import ingest_service, compute_file_hash, get_vault_collection_name
 from app.defense.audit_log import AuditLogger
 from app.routes.auth import get_current_user
+from app.security.ownership import current_user_id, owns
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/vaults", tags=["vaults"])
@@ -17,15 +18,14 @@ audit_logger = AuditLogger()
 
 
 def _verify_vault_access(vault: ProjectVault, current_user: Dict[str, Any]) -> None:
-    user_id = current_user.get("id")
-    if vault.user_id and user_id and vault.user_id != user_id and user_id != "default_user" and current_user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Access denied to this project vault.")
+    # 404 (not 403) so another user's vault ids are not disclosed.
+    if not owns(vault.user_id, current_user):
+        raise HTTPException(status_code=404, detail="Project vault not found.")
 
 
 class CreateVaultRequest(BaseModel):
     vault_name: str = Field(..., min_length=1, max_length=255, description="Name of the legal matter / project vault")
-    description: Optional[str] = Field(None, description="Optional case or matter description")
-    user_id: Optional[str] = Field(None, description="Owner user ID")
+    description: Optional[str] = Field(None, max_length=4000, description="Optional case or matter description")
 
 
 class UpdateVaultRequest(BaseModel):
@@ -36,7 +36,7 @@ class UpdateVaultRequest(BaseModel):
 @router.post("", status_code=201)
 def create_vault(req: CreateVaultRequest, current_user: Dict = Depends(get_current_user)):
     """Creates a new durable Project Vault (matter-based container)."""
-    effective_user_id = req.user_id or current_user.get("id") or "default_user"
+    effective_user_id = current_user_id(current_user)
     with get_sync_session() as session:
         vault = ProjectVault(
             id=str(uuid.uuid4()),
@@ -53,9 +53,9 @@ def create_vault(req: CreateVaultRequest, current_user: Dict = Depends(get_curre
 
 
 @router.get("")
-def list_vaults(user_id: Optional[str] = Query(None), current_user: Dict = Depends(get_current_user)):
+def list_vaults(current_user: Dict = Depends(get_current_user)):
     """Lists all active Project Vaults for the user with document and conversation counts."""
-    effective_uid = user_id or current_user.get("id") or "default_user"
+    effective_uid = current_user_id(current_user)
     with get_sync_session() as session:
         vaults = (
             session.query(ProjectVault)
@@ -89,15 +89,20 @@ def get_vault_details(vault_id: str, current_user: Dict = Depends(get_current_us
 def list_vault_conversations(
     vault_id: str,
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=50, ge=1, le=100)
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: Dict = Depends(get_current_user),
 ):
     """Paginated list of conversations in a specific Project Vault."""
     with get_sync_session() as session:
         vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id, ProjectVault.deleted_at.is_(None)).first()
         if not vault:
             raise HTTPException(status_code=404, detail="Project vault not found.")
+        _verify_vault_access(vault, current_user)
 
-        query = session.query(Conversation).filter(Conversation.project_vault_id == vault_id)
+        query = session.query(Conversation).filter(
+            Conversation.project_vault_id == vault_id,
+            Conversation.user_id == vault.user_id,
+        )
         total_count = query.count()
         offset = (page - 1) * limit
         convs = query.order_by(Conversation.updated_at.desc()).offset(offset).limit(limit).all()
@@ -287,8 +292,9 @@ def get_document_status(vault_id: str, doc_id: str, current_user: Dict = Depends
     """Polls ingestion status and progress for file pills (Spec 01 §6.2)."""
     with get_sync_session() as session:
         vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id).first()
-        if vault:
-            _verify_vault_access(vault, current_user)
+        if not vault:
+            raise HTTPException(status_code=404, detail="Project vault not found.")
+        _verify_vault_access(vault, current_user)
         doc = (
             session.query(DocumentMemory)
             .filter(

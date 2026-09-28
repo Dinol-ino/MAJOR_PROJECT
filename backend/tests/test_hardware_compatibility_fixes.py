@@ -98,7 +98,9 @@ def test_pull_storage_validation(client, monkeypatch):
 
     monkeypatch.setattr(shutil, "disk_usage", mock_disk_usage)
 
-    # Attempting to pull qwen2.5:7b (size: 4.7GB -> requires ~9.4GB free)
-    response = client.post("/api/models/pull", json={"model_id": "qwen2.5:7b"}, params={"stream": False})
+    # Any registry model needs size*2.5+5 GB free; with 1 GB free the preflight must refuse before downloading.
+    from app.system.model_registry import ModelRegistry
+    smallest = min(ModelRegistry().all_models(), key=lambda m: m.size_gb)
+    response = client.post("/api/models/pull", json={"model_id": smallest.model_id}, params={"stream": False})
     assert response.status_code == 409
     assert "Insufficient storage" in response.json()["detail"]

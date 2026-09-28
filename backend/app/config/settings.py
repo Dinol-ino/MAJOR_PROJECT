@@ -20,14 +20,37 @@ class ModelConfig(BaseModel):
     runtime: str = Field(default_factory=lambda: os.getenv("MODEL_RUNTIME", "ollama"))  # ollama | llamacpp | transformers | mock
     llamacpp_gpu: bool = Field(default_factory=lambda: os.getenv("LLAMACPP_GPU", "false").lower() == "true")
     llamacpp_model_path: str = Field(default_factory=lambda: os.getenv("LLAMACPP_MODEL_PATH", ""))
-    num_gpu_layers: int = Field(default_factory=lambda: int(os.getenv("OLLAMA_NUM_GPU_LAYERS", "0")))  # -1=auto, 0=CPU-only
+    num_gpu_layers: int = Field(default_factory=lambda: int(os.getenv("OLLAMA_NUM_GPU_LAYERS", "-1")))  # -1=let Ollama decide, 0=CPU-only, N=layers
     context_tokens: int = Field(default_factory=lambda: int(os.getenv("GENERATOR_CONTEXT_TOKENS", "8192")))
     max_output_tokens: int = Field(default_factory=lambda: int(os.getenv("GENERATOR_MAX_OUTPUT_TOKENS", "2048")))
     models_dir: str = Field(default_factory=lambda: os.getenv("MODELS_DIR", "./models"))
     routing_enabled: bool = Field(default_factory=lambda: os.getenv("MODEL_ROUTING_ENABLED", "true").lower() == "true")
     model_warmup_on_startup: bool = Field(default_factory=lambda: os.getenv("MODEL_WARMUP_ON_STARTUP", "true").lower() == "true")
-    auto_pull_on_startup: bool = Field(default_factory=lambda: os.getenv("AUTO_PULL_ON_STARTUP", "true").lower() == "true")
+    # Downloads are an explicit user action by default. Opting in via env is itself an explicit operator decision.
+    auto_pull_on_startup: bool = Field(default_factory=lambda: os.getenv("AUTO_PULL_ON_STARTUP", "false").lower() == "true")
+    # Never download a model in the middle of a chat request unless the operator explicitly allows it.
+    auto_pull_on_demand: bool = Field(default_factory=lambda: os.getenv("AUTO_PULL_ON_DEMAND", "false").lower() == "true")
+    generation_retries: int = Field(default_factory=lambda: int(os.getenv("OLLAMA_GENERATION_RETRIES", "2")))
+    tags_cache_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_TAGS_CACHE_SECONDS", "5")))
+    probe_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_PROBE_TIMEOUT_SECONDS", "3")))
+    warmup_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("MODEL_WARMUP_TIMEOUT_SECONDS", "180")))
     model_idle_unload_seconds: int = Field(default_factory=lambda: int(os.getenv("MODEL_IDLE_UNLOAD_SECONDS", "600")))
+
+
+def _csv_env(name: str, default: str) -> List[str]:
+    return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
+
+class AuthConfig(BaseModel):
+    """Session/JWT authentication policy. Secrets are read from the environment only."""
+    jwt_secret: str = Field(default_factory=lambda: os.getenv("JWT_SECRET_KEY", ""))
+    jwt_algorithm: str = Field(default_factory=lambda: os.getenv("JWT_ALGORITHM", "HS256"))
+    session_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("AUTH_SESSION_TTL_SECONDS", str(7 * 86400))))
+    password_min_length: int = Field(default_factory=lambda: int(os.getenv("AUTH_PASSWORD_MIN_LENGTH", "8")))
+    registration_open: bool = Field(default_factory=lambda: os.getenv("AUTH_REGISTRATION_OPEN", "true").lower() == "true")
+    max_failed_attempts: int = Field(default_factory=lambda: int(os.getenv("AUTH_MAX_FAILED_ATTEMPTS", "5")))
+    lockout_seconds: int = Field(default_factory=lambda: int(os.getenv("AUTH_LOCKOUT_SECONDS", "900")))
+    token_cache_max_entries: int = Field(default_factory=lambda: int(os.getenv("AUTH_TOKEN_CACHE_MAX_ENTRIES", "2048")))
 
 
 class SecurityConfig(BaseModel):
@@ -36,7 +59,9 @@ class SecurityConfig(BaseModel):
     enable_pii_scanning: bool = Field(default_factory=lambda: os.getenv("ENABLE_PII_SCANNING", "true").lower() == "true")
     pii_entities: List[str] = ["PHONE_NUMBER", "EMAIL_ADDRESS", "AADHAAR_NUMBER", "PAN_NUMBER", "CREDIT_CARD", "IP_ADDRESS"]
     max_query_chars: int = 2000
-    allowed_origins: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "tauri://localhost"]
+    allowed_origins: List[str] = Field(default_factory=lambda: _csv_env("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,tauri://localhost"))
+    # The unshielded baseline bypasses Layers 1-3 and exists only for offline security evaluation.
+    allow_unshielded_baseline: bool = Field(default_factory=lambda: os.getenv("ALLOW_UNSHIELDED_BASELINE", "false").lower() == "true")
     allow_credentials: bool = Field(default_factory=lambda: os.getenv("ALLOW_CREDENTIALS", "true").lower() == "true")
 
 
@@ -144,6 +169,7 @@ class Settings(BaseModel):
     Provides structured concern objects and flat backward-compatible property accessors.
     """
     model: ModelConfig = Field(default_factory=ModelConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)

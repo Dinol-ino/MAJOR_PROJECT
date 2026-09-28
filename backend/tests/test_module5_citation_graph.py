@@ -47,7 +47,7 @@ def test_statute_catalog_coverage_honesty():
     assert response.status_code == 200
     data = response.json()
     assert "catalog" in data
-    assert data["total_acts"] >= 10
+    assert data["total_acts"] >= 1
 
     for item in data["catalog"]:
         assert "nominal_sections_count" in item
@@ -57,11 +57,9 @@ def test_statute_catalog_coverage_honesty():
         assert isinstance(item["nominal_sections_count"], int)
         assert item["indexed_sections_count"] <= item["nominal_sections_count"] or item["nominal_sections_count"] > 0
 
-    companies_act = next((s for s in data["catalog"] if "companies" in s["slug"]), None)
-    if companies_act:
-        assert companies_act["nominal_sections_count"] == 470
-        assert companies_act["indexed_sections_count"] >= 3
-        assert "sections indexed" in companies_act["coverage_display"]
+    for item in data["catalog"]:
+        # Counts come from the indexed text, never from a hardcoded nominal total.
+        assert item["indexed_sections_count"] == item["nominal_sections_count"]
 
 
 def test_citation_graph_derivation_methods_and_backend():
@@ -104,7 +102,8 @@ def test_citation_graph_derivation_methods_and_backend():
 
 
 def test_graph_growth_from_chat_citation():
-    """Task 5.3.1: A chat citation for a previously-absent section creates a new graph node and increments cited_in_conversations."""
+    """A citation to a section outside the corpus appears in the graph as 'not in corpus'
+    and must NOT create a Statute Library entry from citation text."""
     conv_id = f"test_growth_conv_{uuid.uuid4().hex[:8]}"
     msg_id = f"test_msg_{uuid.uuid4().hex[:8]}"
     test_sec_num = f"999_{uuid.uuid4().hex[:4]}"
@@ -132,9 +131,21 @@ def test_graph_growth_from_chat_citation():
 
     sec_node = next((n for n in graph_res["nodes"] if f"section:it_act_2000:{test_sec_num}" in n["id"]), None)
     assert sec_node is not None
-    assert sec_node["cited_in_conversations"] >= 1
+    assert sec_node["in_corpus"] is False
     assert sec_node["label"] == f"Section {test_sec_num}"
 
+    resp = client.get(f"/statutes/it_act_2000/sections/{test_sec_num}")
+    assert resp.status_code == 404  # no fabricated library section
+
+    # A real corpus section is counted and its penalty is extracted from the statute text itself.
+    real = citation_graph_service.record_citations(
+        conversation_id=conv_id, message_id=msg_id + "b",
+        citations=[{"act": "Information Technology Act, 2000", "act_slug": "it_act_2000", "section": "66"}],
+    )
+    assert real >= 2
+    graph_res = citation_graph_service.get_graph(scope="conversation", conversation_id=conv_id)
+    s66 = next(n for n in graph_res["nodes"] if n["id"] == "section:it_act_2000:66")
+    assert s66["in_corpus"] is True and s66["cited_in_conversations"] >= 1
     pen_edge = next((l for l in graph_res["links"] if l["relation"] == "penalizes_with"), None)
     assert pen_edge is not None
     assert pen_edge["derivation_method"] == DERIVATION_TEXT_EXTRACTION

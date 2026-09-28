@@ -122,6 +122,11 @@ class CitationGraphService:
                     return extracted[:180]
         return None
 
+    def delete_conversation_edges(self, conversation_id: str) -> int:
+        """Purges graph relationships derived from a deleted conversation (corpus edges are untouched)."""
+        with get_sync_session() as session:
+            return int(session.query(CitationEdge).filter(CitationEdge.conversation_id == conversation_id).delete(synchronize_session=False) or 0)
+
     def record_citations(
         self,
         conversation_id: str,
@@ -159,17 +164,8 @@ class CitationGraphService:
                     sec_row = session.query(StatuteSection).filter_by(statute_id=statute_row.id, number=sec_num).first()
                     if sec_row:
                         sec_row.cited_in_conversations = (sec_row.cited_in_conversations or 0) + 1
-                    else:
-                        sec_row = StatuteSection(
-                            id=str(uuid.uuid4()),
-                            statute_id=statute_row.id,
-                            number=sec_num,
-                            heading=cit.get("heading") or f"Section {sec_num}",
-                            raw_text=cit.get("text") or cit.get("raw_text") or "",
-                            embedding_ready=True,
-                            cited_in_conversations=1
-                        )
-                        session.add(sec_row)
+                # A citation to a section that is not in the indexed corpus never creates a library entry;
+                # the graph node is shown as "not in corpus" instead.
 
                 # Edge 1: Statute -> Section (Contains: corpus_structure)
                 session.add(CitationEdge(
@@ -305,9 +301,13 @@ class CitationGraphService:
         scope: str = "conversation",
         conversation_id: Optional[str] = None,
         vault_id: Optional[str] = None,
-        search_query: Optional[str] = None
+        search_query: Optional[str] = None,
+        allowed_conversation_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
+        Isolation: when `allowed_conversation_ids` is given (always, from the API), conversation-derived
+        edges are limited to those conversations; corpus edges (no conversation) are shared.
+
         Retrieves graph nodes and edges dynamically according to the requested scope:
         - 'conversation': real edges generated during the active session.
         - 'vault': edges from all conversations within a project vault.
@@ -317,7 +317,7 @@ class CitationGraphService:
         backend_name = self.get_active_backend_name()
         tier = self._get_hardware_tier()
 
-        driver = self._get_memgraph_driver()
+        driver = self._get_memgraph_driver() if allowed_conversation_ids is None else None
         if driver and scope == "global":
             try:
                 memgraph_res = self._query_memgraph_global(driver, search_query)
@@ -345,6 +345,8 @@ class CitationGraphService:
             elif scope == "vault" and vault_id:
                 from app.db.models import Conversation
                 conv_ids = [c.conversation_id for c in session.query(Conversation).filter_by(project_vault_id=vault_id).all()]
+                if allowed_conversation_ids is not None:
+                    conv_ids = [c for c in conv_ids if c in set(allowed_conversation_ids)]
                 if conv_ids:
                     query = query.filter(CitationEdge.conversation_id.in_(conv_ids))
                 else:
@@ -357,7 +359,11 @@ class CitationGraphService:
                         "hardware_tier": tier
                     }
             elif scope == "global":
-                query = query.filter(CitationEdge.origin.in_(["mcp_relation", "llm_citation", "vault_doc", "text_extraction"]))
+                if allowed_conversation_ids is not None:
+                    query = query.filter(
+                        CitationEdge.conversation_id.is_(None)
+                        | CitationEdge.conversation_id.in_(allowed_conversation_ids or ["__none__"])
+                    )
 
             edges = query.order_by(CitationEdge.created_at.desc()).limit(200).all()
 
@@ -502,6 +508,7 @@ class CitationGraphService:
         color = "#38bdf8"
         category = "Statute"
         cited_count = 0
+        in_corpus = False
 
         if key.startswith("section:"):
             parts = key.split(":")
@@ -515,20 +522,22 @@ class CitationGraphService:
             if statute:
                 sec_row = session.query(StatuteSection).filter_by(statute_id=statute.id, number=sec_num).first()
                 if sec_row:
+                    in_corpus = True
                     cited_count = sec_row.cited_in_conversations or 0
                     desc = f"{statute.title} — {sec_row.heading or ''}\n{sec_row.raw_text[:140] if sec_row.raw_text else ''}"
                 else:
-                    desc = f"{statute.title}, Section {sec_num}"
+                    desc = f"{statute.title}, Section {sec_num} (not in the indexed corpus)"
             else:
-                desc = f"{act_slug.replace('_', ' ').title()}, Section {sec_num}"
+                desc = f"{act_slug.replace('_', ' ').title()}, Section {sec_num} (act not in the indexed corpus)"
 
         elif key.startswith("statute:"):
             act_slug = key.replace("statute:", "")
             statute = session.query(Statute).filter_by(slug=act_slug).first()
             if statute:
+                in_corpus = True
                 label = statute.title
                 category = statute.domain.title()
-                desc = f"Enacted: {statute.year or 'N/A'} · Source: {statute.source} · {statute.section_count} Sections"
+                desc = f"{statute.section_count} indexed sections · status: {statute.legal_status or 'unverified'}"
             else:
                 label = act_slug.replace("_", " ").title()
             color = "#38bdf8"
@@ -537,7 +546,7 @@ class CitationGraphService:
             label = key.replace("precedent:", "").replace("_", " ").title()
             category = "Precedent"
             color = "#a855f7"
-            desc = f"Landmark Precedent: {label}"
+            desc = f"Case reference: {label} (not verified against a judgment text in this workspace)"
 
         elif key.startswith("penalty:"):
             parts = key.split(":")
@@ -555,15 +564,22 @@ class CitationGraphService:
             "category": category,
             "desc": desc,
             "cited_in_conversations": cited_count,
+            "in_corpus": in_corpus,
             "size_score": 1.0 + (min(cited_count, 10) * 0.15)
         }
 
-    def expand_node(self, node_id: str, depth: int = 1) -> Dict[str, Any]:
-        """Lazy neighborhood expansion for a clicked node with edge provenance."""
+    def expand_node(self, node_id: str, depth: int = 1, allowed_conversation_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Lazy neighborhood expansion for a clicked node with edge provenance (tenant-scoped)."""
         with get_sync_session() as session:
-            edges = session.query(CitationEdge).filter(
+            q = session.query(CitationEdge).filter(
                 (CitationEdge.src_key == node_id) | (CitationEdge.dst_key == node_id)
-            ).limit(25).all()
+            )
+            if allowed_conversation_ids is not None:
+                q = q.filter(
+                    CitationEdge.conversation_id.is_(None)
+                    | CitationEdge.conversation_id.in_(allowed_conversation_ids or ["__none__"])
+                )
+            edges = q.limit(25).all()
 
             nodes_dict: Dict[str, Dict[str, Any]] = {}
             links_list: List[Dict[str, Any]] = []

@@ -444,6 +444,13 @@ class Statute(Base):
     section_count = Column(Integer, nullable=False, default=0)
     currency_checked_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    # Provenance (from the corpus manifest; never invented). Null means "not recorded".
+    source_url = Column(String(512), nullable=True)
+    source_version = Column(String(256), nullable=True)
+    publication_date = Column(String(32), nullable=True)
+    legal_status = Column(String(32), nullable=True)      # in_force | repealed | amended | unverified
+    content_hash = Column(String(64), nullable=True)
+    verified_at = Column(String(32), nullable=True)       # date a human verified the text against the source
 
     sections = relationship("StatuteSection", back_populates="statute", cascade="all, delete-orphan", order_by="StatuteSection.number")
 
@@ -471,6 +478,12 @@ class Statute(Base):
             "coverage_display": coverage_display,
             "currency_checked_at": self.currency_checked_at.isoformat() if self.currency_checked_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "source_url": self.source_url,
+            "source_version": self.source_version,
+            "publication_date": self.publication_date,
+            "legal_status": self.legal_status or "unverified",
+            "content_hash": self.content_hash,
+            "verified_at": self.verified_at,
         }
         if include_sections and self.sections:
             data["sections"] = [s.to_dict() for s in self.sections]

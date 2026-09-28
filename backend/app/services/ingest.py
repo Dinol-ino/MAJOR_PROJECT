@@ -9,7 +9,7 @@ from app.db.engine import get_sync_session
 from app.db.models import DocumentMemory, DocumentPage, ProjectVault
 from app.security.pdf_sanitizer import pdf_sanitizer
 from app.ingestion.chunker import SectionAwareChunker
-from app.retrieval.client import get_shared_chroma_client, get_shared_embedding_function
+from app.retrieval.client import get_shared_chroma_client, get_shared_embedding_function, DenseRetrievalUnavailable
 from app.retrieval.bm25_index import PersistentBM25Index
 
 logger = logging.getLogger(__name__)
@@ -46,11 +46,21 @@ class VaultDocumentIngestionService:
         )
 
     def delete_vault_collection(self, vault_id: str):
+        """Purges every retrieval representation of a vault: dense collection, BM25 entries, cached results."""
         col_name = get_vault_collection_name(vault_id)
         try:
             self.chroma_client.delete_collection(name=col_name)
         except Exception as e:
             logger.debug(f"Collection {col_name} delete error or already deleted: {e}")
+        try:
+            self.bm25_index.delete_documents_where(lambda _cid, m: m.get("vault_id") == vault_id)
+        except Exception as e:
+            logger.warning("BM25 purge failed for vault %s: %s", vault_id, type(e).__name__)
+        try:
+            from app.cache import l2_retrieval_cache
+            l2_retrieval_cache.clear()
+        except Exception:
+            pass
 
     def update_doc_state(
         self,
@@ -154,12 +164,12 @@ class VaultDocumentIngestionService:
             self.update_doc_state(doc_id, status="indexing", progress=95)
 
             if ids:
-                col.add(
-                    documents=documents,
-                    metadatas=metadatas,
-                    ids=ids
-                )
+                # Lexical index is authoritative; dense vectors only when a real embedding model is loaded.
                 self.bm25_index.add_documents_batch(doc_ids=ids, documents=documents, metadatas=metadatas)
+                try:
+                    col.add(documents=documents, metadatas=metadatas, ids=ids)
+                except DenseRetrievalUnavailable:
+                    pass
 
             # 5. Ready stage (100%)
             self.update_doc_state(
@@ -196,25 +206,51 @@ class VaultDocumentIngestionService:
         top_k: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Queries the vault-scoped ChromaDB collection for evidence relevant to a user question.
+        Hybrid (BM25 + dense, RRF-fused) retrieval strictly scoped to one vault.
+        Lexical results are filtered by vault_id metadata; dense results come from the vault's own collection.
         """
+        from app.retrieval.hybrid_rank import fuse_bm25_dense
+
+        bm25_docs: List[Dict[str, Any]] = []
+        try:
+            for hit in self.bm25_index.search(
+                query=query_text,
+                top_k=top_k * 2,
+                filter_fn=lambda m: m.get("vault_id") == vault_id,
+            ):
+                meta = hit.get("metadata") or {}
+                bm25_docs.append({**hit, "doc_type": "vault_document", "metadata": meta})
+        except Exception as e:
+            logger.debug("Vault BM25 query error for vault %s: %s", vault_id, type(e).__name__)
+
+        dense_docs: List[Dict[str, Any]] = []
         try:
             col = self.get_vault_collection(vault_id)
-            res = col.query(query_texts=[query_text], n_results=top_k)
-            results = []
-            if res and res.get("documents") and res["documents"][0]:
-                distances = res.get("distances", [[]])[0] if "distances" in res and res["distances"] else [0.0] * len(res["documents"][0])
-                for i, (doc_text, meta) in enumerate(zip(res["documents"][0], res["metadatas"][0])):
-                    dist = distances[i] if i < len(distances) else 0.0
-                    results.append({
-                        "text": doc_text,
-                        "metadata": meta,
-                        "score": 1.0 / (1.0 + max(0.0, float(dist))),
-                    })
-            return results
+            n = col.count()
+            if n > 0:
+                res = col.query(query_texts=[query_text], n_results=min(top_k * 2, n))
+                if res and res.get("documents") and res["documents"][0]:
+                    distances = res["distances"][0] if res.get("distances") else [0.0] * len(res["documents"][0])
+                    for i, (doc_text, meta) in enumerate(zip(res["documents"][0], res["metadatas"][0])):
+                        if (meta or {}).get("vault_id") not in (None, vault_id):
+                            continue  # defence in depth: never surface another vault's chunk
+                        dist = distances[i] if i < len(distances) else 0.0
+                        dense_docs.append({
+                            "act": (meta or {}).get("act") or (meta or {}).get("filename", "Vault Document"),
+                            "section": (meta or {}).get("section", ""),
+                            "text": doc_text,
+                            "metadata": meta,
+                            "doc_type": "vault_document",
+                            "score": 1.0 / (1.0 + max(0.0, float(dist))),
+                        })
+        except DenseRetrievalUnavailable:
+            pass
         except Exception as e:
-            logger.debug(f"Vault query error for vault {vault_id}: {e}")
+            logger.debug("Vault dense query error for vault %s: %s", vault_id, type(e).__name__)
+
+        if not bm25_docs and not dense_docs:
             return []
+        return fuse_bm25_dense(bm25_docs, dense_docs, top_k=top_k)
 
     def delete_document_vectors(self, vault_id: str, doc_id: str):
         """Purges document chunks from vault Chroma collection and BM25 index."""
@@ -226,11 +262,18 @@ class VaultDocumentIngestionService:
             logger.warning(f"Error purging vectors for doc {doc_id} from vault {vault_id}: {e}")
 
         try:
-            matching_ids = [cid for cid, m in zip(self.bm25_index.doc_ids, self.bm25_index.metadatas) if m.get("doc_id") == doc_id or cid.startswith(f"{doc_id}_")]
-            for mid in matching_ids:
-                self.bm25_index.delete_document(mid)
+            self.bm25_index.delete_documents_where(
+                lambda cid, m: m.get("doc_id") == doc_id or cid.startswith(f"{doc_id}_")
+            )
         except Exception as e:
-            logger.debug(f"BM25 doc purge notice for doc {doc_id}: {e}")
+            logger.warning("BM25 doc purge failed for doc %s: %s", doc_id, type(e).__name__)
+
+        # Cached retrieval results may still reference the deleted chunks.
+        try:
+            from app.cache import l2_retrieval_cache
+            l2_retrieval_cache.clear()
+        except Exception:
+            pass
 
 
 ingest_service = VaultDocumentIngestionService()
