@@ -25,6 +25,9 @@ class APIKeyVault:
         self._fernet = self._init_fernet()
 
     def _init_fernet(self) -> Fernet:
+        # With no SECRET_KEY the derived key would be sha256(b"") — publicly known — so storing
+        # credentials is refused (see _encrypt) rather than "encrypting" with a known key.
+        self._usable = bool(settings.SECRET_KEY)
         secret = settings.SECRET_KEY.encode("utf-8")
         # Derive a deterministic 32-byte url-safe base64 key from SECRET_KEY
         digest = hashlib.sha256(secret).digest()
@@ -32,6 +35,8 @@ class APIKeyVault:
         return Fernet(key)
 
     def _encrypt(self, plaintext: str) -> str:
+        if not getattr(self, "_usable", False):
+            raise ValueError("SECRET_KEY is not set; refusing to store credentials with a known key.")
         return self._fernet.encrypt(plaintext.encode("utf-8")).decode("utf-8")
 
     def _decrypt(self, ciphertext: str) -> Optional[str]:

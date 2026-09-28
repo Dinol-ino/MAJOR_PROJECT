@@ -27,8 +27,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Non-blocking background hardware detection warmup
-    HardwareDetector.detect()
+    # Hardware probing runs in a background thread so startup and requests never wait on it.
+    from app.system.gpu_probe import refresh_in_background
+    refresh_in_background()
     ModelRegistry()
     try:
         await init_db_schema()
@@ -43,7 +44,7 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Background model auto-pull/warmup deferred: {exc}")
 
     app.state.warmup_task = asyncio.create_task(_background_warmup())
-    logger.info("DFrag Enterprise API service & Stage 5 Runtime initialized. Floor model auto-pull/warmup scheduled in background.")
+    logger.info("DFrag API started (network mode=%s, runtime=%s).", os.getenv("NETWORK_MODE", settings.network.default_mode), settings.MODEL_RUNTIME)
     yield
     app.state.warmup_task.cancel()
 

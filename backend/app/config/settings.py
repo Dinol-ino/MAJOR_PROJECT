@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
@@ -137,6 +137,38 @@ class OrchestratorConfig(BaseModel):
     circuit_breaker_recovery_seconds: float = Field(default_factory=lambda: float(os.getenv("CIRCUIT_BREAKER_RECOVERY_SECONDS", "120.0")))
 
 
+def _profile(level: str, **defaults) -> Dict[str, Any]:
+    """Reasoning profile with per-field env overrides, e.g. REASONING_HIGH_MAX_OUTPUT_TOKENS=3072."""
+    out: Dict[str, Any] = {}
+    for key, default in defaults.items():
+        raw = os.getenv(f"REASONING_{level.upper()}_{key.upper()}")
+        out[key] = type(default)(raw) if raw not in (None, "") else default
+    return out
+
+
+class ReasoningConfig(BaseModel):
+    """
+    LOW / MEDIUM / HIGH change real resource budgets (retrieval depth, evidence volume,
+    tool calls, generation length, verification retries). All values stay under the
+    orchestrator hard ceilings in OrchestratorConfig.
+    """
+    low: Dict[str, Any] = Field(default_factory=lambda: _profile(
+        "low", retrieval_top_k=3, max_evidence_chunks=4, max_tool_calls=0, max_output_tokens=512,
+        retry_budget=0, context_fraction=0.5, graph_expansion=0, deep_thinking=0))
+    medium: Dict[str, Any] = Field(default_factory=lambda: _profile(
+        "medium", retrieval_top_k=5, max_evidence_chunks=8, max_tool_calls=2, max_output_tokens=1024,
+        retry_budget=1, context_fraction=0.75, graph_expansion=1, deep_thinking=0))
+    high: Dict[str, Any] = Field(default_factory=lambda: _profile(
+        "high", retrieval_top_k=8, max_evidence_chunks=12, max_tool_calls=4, max_output_tokens=2048,
+        retry_budget=2, context_fraction=0.9, graph_expansion=1, deep_thinking=1))
+
+    def for_effort(self, effort: Optional[str]) -> Dict[str, Any]:
+        level = (effort or "medium").lower()
+        level = {"off": "low", "none": "low", "minimal": "low"}.get(level, level)
+        profile = getattr(self, level, None) or self.medium
+        return {"level": level if level in ("low", "medium", "high") else "medium", **profile}
+
+
 class ObservabilityConfig(BaseModel):
     enabled: bool = Field(default_factory=lambda: os.getenv("OBSERVABILITY_ENABLED", "true").lower() == "true")
     retention_days: int = Field(default_factory=lambda: int(os.getenv("METRICS_RETENTION_DAYS", "30")))
@@ -146,8 +178,8 @@ class ObservabilityConfig(BaseModel):
 
 
 class CloudFallbackConfig(BaseModel):
-    enabled: bool = Field(default_factory=lambda: os.getenv("CLOUD_FALLBACK_ENABLED", "true").lower() == "true")
-    auto_fallback: bool = Field(default_factory=lambda: os.getenv("CLOUD_AUTO_FALLBACK", "true").lower() == "true")
+    enabled: bool = Field(default_factory=lambda: os.getenv("CLOUD_FALLBACK_ENABLED", "false").lower() == "true")
+    auto_fallback: bool = Field(default_factory=lambda: os.getenv("CLOUD_AUTO_FALLBACK", "false").lower() == "true")
     active_provider: str = Field(default_factory=lambda: os.getenv("CLOUD_PROVIDER", "grok").lower())  # grok | zai
     grok_api_base: str = Field(default_factory=lambda: os.getenv("GROK_API_BASE", "https://api.x.ai/v1"))
     grok_model: str = Field(default_factory=lambda: os.getenv("GROK_MODEL", "grok-2"))
@@ -180,6 +212,7 @@ class Settings(BaseModel):
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     cloud_fallback: CloudFallbackConfig = Field(default_factory=CloudFallbackConfig)
     graph: GraphConfig = Field(default_factory=GraphConfig)
+    reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
 
     # Flat backward-compatible aliases
     @property

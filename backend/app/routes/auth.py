@@ -357,7 +357,8 @@ def register(request: Request, req: RegisterRequest):
                 email=email,
                 hashed_password=_hash_password(req.password),
                 full_name=(req.full_name or "Legal Practitioner")[:128],
-                role="attorney",
+                # The workspace owner (first account) administers it; everyone else is a practitioner.
+                role="admin" if not has_accounts else "attorney",
             )
             session.add(user)
             session.commit()

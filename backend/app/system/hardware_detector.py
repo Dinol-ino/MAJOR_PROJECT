@@ -29,7 +29,8 @@ class HardwareDetector:
     _cached_time: float = 0.0
 
     @classmethod
-    def detect(cls, force_refresh: bool = False, cache_ttl: int = 300) -> HardwareProfile:
+    def detect(cls, force_refresh: bool = False, cache_ttl: Optional[int] = None) -> HardwareProfile:
+        cache_ttl = cache_ttl if cache_ttl is not None else int(os.getenv("HARDWARE_CACHE_TTL_SECONDS", "300"))
         now = time.time()
         if not force_refresh and cls._cached_profile is not None and (now - cls._cached_time) < cache_ttl:
             return cls._cached_profile
@@ -99,82 +100,29 @@ class HardwareDetector:
         gpu_vram_gb = None
         gpu_backend = None
 
-        # Probe 1: Torch CUDA / Metal
-        try:
-            import torch
-            if torch.cuda.is_available():
-                gpu_available = True
-                gpu_name = torch.cuda.get_device_name(0)
-                vram_bytes = torch.cuda.get_device_properties(0).total_memory
-                gpu_vram_gb = round(vram_bytes / (1024 ** 3), 2)
-                gpu_backend = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                gpu_available = True
-                gpu_name = "Apple Silicon Metal"
-                gpu_vram_gb = ram_total_gb  # Unified memory
-                gpu_backend = "metal"
-        except Exception as e:
-            logger.debug(f"Torch GPU detection bypassed: {e}")
-
-        # Probe 2: nvidia-smi (PATH or standard install directories)
-        if not gpu_available:
-            nvsmi_binaries = ["nvidia-smi"]
-            if sys.platform == "win32":
-                nvsmi_binaries.extend([
-                    r"C:\Windows\System32\nvidia-smi.exe",
-                    r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
-                ])
-            for nvsmi_cmd in nvsmi_binaries:
-                try:
-                    import subprocess
-                    res = subprocess.run(
-                        [nvsmi_cmd, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-                        capture_output=True,
-                        text=True,
-                        timeout=3
-                    )
-                    if res.returncode == 0 and res.stdout.strip():
-                        line = res.stdout.strip().split("\n")[0]
-                        parts = line.split(",")
-                        if len(parts) >= 2:
-                            gpu_name = parts[0].strip()
-                            gpu_vram_gb = round(float(parts[1].strip()) / 1024.0, 2)
-                            gpu_available = True
-                            gpu_backend = "cuda"
-                            break
-                except Exception as e:
-                    logger.debug(f"nvidia-smi probe ({nvsmi_cmd}) notice: {e}")
-
-        # Probe 3: Windows WMI Win32_VideoController fallback
-        if not gpu_available and sys.platform == "win32":
-            try:
-                import subprocess, json
-                cmd = "Get-CimInstance Win32_VideoController | Where-Object { $_.Name -like '*NVIDIA*' -or $_.Name -like '*Radeon*' } | Select-Object -First 1 Name, AdapterRAM | ConvertTo-Json"
-                res = subprocess.run(
-                    ["powershell", "-NoProfile", "-Command", cmd],
-                    capture_output=True,
-                    text=True,
-                    timeout=3
-                )
-                if res.returncode == 0 and res.stdout.strip():
-                    wmi_data = json.loads(res.stdout.strip())
-                    gpu_name = wmi_data.get("Name")
-                    raw_ram = wmi_data.get("AdapterRAM", 0)
-                    gpu_vram_gb = round(raw_ram / (1024 ** 3), 2) if raw_ram else 4.0
-                    gpu_available = True
-                    gpu_backend = "cuda" if "nvidia" in (gpu_name or "").lower() else "directx"
-            except Exception as exc:
-                logger.debug(f"WMI GPU fallback notice: {exc}")
+        # Shared bounded probe (NVML -> nvidia-smi -> Apple Silicon -> WMI); never imports torch.
+        from app.system.gpu_probe import get_gpu_info
+        gpu = get_gpu_info(block=True)
+        if gpu.get("detected"):
+            gpu_available = True
+            gpu_name = gpu.get("name")
+            gpu_backend = gpu.get("backend")
+            if gpu.get("backend") == "metal":
+                gpu_vram_gb = ram_total_gb  # unified memory
+            elif gpu.get("vram_reliable") and gpu.get("vram_total_mb"):
+                gpu_vram_gb = round(gpu["vram_total_mb"] / 1024.0, 2)
+            else:
+                # Unknown VRAM is not guessed: fit decisions fall back to system RAM.
+                gpu_vram_gb = None
 
         t_gpu_ms = (time.perf_counter() - t_gpu0) * 1000
 
         # 4. Storage Free Probe
         try:
-            target_path = os.getcwd()
-            total, used, free = shutil.disk_usage(target_path)
-            storage_free_gb = round(free / (1024 ** 3), 2)
+            usage = shutil.disk_usage(os.getenv("MODELS_DISK_PATH", os.getcwd()))
+            storage_free_gb = round(getattr(usage, "free", usage[2]) / (1024 ** 3), 2)
         except Exception:
-            storage_free_gb = 10.0
+            storage_free_gb = 0.0  # unmeasurable => treated as no room, never as a guessed amount
 
         # 5. OS & Real AVX2 Instruction Detection (Bug H1 fix)
         platform_name = platform.system().lower()

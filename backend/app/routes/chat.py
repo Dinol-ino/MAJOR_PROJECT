@@ -51,51 +51,9 @@ confidence_scorer = ConfidenceScorer()
 response_formatter = ResponseFormatter()
  
 def _synthesize_grounded_legal_answer(query: str, evidence: List[Dict[str, Any]]) -> str:
-    """Synthesizes structured statutory answer from retrieved legal evidence when LLM is offline."""
-    if not evidence:
-        return (
-            "I do not have relevant statutory provisions or legal evidence in the corpus to answer this query. "
-            "Please provide a specific legal inquiry or statutory reference."
-        )
-
-    acts_found = set()
-    sections_found = []
-    clean_excerpts = []
-
-    for item in evidence:
-        act = item.get("act") or "Statutory Authority"
-        sec = item.get("section") or ""
-        text = item.get("text", "").strip()
-        if act:
-            acts_found.add(act)
-        if sec and sec not in sections_found:
-            sections_found.append(sec)
-        if text:
-            clean_excerpts.append((act, sec, text))
-
-    act_title = ", ".join(sorted(acts_found)) if acts_found else "Indian Statutory Law"
-    sec_title = f" (Sections: {', '.join(sections_found[:4])})" if sections_found else ""
-
-    lines = [
-        f"### Statutory Analysis: {act_title}{sec_title}",
-        "",
-        "Based on the verified statutory provisions retrieved from the authoritative legal corpus, the following key legal determinations apply:",
-        "",
-    ]
-
-    for i, (act, sec, text) in enumerate(clean_excerpts[:3], 1):
-        sec_header = f"**{sec} ({act})**" if sec else f"**Provision {i} ({act})**"
-        snippet = text[:400] + "..." if len(text) > 400 else text
-        lines.append(f"{i}. {sec_header}:")
-        lines.append(f"   > {snippet}")
-        lines.append("")
-
-    lines.append(
-        f"**Legal Grounding & Compliance**: The above statutory provisions govern the inquiry. "
-        f"All citations are verified against local statutory law under {act_title}."
-    )
-
-    return "\n".join(lines)
+    """Evidence-only reply used when the model is unavailable (shared with the orchestrator; no analysis claimed)."""
+    from app.orchestrator.state_machine import research_orchestrator
+    return research_orchestrator._synthesize_grounded_answer(query, evidence)
 
 
 @router.get("/chat/sessions")
@@ -164,6 +122,17 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
     if not request.shield_on and not settings.security.allow_unshielded_baseline:
         request.shield_on = True
 
+    if len(request.message or "") > settings.security.max_query_chars * 4:
+        raise HTTPException(status_code=413, detail="Message is too long.")
+
+    # The answering model is decided once, explicitly. It is never silently swapped later.
+    from app.runtime.model_state import model_state, ModelNotAvailable
+    try:
+        resolved_model = await model_state.resolve_for_request(request.model)
+    except ModelNotAvailable as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)})
+    request.model = resolved_model
+
     req_memory = RequestMemory(
         session_id=request.session_id,
         raw_query=request.message,
@@ -201,10 +170,10 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
                 query=request.message,
                 session_id=request.session_id,
                 user_id=current_uid,
-                model=request.model,
+                model=resolved_model,
                 shield_on=True,
                 vault_id=request.vault_id,
-                reasoning_effort=request.reasoning_effort or "off"
+                reasoning_effort=request.reasoning_effort or "medium"
             )
             durable_memory.add_message(
                 conversation_id=request.session_id,
@@ -239,8 +208,9 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
                 confidence_score=conf_score,
                 hallucination_flags=halluc_flags,
                 reasoning_trace=orch_res.reasoning_trace,
-                model_used=getattr(orch_res, "model_used", None) or request.model or settings.DEFAULT_MODEL,
-                runtime_used=getattr(orch_res, "runtime_used", None) or settings.MODEL_RUNTIME
+                model_used=orch_res.model_used,
+                runtime_used=orch_res.runtime_used or settings.MODEL_RUNTIME,
+                metrics=orch_res.metrics,
             )
 
         # Direct Fallback Pipeline (Rollback Mode)
@@ -352,37 +322,20 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
                     model_used = cloud_model
                     runtime_used = "cloud"
                 else:
-                    # Determine a real fallback model — never fall back to the same model that just failed
-                    fallback_model = settings.OLLAMA_FALLBACK_MODEL.strip() or settings.DEFAULT_MODEL
-                    if fallback_model.lower() == target_model.lower():
-                        fallback_model = settings.DEFAULT_MODEL if target_model.lower() != settings.DEFAULT_MODEL.lower() else ""
-
-                    logger.warning(
-                        f"Runtime engine generation error on model '{target_model}': {exc}. "
-                        f"Attempting automatic fallback to '{fallback_model}'."
-                    )
-                    # Log fallback event to audit logger
+                    # No silent substitution of another local model: report and show evidence only.
+                    logger.warning("Model '%s' unavailable (%s); returning evidence excerpts only.", target_model, type(exc).__name__)
                     audit_logger.log(
-                        action="chat_model_fallback",
+                        action="chat_model_unavailable",
                         layer="runtime",
                         injection_score=inj_score,
                         retrieval_hits=len(retrieved_chunks),
                         citations_used=len(sources),
-                        validation_pass_fail="fallback_tier0",
-                        model_tier_used=f"{fallback_model} (Tier 0 Fallback)",
+                        validation_pass_fail="model_unavailable",
+                        model_tier_used=target_model,
                         latency_ms=(time.time() - start_time) * 1000
                     )
-                    is_conn = "unreachable" in str(exc).lower() or "connect" in str(exc).lower()
-                    if not is_conn and fallback_model:
-                        try:
-                            raw_answer = await runtime.generate(prompt, model=fallback_model)
-                            model_used = fallback_model
-                        except Exception as fallback_exc:
-                            logger.warning(f"Fallback to '{fallback_model}' also failed ({fallback_exc}). Synthesizing grounded statutory response from verified corpus.")
-                            raw_answer = _synthesize_grounded_legal_answer(request.message, fitted_chunks)
-                    else:
-                        logger.warning(f"Ollama daemon unreachable ({exc}). Synthesizing grounded statutory response from verified corpus.")
-                        raw_answer = _synthesize_grounded_legal_answer(request.message, fitted_chunks)
+                    raw_answer = _synthesize_grounded_legal_answer(request.message, fitted_chunks)
+                    model_used = "none"
 
 
         # Layer 3: Output Guard Validation & Citation-existence Check
@@ -433,8 +386,7 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
         hallucination_report = hallucination_detector.detect(final_answer, fitted_chunks)
         confidence = confidence_scorer.score(final_answer, fitted_chunks, hallucination_report)
 
-        model_used = request.model or settings.DEFAULT_MODEL
-        runtime_used = settings.MODEL_RUNTIME
+        runtime_used = runtime_used if runtime_used == "cloud" else settings.MODEL_RUNTIME
 
         audit_logger.log(
             action="chat_success",

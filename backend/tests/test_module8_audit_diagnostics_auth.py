@@ -43,8 +43,24 @@ def test_audit_ledger_verification_and_export(client):
     assert list_data["blocked_count"] >= 1
     assert list_data["mcp_count"] >= 1
 
-    # 3. Test export endpoint
-    exp_resp = client.get("/audit/export/json")
+    # Non-admin practitioners get counts + live verification, but not workspace-wide rows.
+    assert list_data["rows"] == []
+    assert list_data["verified"] is True
+
+    # 3. Export is restricted to administrators
+    import pytest as _pytest
+    from unittest.mock import patch
+    assert client.get("/audit/export/json").status_code == 403
+    admin = {"id": "admin_test", "username": "admin", "role": "admin"}
+    from app.main import app as _app
+    from app.routes.auth import get_current_user as _gcu
+    _app.dependency_overrides[_gcu] = lambda: admin
+    try:
+        exp_resp = client.get("/audit/export/json")
+        admin_rows = client.get("/audit/all").json()["rows"]
+    finally:
+        _app.dependency_overrides.pop(_gcu, None)
+    assert len(admin_rows) >= 4
     assert exp_resp.status_code == 200
     exp_data = exp_resp.json()
     assert "export_metadata" in exp_data

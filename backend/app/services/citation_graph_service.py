@@ -122,6 +122,53 @@ class CitationGraphService:
                     return extracted[:180]
         return None
 
+    def corpus_neighbors(self, chunks: List[Dict[str, Any]], limit: int = 3) -> List[Dict[str, Any]]:
+        """
+        Context expansion: sections that the retrieved statutory sections cross-reference in their own
+        text (edges derived from the corpus, not from model output). Returns evidence-shaped dicts.
+        """
+        keys = []
+        for c in chunks:
+            meta = c.get("metadata") or {}
+            slug = meta.get("act_slug") or c.get("act_slug")
+            sec = str(c.get("section") or meta.get("section") or "").strip()
+            if slug and sec:
+                keys.append(f"section:{slug}:{sec}")
+        if not keys or limit <= 0:
+            return []
+        out: List[Dict[str, Any]] = []
+        with get_sync_session() as session:
+            edges = (
+                session.query(CitationEdge)
+                .filter(CitationEdge.src_key.in_(keys), CitationEdge.origin == "corpus_text")
+                .limit(limit * 4)
+                .all()
+            )
+            seen = set()
+            for e in edges:
+                if e.dst_key in seen or e.dst_key in keys:
+                    continue
+                seen.add(e.dst_key)
+                _, slug, number = e.dst_key.split(":", 2)
+                statute = session.query(Statute).filter_by(slug=slug).first()
+                if not statute:
+                    continue
+                row = session.query(StatuteSection).filter_by(statute_id=statute.id, number=number).first()
+                if not row or not row.raw_text:
+                    continue
+                out.append({
+                    "act": statute.title,
+                    "section": number,
+                    "text": row.raw_text,
+                    "doc_type": "statutory_law",
+                    "trust_score": 0.4,  # ranked below directly retrieved evidence when packing context
+                    "metadata": {"act_slug": slug, "section": number, "via": "cross_reference", "from": e.src_key,
+                                 "legal_status": statute.legal_status or "unverified"},
+                })
+                if len(out) >= limit:
+                    break
+        return out
+
     def delete_conversation_edges(self, conversation_id: str) -> int:
         """Purges graph relationships derived from a deleted conversation (corpus edges are untouched)."""
         with get_sync_session() as session:

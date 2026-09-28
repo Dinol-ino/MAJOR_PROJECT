@@ -201,6 +201,8 @@ def test_deep_thinking_fsm_reasoning_trace():
     assert resp.status_code == 200
     data = resp.json()
     assert data["blocked_by"] is None
-    # Reasoning trace must be populated for high reasoning effort
-    assert data["reasoning_trace"] is not None
-    assert len(data["reasoning_trace"]) > 20
+    # HIGH applies a real, larger budget...
+    assert data["metrics"]["reasoning_level"] == "high"
+    # ...but a reasoning trace is only shown if the model actually produced one. In tests no model
+    # runs, so there must be no fabricated trace.
+    assert data["reasoning_trace"] is None

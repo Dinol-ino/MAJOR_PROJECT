@@ -98,28 +98,30 @@ def test_citation_graph_empty_state_and_real_edges():
 
 def test_mcp_server_manager_lifecycle_and_discovery():
     """
-    Spec 04 §2.1 & §2.2: Verify 4 canonical Indian legal MCP servers are registered,
-    report honest health status, and support auto-discovery.
+    External MCP servers are configuration-driven. With none configured, status is honest:
+    no servers, no invented tools, and reconnecting an unknown server is a 404.
     """
-    # 1. MCP status endpoint
     resp = client.get("/mcp/status")
     assert resp.status_code == 200
     status_data = resp.json()
     assert status_data["enabled"] is True
-    active_srvs = {s["name"]: s for s in status_data["active_servers"]}
-    assert "ansvar-systems-india-law-mcp" in active_srvs
-    assert "themis-mcp" in active_srvs
-    assert "nyaya-mcp" in active_srvs
-    assert "taxbykk-mcp" in active_srvs
+    for srv in status_data["active_servers"]:
+        assert srv["status"] in ("configured", "unavailable", "disabled")  # never a fake "connected"
 
-    # 2. Auto-discovery endpoint
-    resp_disc = client.post("/mcp/discover")
-    assert resp_disc.status_code == 200
-    disc_data = resp_disc.json()
-    assert disc_data["total_discovered"] >= 8
+    disc = client.post("/mcp/discover").json()
+    assert disc["total_discovered"] == sum(s["tools_count"] for s in status_data["active_servers"])
 
-    # 3. Reconnect endpoint
-    resp_recon = client.post("/mcp/servers/themis-mcp/reconnect")
-    assert resp_recon.status_code == 200
-    recon_data = resp_recon.json()
-    assert recon_data["server"]["name"] == "themis-mcp"
+    assert client.post("/mcp/servers/not-a-configured-server/reconnect").status_code == 404
+
+
+def test_online_tools_never_fabricate_results_and_mode_cannot_be_overridden():
+    # Client-supplied network_mode is ignored: OFFLINE policy still blocks ONLINE-only tools.
+    resp = client.post("/mcp/tool-call", json={
+        "tool_name": "kanoon_case_search",
+        "arguments": {"keywords": "privacy"},
+        "network_mode": "ONLINE",
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert body["data"] in (None, {}, [])

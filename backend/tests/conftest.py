@@ -27,6 +27,7 @@ if os.environ.get("DFRAG_TEST_USE_ENV") != "1":
     os.environ["CLOUD_FALLBACK_ENABLED"] = "false"
     os.environ["ACTS_RAW_DIR"] = os.path.join(_REPO_ROOT, "data", "acts_raw")
     os.environ.setdefault("JWT_SECRET_KEY", "test-only-signing-key-not-used-outside-pytest-0123456789")
+    os.environ.setdefault("SECRET_KEY", "test-only-vault-key-not-used-outside-pytest-0123456789")
     os.environ["DFRAG_TEST_MODE"] = "1"
 
 import pytest  # noqa: E402

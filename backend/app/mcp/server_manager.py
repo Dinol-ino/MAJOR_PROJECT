@@ -9,52 +9,31 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-MCP_SERVERS_CONFIG: Dict[str, Dict[str, Any]] = {
-    "ansvar-systems-india-law-mcp": {
-        "transport": "stdio",
-        "command": ["npx", "-y", "@modelcontextprotocol/server-india-law"],
-        "capabilities": ["full_text_search", "get_section", "statute_currency_check"],
-        "description": "India Code central acts: DPDPA 2023, IT Act, Companies Act, Consumer Protection Act",
-        "domain": "cyber/corporate",
-        "default_enabled": True,
-        "env": {}
-    },
-    "themis-mcp": {
-        "transport": "stdio",
-        "command": ["npx", "-y", "@modelcontextprotocol/themis-india-law"],
-        "capabilities": ["section_lookup", "offence_search", "old_new_mapping"],
-        "description": "BNS, BNSS, BSA, IPC (old -> new criminal code mapping & cross-walk)",
-        "domain": "criminal",
-        "default_enabled": True,
-        "env": {}
-    },
-    "nyaya-mcp": {
-        "transport": "stdio",
-        "command": ["npx", "-y", "@modelcontextprotocol/nyaya-mcp"],
-        "capabilities": ["case_search", "judgment_retrieve", "constitution_parts"],
-        "description": "Constitution of India + landmark Supreme Court judgments",
-        "domain": "constitutional",
-        "default_enabled": True,
-        "env": {}
-    },
-    "taxbykk-mcp": {
-        "transport": "stdio",
-        "command": ["npx", "-y", "@modelcontextprotocol/taxbykk-mcp"],
-        "capabilities": ["gst_search", "tax_section_cite"],
-        "description": "GST, CGST, indirect tax - page-level statutory citations",
-        "domain": "tax",
-        "default_enabled": True,
-        "env": {}
-    }
-}
+def _load_server_config() -> Dict[str, Dict[str, Any]]:
+    """External MCP servers come from configuration only (MCP_SERVERS_CONFIG_PATH or app/config/mcp_servers.yaml)."""
+    import yaml
+    path = os.getenv("MCP_SERVERS_CONFIG_PATH") or os.path.join(os.path.dirname(__file__), "..", "config", "mcp_servers.yaml")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        servers = data.get("servers") or {}
+        return {str(k): dict(v or {}) for k, v in servers.items()}
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:
+        logger.error("MCP server config unreadable (%s); no external servers loaded.", type(exc).__name__)
+        return {}
+
+
+MCP_SERVERS_CONFIG: Dict[str, Dict[str, Any]] = _load_server_config()
 
 
 class MCPServerInstance:
     def __init__(self, name: str, config: Dict[str, Any]):
         self.name = name
         self.config = config
-        self.enabled = config.get("default_enabled", True)
-        self.status = "connecting"  # connected | connecting | error | disabled
+        self.enabled = bool(config.get("enabled", config.get("default_enabled", False)))
+        self.status = "unavailable"  # configured | unavailable | disabled  (never "connected" without a handshake)
         self.error_reason: Optional[str] = None
         self.last_ping: Optional[float] = None
         self.discovered_tools: List[Dict[str, Any]] = []
@@ -76,12 +55,13 @@ class MCPServerInstance:
         has_exec = shutil.which(executable) if executable else False
 
         if not has_exec:
-            self.status = "error"
-            self.error_reason = f"Executable '{executable}' not found in system PATH. Install Node.js/npx to activate."
+            self.status = "unavailable"
+            self.error_reason = f"Executable '{executable}' not found."
         else:
-            self.status = "connected"
-            self.error_reason = None
-            self.last_ping = time.time()
+            # The executable exists, but no MCP handshake has been performed: report that honestly.
+            self.status = "configured"
+            self.error_reason = "Not started: no live MCP session has been established."
+            self.last_ping = None
 
         return self.status
 
@@ -118,64 +98,8 @@ class MCPServerManager:
             self._servers[name] = instance
 
     def _register_default_server_tools(self, instance: MCPServerInstance):
-        """Populates canonical tool declarations matching server capabilities."""
-        if instance.name == "ansvar-systems-india-law-mcp":
-            instance.discovered_tools = [
-                {
-                    "name": "india_code_full_text_search",
-                    "description": "Full text search across India Code central acts including DPDPA 2023, IT Act, Companies Act.",
-                    "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
-                },
-                {
-                    "name": "india_code_get_section",
-                    "description": "Fetches exact text and heading for a specific statute section.",
-                    "input_schema": {"type": "object", "properties": {"act": {"type": "string"}, "section": {"type": "string"}}, "required": ["act", "section"]}
-                },
-                {
-                    "name": "statute_currency_check",
-                    "description": "Verifies whether a statute or section has been amended, substituted, or repealed.",
-                    "input_schema": {"type": "object", "properties": {"act": {"type": "string"}, "section": {"type": "string"}}, "required": ["act"]}
-                }
-            ]
-        elif instance.name == "themis-mcp":
-            instance.discovered_tools = [
-                {
-                    "name": "themis_section_lookup",
-                    "description": "Direct provision lookup in Bharatiya Nyaya Sanhita (BNS), BNSS, BSA, or legacy IPC.",
-                    "input_schema": {"type": "object", "properties": {"code": {"type": "string"}, "section": {"type": "string"}}, "required": ["code", "section"]}
-                },
-                {
-                    "name": "themis_old_new_mapping",
-                    "description": "Cross-walk mapping between legacy Indian Penal Code (IPC) and Bharatiya Nyaya Sanhita (BNS 2023).",
-                    "input_schema": {"type": "object", "properties": {"ipc_section": {"type": "string"}, "bns_section": {"type": "string"}}}
-                }
-            ]
-        elif instance.name == "nyaya-mcp":
-            instance.discovered_tools = [
-                {
-                    "name": "nyaya_constitution_parts",
-                    "description": "Queries provisions, Fundamental Rights, and Articles of the Constitution of India.",
-                    "input_schema": {"type": "object", "properties": {"article": {"type": "string"}}, "required": ["article"]}
-                },
-                {
-                    "name": "nyaya_case_search",
-                    "description": "Searches landmark Supreme Court of India precedents and constitutional bench judgments.",
-                    "input_schema": {"type": "object", "properties": {"keywords": {"type": "string"}}, "required": ["keywords"]}
-                }
-            ]
-        elif instance.name == "taxbykk-mcp":
-            instance.discovered_tools = [
-                {
-                    "name": "taxbykk_gst_search",
-                    "description": "Search Goods and Services Tax (GST / CGST) acts, rules, and rate schedules.",
-                    "input_schema": {"type": "object", "properties": {"term": {"type": "string"}}, "required": ["term"]}
-                },
-                {
-                    "name": "taxbykk_tax_section_cite",
-                    "description": "Retrieves official tax section citations with page-level statutory references.",
-                    "input_schema": {"type": "object", "properties": {"section": {"type": "string"}, "act": {"type": "string"}}, "required": ["section"]}
-                }
-            ]
+        """Tools are only known after a real MCP handshake; none are invented from server names."""
+        instance.discovered_tools = []
 
     def get_all_servers_status(self) -> List[Dict[str, Any]]:
         result = []

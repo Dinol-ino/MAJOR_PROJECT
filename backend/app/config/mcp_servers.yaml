@@ -1,0 +1,16 @@
+# External MCP research servers.
+#
+# Declare only servers you actually operate. A declared server is reported as
+# "configured" (its executable is present) or "unavailable" (it is not). This build
+# does not claim a server is "connected" unless a live handshake has succeeded, and
+# external servers are only reachable in ONLINE mode through the MCP gateway policy.
+#
+# Example (disabled):
+#   my-legal-source:
+#     transport: stdio
+#     command: ["node", "/opt/mcp/my-legal-source/index.js"]
+#     description: "What this source provides"
+#     domain: "statutory"
+#     capabilities: ["get_section"]
+#     enabled: false
+servers: {}

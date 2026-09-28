@@ -83,8 +83,8 @@ def update_fallback_settings(req: FallbackSettingsUpdateRequest):
         res["settings"] = vault_status
         return res
     except Exception as exc:
-        logger.error(f"Failed to update fallback settings: {exc}")
-        raise HTTPException(status_code=400, detail=str(exc))
+        logger.error("Failed to update fallback settings: %s", type(exc).__name__)
+        raise HTTPException(status_code=400, detail="Could not update fallback settings.")
 
 
 @router.post("/fallback/test")
@@ -93,6 +93,11 @@ async def test_fallback_key(req: FallbackTestRequest):
     Tests connectivity and authentication against Grok API or Z.ai endpoint.
     Masks credential in all outputs.
     """
+    from app.network.mode_enforcer import mode_enforcer
+    if mode_enforcer.is_offline():
+        # OFFLINE means no outbound calls, including credential checks against cloud providers.
+        raise HTTPException(status_code=409, detail="The workspace is OFFLINE. Switch to ONLINE to test a cloud provider key.")
+
     provider = req.provider.lower()
     test_key = req.key.strip() if req.key else api_vault.get(provider)
 

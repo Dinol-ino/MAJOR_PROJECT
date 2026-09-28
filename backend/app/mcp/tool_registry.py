@@ -240,34 +240,28 @@ class ToolRegistry:
         return {"session_id": session_id, "results": results}
 
     def _mock_legal_corpus_query(self, query: str, domain: str = "criminal_law") -> Dict[str, Any]:
-        return {
-            "citations": [{"act": "Indian Penal Code", "section": "Section 300"}],
-            "summary": f"Retrieved provisions related to '{query}' in {domain}."
-        }
+        """Read-only query over the indexed statutory corpus (real results; domain is advisory)."""
+        from app.retrieval.tier1_law import Tier1LawRetrieval
+        from app.config import settings
+        results = Tier1LawRetrieval(persist_dir=settings.CHROMA_PERSIST_DIR).query(text=query, top_k=5)
+        citations = [{"act": r.get("act", ""), "section": str(r.get("section", ""))} for r in results]
+        summary = f"{len(results)} provision(s) retrieved from the local statutory corpus." if results else "No matching provisions in the local statutory corpus."
+        return {"citations": citations, "summary": summary}
+
+    # The three handlers below represent ONLINE sources. No live connector is configured in this
+    # build, so they report unavailability instead of returning fabricated legal results.
+    @staticmethod
+    def _unavailable(source: str) -> Dict[str, Any]:
+        raise RuntimeError(f"No live connector is configured for {source}; nothing was retrieved.")
 
     def _mock_live_statute_checker(self, act_name: str, section: Optional[str] = None) -> Dict[str, Any]:
-        return {
-            "act_name": act_name,
-            "status": "In Force",
-            "latest_amendment_year": 2023,
-            "details": f"Verified live gazette status for {act_name}."
-        }
+        return self._unavailable("statute currency checks")
 
     def _mock_kanoon_search(self, keywords: str, citation: Optional[str] = None, max_cases: int = 3) -> Dict[str, Any]:
-        return {
-            "cases": [
-                {"title": "State of Maharashtra v. Mayer Hans George", "citation": "1965 AIR 722", "relevance": "High"}
-            ],
-            "source": "Indian Kanoon Allowlisted Mirror"
-        }
+        return self._unavailable("case-law search")
 
     def _mock_indiacode_fetcher(self, act_id: str) -> Dict[str, Any]:
-        return {
-            "act_id": act_id,
-            "official_title": f"Government Act Registry Ref #{act_id}",
-            "gazette_ref": "Ext. No. 45/1860",
-            "enactment_date": "1860-10-06"
-        }
+        return self._unavailable("India Code gazette lookup")
 
 
 tool_registry = ToolRegistry()

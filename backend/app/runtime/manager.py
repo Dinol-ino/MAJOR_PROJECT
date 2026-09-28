@@ -376,9 +376,11 @@ class ModelLifecycleManager:
             logger.info("Model warmup/auto-pull on startup is disabled in configuration.")
             return False
 
-        floor_model = self._resolve_startup_model()
+        from app.runtime.model_state import model_state
+        persisted = model_state.persisted_active_model()
+        floor_model = persisted or self._resolve_startup_model()
 
-        # Check if model is installed; if not, auto-pull
+        # Check if model is installed; if not, auto-pull (only when the operator opted in)
         installed = await self._is_model_installed(floor_model)
         if not installed:
             if not settings.model.auto_pull_on_startup:

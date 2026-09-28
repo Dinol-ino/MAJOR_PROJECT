@@ -59,14 +59,15 @@ class MCPGateway:
         Synchronously executes a tool call through all defensive gates.
         """
         start_time = time.time()
-        if network_mode:
-            mode = network_mode.upper()
-        else:
-            try:
-                from app.network.mode_enforcer import mode_enforcer
-                mode = mode_enforcer.get_mode().upper()
-            except Exception:
-                mode = settings.network.default_mode.upper()
+        # The authoritative mode is always the server-side enforcer. A caller-supplied mode may only
+        # make policy STRICTER (request OFFLINE), never open network access.
+        try:
+            from app.network.mode_enforcer import mode_enforcer
+            mode = mode_enforcer.get_mode().upper()
+        except Exception:
+            mode = settings.network.default_mode.upper()
+        if network_mode and network_mode.upper() == "OFFLINE":
+            mode = "OFFLINE"
 
         # Step 1: Policy Engine Evaluation
         decision: PolicyDecision = policy_engine.evaluate(
@@ -128,12 +129,12 @@ class MCPGateway:
             if tool and tool.handler:
                 raw_result = tool.handler(**validated_args)
             else:
-                # Mock response for external servers if handler not attached
-                raw_result = {"status": "success", "result": f"Executed tool '{tool_name}' successfully on server '{tool.server_name if tool else 'local'}'."}
+                # Never fabricate a success for a tool that has no executable handler.
+                raise RuntimeError(f"Tool '{tool_name}' has no connected executor.")
         except Exception as exec_err:
             latency = (time.time() - start_time) * 1000
-            error_text = f"Tool execution runtime error: {str(exec_err)}"
-            logger.error(error_text)
+            error_text = f"Tool unavailable: {str(exec_err)[:200]}"
+            logger.warning("MCP tool %s failed: %s", tool_name, type(exec_err).__name__)
             self._record_audit_and_telemetry(
                 tool_name=tool_name,
                 category=decision.category,

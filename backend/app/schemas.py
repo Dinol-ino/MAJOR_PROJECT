@@ -8,7 +8,7 @@ class ChatRequest(BaseModel):
     shield_on: bool
     model: Optional[str] = None
     vault_id: Optional[str] = None
-    reasoning_effort: Optional[str] = "off"  # "off" | "low" | "high"
+    reasoning_effort: Optional[str] = "medium"  # "low" | "medium" | "high" ("off" is treated as "low")
 
 class CitationSource(BaseModel):
     act: str
@@ -34,6 +34,8 @@ class ChatResponse(BaseModel):
     citations_parsed: Optional[List[dict]] = None
     model_used: Optional[str] = None
     runtime_used: Optional[str] = None
+    # Real measurements for this request (token counts from the runtime, stage latencies).
+    metrics: Optional[dict] = None
 
 # --- /upload Endpoint Schemas ---
 class UploadResponse(BaseModel):

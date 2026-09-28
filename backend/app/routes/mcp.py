@@ -21,7 +21,8 @@ class MCPToolCallRequest(BaseModel):
     tool_name: str = Field(..., description="Name of registered tool")
     arguments: Dict[str, Any] = Field(default_factory=dict, description="Input arguments matching tool schema")
     session_id: Optional[str] = Field(default="default_session", description="Active user session ID")
-    network_mode: Optional[str] = Field(default=None, description="Optional override for network mode (OFFLINE / ONLINE)")
+    # Accepted for backwards compatibility and IGNORED: clients can never override the network mode.
+    network_mode: Optional[str] = Field(default=None, description="Ignored; the server-side network mode always applies")
 
 
 class MCPStatusResponse(BaseModel):
@@ -92,7 +93,7 @@ def execute_tool_call(request: MCPToolCallRequest):
         tool_name=request.tool_name,
         arguments=request.arguments,
         session_id=request.session_id,
-        network_mode=request.network_mode
+        network_mode=None,
     )
     return response
 
