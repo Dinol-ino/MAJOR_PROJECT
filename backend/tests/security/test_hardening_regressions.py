@@ -149,3 +149,31 @@ def test_injected_instructions_in_retrieved_text_are_neutralised():
     cleaned = context_sanitizer.sanitize_text(malicious, source_type="user_document")
     assert "ignore all previous instructions" not in cleaned.lower()
     assert "fee is rs 100" in cleaned.lower()
+
+
+def test_unmanifested_act_title_comes_from_its_short_title_clause():
+    """Files without a manifest entry are named by the Act's own short-title clause, never invented."""
+    from app.ingestion.statutory_corpus import _act_record
+
+    text = "CHAPTER I\nSection 1. Short title. - (1) This Act may be called the Indian Contract Act, 1872.\n"
+    rec = _act_record("Contract_Act_1872.txt", text, {})
+    assert rec["title"] == "Indian Contract Act, 1872"
+    assert rec["year"] == 1872
+    assert rec["legal_status"] == "unverified" and rec["source_url"] is None
+
+    # No clause -> filename-derived title, no year guessed.
+    rec2 = _act_record("Some_Rules.txt", "Section 1. Definitions.", {})
+    assert rec2["title"] == "Some Rules" and rec2["year"] is None
+
+    # Manifest title always wins.
+    rec3 = _act_record("Contract_Act_1872.txt", text, {"Contract_Act_1872.txt": {"title": "X Act", "year": 1900}})
+    assert rec3["title"] == "X Act" and rec3["year"] == 1900
+
+
+def test_indexed_act_matching_uses_whole_words_and_acronyms():
+    """Against the indexed corpus: 'IT Act' must resolve to the IT Act, not to a title containing 'it'."""
+    from app.orchestrator.state_machine import ResearchStateMachine as M
+
+    assert M._indexed_act_matching("It Act") == "Information Technology Act, 2000"
+    assert M._indexed_act_matching("Information Technology Act") == "Information Technology Act, 2000"
+    assert M._indexed_act_matching("Motor Vehicles Act") is None

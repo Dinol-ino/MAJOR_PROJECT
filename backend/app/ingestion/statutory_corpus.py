@@ -92,15 +92,35 @@ def extract_cross_references(section_text: str, own_number: str, known: set) -> 
     return found
 
 
+_SHORT_TITLE_RE = re.compile(
+    r"This\s+Act\s+may\s+be\s+called\s+the\s+([A-Z][^.;:()\n]{2,160}?,\s*(\d{4}))", re.IGNORECASE
+)
+
+
+def _short_title_from_text(text: str) -> tuple:
+    """The Act's own short-title clause ("This Act may be called the X, YYYY"), if present.
+
+    Used only when the manifest has no title, so unmanifested files get the name the
+    statute gives itself instead of a filename. Returns (title, year) or (None, None).
+    """
+    m = _SHORT_TITLE_RE.search(text[:5000])
+    if not m:
+        return None, None
+    title = re.sub(r"\s+", " ", m.group(1)).strip()
+    return title, int(m.group(2))
+
+
 def _act_record(filename: str, text: str, manifest: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     entry = manifest.get(filename, {})
     base = os.path.splitext(filename)[0]
-    title = (entry.get("title") or base.replace("_", " ")).strip()
+    text_title, text_year = _short_title_from_text(text)
+    title = (entry.get("title") or text_title or base.replace("_", " ")).strip()
+    year = entry.get("year") if isinstance(entry.get("year"), int) else (None if entry.get("title") else text_year)
     return {
         "filename": filename,
         "slug": (entry.get("slug") or _slugify(title)),
         "title": title,
-        "year": entry.get("year") if isinstance(entry.get("year"), int) else None,
+        "year": year,
         "domain": (entry.get("domain") or "unclassified").strip(),
         "jurisdiction": (entry.get("jurisdiction") or "").strip() or None,
         "source_url": (entry.get("source_url") or "").strip() or None,

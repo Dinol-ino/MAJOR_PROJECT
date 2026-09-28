@@ -1071,7 +1071,8 @@ class ResearchStateMachine:
         if not name:
             return None
         import re as _re
-        words = [w for w in _re.findall(r"[a-z]+", name.lower()) if w not in {"the", "act", "code", "of", "and"}]
+        stop = {"the", "act", "code", "of", "and"}
+        words = [w for w in _re.findall(r"[a-z]+", name.lower()) if w not in stop]
         if not words:
             return None
         try:
@@ -1079,7 +1080,13 @@ class ResearchStateMachine:
             from app.db.models import Statute
             with get_sync_session() as session:
                 for (title,) in session.query(Statute.title).all():
-                    if all(w in title.lower() for w in words):
+                    title_words = [w for w in _re.findall(r"[a-z]+", title.lower()) if w not in stop]
+                    # Whole-word match ("contract" -> Indian Contract Act), or a single token that is
+                    # the title's acronym ("IT" -> Information Technology Act). Substring matching
+                    # would let "it" match "digital".
+                    if all(w in title_words for w in words):
+                        return title
+                    if len(words) == 1 and len(title_words) > 1 and words[0] == "".join(t[0] for t in title_words):
                         return title
         except Exception:
             return None
