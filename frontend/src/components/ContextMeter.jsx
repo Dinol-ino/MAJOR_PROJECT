@@ -1,110 +1,57 @@
 import React, { useState } from 'react';
 
 /**
- * ContextMeter — Claude-style context window budget indicator.
- * Displays total token usage and detailed breakdown (History, Documents, System).
+ * Context use of the most recent answer, taken from the server's measurements.
+ * Estimates (chars/4) are labelled as estimates; runtime token counts are shown when the
+ * model reported them. Nothing here is a placeholder.
  */
-export default function ContextMeter({
-  usedTokens = 3200,
-  maxTokens = 32768,
-  breakdown = { history: 1800, documents: 900, system: 500 }
-}) {
-  const [showPopover, setShowPopover] = useState(false);
+export default function ContextMeter({ metrics }) {
+  const [open, setOpen] = useState(false);
+  if (!metrics || !metrics.max_context_tokens) return null;
 
-  const percent = Math.min(100, Math.round((usedTokens / maxTokens) * 100));
-  const isHigh = percent >= 80;
-
-  const formatTokens = (n) => {
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-    return `${n}`;
-  };
-
-  const meterColor = isHigh ? 'var(--accent-amber)' : 'var(--accent)';
+  const budget = metrics.context_budget_tokens || metrics.max_context_tokens;
+  const used = metrics.prompt_tokens ?? ((metrics.evidence_tokens_est || 0) + (metrics.system_prompt_tokens_est || 0));
+  const pct = Math.min(100, Math.round((used / Math.max(1, budget)) * 100));
+  const fmt = (n) => (n == null ? '—' : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
 
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
-      <div
-        onClick={() => setShowPopover(!showPopover)}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '2px 8px',
-          borderRadius: 'var(--radius-sm)',
-          background: 'transparent',
-          cursor: 'pointer',
-          fontSize: '0.72rem',
-          color: isHigh ? 'var(--accent-amber)' : 'var(--text-secondary)',
-          userSelect: 'none'
-        }}
-        title="Click to view context budget breakdown"
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '0.72rem', cursor: 'pointer', display: 'inline-flex', gap: 8, alignItems: 'center' }}
+        title="Context used by the last answer"
       >
-        <span style={{ fontFamily: 'var(--font-mono)' }}>
-          {formatTokens(usedTokens)} / {formatTokens(maxTokens)} tokens ({percent}%)
+        <span>{fmt(used)} / {fmt(budget)} tokens{metrics.prompt_tokens == null ? ' (est.)' : ''}</span>
+        <span style={{ width: 60, height: 3, background: 'var(--bg-raised)', display: 'inline-block', position: 'relative' }}>
+          <span style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: pct >= 85 ? 'var(--status-amber)' : 'var(--accent)' }} />
         </span>
-
-        {/* Mini progress pill */}
-        <div
-          style={{
-            width: '42px',
-            height: '4px',
-            background: 'var(--border-subtle)',
-            borderRadius: '2px',
-            overflow: 'hidden'
-          }}
-        >
-          <div
-            style={{
-              width: `${percent}%`,
-              height: '100%',
-              background: meterColor,
-              transition: 'width 0.3s ease'
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Breakdown Popover */}
-      {showPopover && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: '100%',
-            left: 0,
-            marginBottom: '6px',
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-medium)',
-            borderRadius: 'var(--radius-sm)',
-            boxShadow: 'var(--shadow-md)',
-            padding: '10px 14px',
-            fontSize: '0.73rem',
-            color: 'var(--text-primary)',
-            zIndex: 1200,
-            width: '240px'
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: '6px', color: 'var(--text-primary)' }}>
-            Context Window Allocation
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontFamily: 'var(--font-mono)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Conversation History:</span>
-              <span>{formatTokens(breakdown.history || 0)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Vault Documents:</span>
-              <span>{formatTokens(breakdown.documents || 0)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>System Directives:</span>
-              <span>{formatTokens(breakdown.system || 0)}</span>
-            </div>
-          </div>
-          <div style={{ marginTop: '8px', borderTop: '1px solid var(--border-subtle)', paddingTop: '4px', fontSize: '0.68rem', color: 'var(--text-dim)' }}>
-            {isHigh ? '⚠️ Context > 80% — Older turns are summarized.' : 'Ample capacity remaining for statutory synthesis.'}
-          </div>
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, bottom: 26, width: 280, background: 'var(--bg-modal)', border: '1px solid var(--border-medium)', borderRadius: 'var(--radius-md)', padding: 12, fontSize: '0.78rem', color: 'var(--text-secondary)', zIndex: 40, boxShadow: 'var(--shadow-lg)' }}>
+          <Row k="Reasoning level" v={metrics.reasoning_level} />
+          <Row k="Model context window" v={fmt(metrics.max_context_tokens)} />
+          <Row k="Budget for this level" v={fmt(metrics.context_budget_tokens)} />
+          <Row k="Evidence (est.)" v={`${fmt(metrics.evidence_tokens_est)} in ${metrics.evidence_chunks_used ?? 0} passages`} />
+          {metrics.evidence_chunks_dropped > 0 && <Row k="Lower-ranked passages left out" v={metrics.evidence_chunks_dropped} />}
+          {metrics.graph_neighbors_added > 0 && <Row k="Added via cross-references" v={metrics.graph_neighbors_added} />}
+          <Row k="Prompt tokens (runtime)" v={fmt(metrics.prompt_tokens)} />
+          <Row k="Answer tokens (runtime)" v={`${fmt(metrics.generation_tokens)} of max ${fmt(metrics.max_output_tokens)}`} />
+          {metrics.tokens_per_sec != null && <Row k="Generation speed" v={`${metrics.tokens_per_sec} tok/s`} />}
+          {metrics.retrieval_ms != null && <Row k="Retrieval" v={`${metrics.retrieval_ms} ms`} />}
+          {metrics.model_latency_ms != null && <Row k="Model" v={`${Math.round(metrics.model_latency_ms)} ms`} />}
+          {metrics.total_latency_ms != null && <Row k="Total" v={`${Math.round(metrics.total_latency_ms)} ms`} />}
         </div>
       )}
+    </div>
+  );
+}
+
+function Row({ k, v }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '2px 0' }}>
+      <span style={{ color: 'var(--text-muted)' }}>{k}</span>
+      <span style={{ color: 'var(--text-primary)', textAlign: 'right' }}>{v ?? '—'}</span>
     </div>
   );
 }

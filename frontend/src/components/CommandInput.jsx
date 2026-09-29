@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { apiClient } from '../api/client';
 import MicButton from './MicButton';
 import UploadButton from './UploadButton';
 import FilePill from './FilePill';
 import ContextMeter from './ContextMeter';
-import { SendIcon, BookIcon, FolderIcon, SparklesIcon, ScaleIcon } from './Icons';
+import { SendIcon, SparklesIcon } from './Icons';
 
 export default function CommandInput({
   onSendMessage,
@@ -11,19 +12,34 @@ export default function CommandInput({
   onUploadSuccess,
   isGenerating,
   activeVaultId,
-  usedTokens = 4200,
-  maxTokens = 32768
+  lastMetrics = null,
 }) {
   const [input, setInput] = useState('');
-  const [reasoningEffort, setReasoningEffort] = useState('off'); // 'off' | 'low' | 'high'
+  // LOW / MEDIUM / HIGH map to real server-side budgets (retrieval depth, evidence, output length, verification).
+  const [reasoningEffort, setReasoningEffort] = useState('medium');
   const [attachedFiles, setAttachedFiles] = useState([]);
+  const [suggestions, setSuggestions] = useState([]);
+
+  // Suggestions are built from what is actually indexed, never from hardcoded statutes.
+  useEffect(() => {
+    let active = true;
+    apiClient.getCorpusStatus().then((c) => {
+      if (!active) return;
+      const acts = (c.acts || []).filter((a) => a.sections && a.sections.length);
+      const out = [];
+      if (acts[0]) {
+        const sec = acts[0].sections.find((x) => /^\d/.test(String(x))) || acts[0].sections[0];
+        out.push({ label: `${acts[0].act_name}, s. ${sec}`, prompt: `What does Section ${sec} of the ${acts[0].act_name} provide?` });
+        out.push({ label: `Penalties in ${acts[0].act_name}`, prompt: `Which provisions of the ${acts[0].act_name} prescribe penalties, and what are they?` });
+      }
+      if (acts[1]) out.push({ label: acts[1].act_name, prompt: `Summarise the key provisions of the ${acts[1].act_name}.` });
+      setSuggestions(out.slice(0, 3));
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const cycleReasoningEffort = () => {
-    setReasoningEffort((prev) => {
-      if (prev === 'off') return 'low';
-      if (prev === 'low') return 'high';
-      return 'off';
-    });
+    setReasoningEffort((prev) => (prev === 'low' ? 'medium' : prev === 'medium' ? 'high' : 'low'));
   };
 
   const isAnyFileIndexing = attachedFiles.some(
@@ -66,18 +82,12 @@ export default function CommandInput({
 
   return (
     <div style={{ width: '100%', maxWidth: 'var(--max-content-width)', margin: '0 auto' }}>
-      {/* Context Window Indicator Bar */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px', paddingRight: '4px' }}>
-        <ContextMeter
-          usedTokens={usedTokens}
-          maxTokens={maxTokens}
-          breakdown={{
-            history: Math.round(usedTokens * 0.55),
-            documents: Math.round(usedTokens * 0.3),
-            system: Math.round(usedTokens * 0.15)
-          }}
-        />
-      </div>
+      {/* Context use of the LAST answer, from the server's own measurements (hidden until one exists). */}
+      {lastMetrics && lastMetrics.max_context_tokens && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px', paddingRight: '4px' }}>
+          <ContextMeter metrics={lastMetrics} />
+        </div>
+      )}
 
       {/* Floating Command Box */}
       <form
@@ -185,7 +195,7 @@ export default function CommandInput({
                     : 'var(--text-secondary)',
                 cursor: 'pointer'
               }}
-              title={`Reasoning Effort: ${reasoningEffort.toUpperCase()} (Cycle OFF / LOW / HIGH Deep Thinking)`}
+              title="Reasoning level sets the retrieval depth, evidence volume, answer length and verification retries (click to cycle Low / Medium / High)"
             >
               <SparklesIcon
                 size={12}
@@ -198,11 +208,7 @@ export default function CommandInput({
                 }
               />
               <span>
-                {reasoningEffort === 'high'
-                  ? 'Reasoning: HIGH (Deep)'
-                  : reasoningEffort === 'low'
-                  ? 'Reasoning: LOW'
-                  : 'Reasoning: OFF'}
+                {`Reasoning: ${reasoningEffort.charAt(0).toUpperCase()}${reasoningEffort.slice(1)}`}
               </span>
             </button>
           </div>
@@ -238,88 +244,20 @@ export default function CommandInput({
         </div>
       </form>
 
-      {/* Action Quick Suggestion Pills */}
-      <div
-        style={{
-          display: 'flex',
-          gap: '8px',
-          justifyContent: 'center',
-          flexWrap: 'wrap',
-          marginTop: '14px'
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => handlePillClick("Analyze IT Act Section 66 penalties and compliance requirements")}
-          style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '16px',
-            padding: '5px 12px',
-            fontSize: '0.76rem',
-            color: 'var(--text-secondary)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-        >
-          <BookIcon size={13} color="var(--accent-blue)" /> Analyze Section 66
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handlePillClick("What are the key provisions of Companies Act 2013 regarding director liability under Section 447?")}
-          style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '16px',
-            padding: '5px 12px',
-            fontSize: '0.76rem',
-            color: 'var(--text-secondary)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-        >
-          <ScaleIcon size={13} color="var(--accent-pink)" /> Research Companies Act
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handlePillClick("Draft a legal notice for breach of non-disclosure contract under Indian Contract Act Section 73")}
-          style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '16px',
-            padding: '5px 12px',
-            fontSize: '0.76rem',
-            color: 'var(--text-secondary)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-        >
-          <SparklesIcon size={13} color="var(--accent-blue)" /> Draft Legal Notice
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handlePillClick("Explain cheating and forgery offences under Bharatiya Nyaya Sanhita (BNS 2023) Section 318")}
-          style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '16px',
-            padding: '5px 12px',
-            fontSize: '0.76rem',
-            color: 'var(--text-secondary)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-        >
-          <FolderIcon size={13} color="var(--accent-pink)" /> BNS 2023 Cheating
-        </button>
-      </div>
+      {suggestions.length > 0 && (
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap', marginTop: '14px' }}>
+          {suggestions.map((sg) => (
+            <button
+              key={sg.label}
+              type="button"
+              onClick={() => handlePillClick(sg.prompt)}
+              style={{ background: 'transparent', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-full)', padding: '5px 12px', fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            >
+              {sg.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

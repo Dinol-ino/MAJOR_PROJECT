@@ -1,65 +1,68 @@
 /* ==========================================================================
-   DFrag Design System — Tokens (Spec 06)
-   High-contrast legal-tech design tokens (inspired by Linear / Consensus / Claude)
-   Strictly NO purple hues, NO decorative gradients.
+   DFrag Design Tokens — restrained legal-research workspace
+   - Editorial serif for reading & headings (Source Serif 4, OFL, self-hosted)
+   - Neutral charcoal / slate (dark) and cream paper (light)
+   - One restrained accent (aged brass), used for focus and primary actions only
+   - No gradients, no glow, thin rules, generous spacing
+   Variable names are kept stable so existing components keep working.
    ========================================================================== */
 
 :root {
-  /* Color Palette — Solid Pitch/Obsidian Black Base */
-  --bg-app: #060709;
-  --bg-surface: #0c0d12;
-  --bg-raised: #12141a;
-  --bg-card: #101218;
-  --bg-card-hover: #161822;
-  --bg-sidebar: #060709;
-  --bg-input: #0a0b0f;
-  --bg-modal: #101218;
+  --bg-app: #121314;
+  --bg-surface: #17191b;
+  --bg-raised: #1d2023;
+  --bg-card: #17191b;
+  --bg-card-hover: #1c1f22;
+  --bg-sidebar: #0f1011;
+  --bg-input: #141618;
+  --bg-modal: #191b1e;
 
-  /* Borders & Dividers — Crisp Solid Lines */
-  --border-subtle: #1c1f28;
-  --border-medium: #272c3a;
-  --border-active: #0084ff;
-  --border-pink: #ff007f;
+  --border-subtle: rgba(236, 232, 225, 0.08);
+  --border-medium: rgba(236, 232, 225, 0.16);
+  --border-active: #a88b5a;
+  --border-bold: rgba(168, 139, 90, 0.5);
+  --border-pink: var(--border-active);
 
-  /* Typography Colors — High-Contrast Pure White & Cool Silver */
-  --text-primary: #ffffff;
-  --text-secondary: #a3aab8;
-  --text-muted: #6e7587;
-  --text-dim: #494e5d;
+  --text-primary: #ece8e1;
+  --text-secondary: #c9c3b9;
+  --text-muted: #8f8a82;
+  --text-dim: #5f5b56;
 
-  /* Solid Professional Duotone: Electric Blue & Vivid Magenta Pink */
-  --accent: #0084ff;              /* Solid Electric Blue — Primary Actions, Links, Controls */
-  --accent-hover: #0073e6;
-  --accent-blue: #0084ff;
-  --accent-blue-subtle: rgba(0, 132, 255, 0.12);
-  --accent-blue-border: rgba(0, 132, 255, 0.35);
+  --accent: #a88b5a;
+  --accent-gold: #a88b5a;
+  --accent-hover: #bfa071;
 
-  --accent-pink: #ff007f;         /* Solid Vivid Magenta Pink — Security Shield, Key Highlights, Emblem */
-  --accent-pink-hover: #e60072;
-  --accent-pink-subtle: rgba(255, 0, 127, 0.12);
-  --accent-pink-border: rgba(255, 0, 127, 0.35);
+  /* Compatibility aliases: every legacy "blue/pink/cyan" accent maps to the one accent. */
+  --accent-blue: var(--accent);
+  --accent-blue-subtle: rgba(168, 139, 90, 0.10);
+  --accent-blue-border: rgba(168, 139, 90, 0.32);
+  --accent-pink: var(--accent);
+  --accent-pink-hover: var(--accent-hover);
+  --accent-pink-subtle: rgba(168, 139, 90, 0.10);
+  --accent-pink-border: rgba(168, 139, 90, 0.32);
+  --accent-cyan: var(--accent);
+  --accent-indigo: var(--accent);
+  --accent-amber: #b98a3e;
 
-  --accent-cyan: #0084ff;         /* Replaced AI-teal with solid Electric Blue */
-  --accent-indigo: #0084ff;
-  --accent-amber: #ffaa00;        /* Warning / Review */
+  --status-green: #6fae8a;
+  --status-red: #d0746b;
+  --status-amber: #c9a15a;
+  --defense-pass: var(--status-green);
+  --defense-review: var(--status-amber);
+  --defense-block: var(--status-red);
 
-  --status-green: #00e599;        /* Solid Mint for healthy system signals */
-  --status-red: #ff2a55;          /* Circuit open / Security errors */
-  --defense-pass: #0084ff;        /* Electric Blue for verified citations */
-  --defense-review: #ffaa00;
-  --defense-block: #ff007f;       /* Magenta Pink for security blocks */
+  /* Gradients retired: kept as solid values for backwards compatibility. */
+  --accent-gradient: var(--accent);
+  --accent-pink-gradient: var(--accent);
+  --accent-blue-gradient: var(--accent);
+  --gold-glow: none;
 
-  /* Distinctive Solid Duotone Logo / Hero Accent */
-  --accent-gradient: linear-gradient(135deg, #ff007f 0%, #0084ff 100%);
-  --accent-pink-gradient: linear-gradient(135deg, #ff007f 0%, #ff3399 100%);
-  --accent-blue-gradient: linear-gradient(135deg, #0084ff 0%, #00b4d8 100%);
+  --font-serif: "Source Serif 4", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+  --font-title: var(--font-serif);
+  --font-reading: var(--font-serif);
 
-  /* Typography */
-  --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", monospace;
-  --font-title: var(--font-sans);
-
-  /* Spacing Scale */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -67,67 +70,61 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+  --space-12: 48px;
 
-  /* Radii — Clean, professional geometry */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-full: 999px;
 
-  /* Shadows — Minimal, crisp depth (No murky neon AI glow) */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.65);
+  --shadow-sm: none;
+  --shadow-md: 0 1px 0 rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-image: none;
 
-  /* Layout */
   --max-content-width: 780px;
 }
 
-/* ==========================================================================
-   Light Mode Overrides (WCAG AA Compliant)
-   ========================================================================== */
 body.light-theme,
 [data-theme="light"] {
-  --bg-app: #f8f9fa;
-  --bg-surface: #ffffff;
-  --bg-raised: #f0f1f3;
-  --bg-card: #ffffff;
-  --bg-card-hover: #f3f4f6;
-  --bg-sidebar: #f1f3f5;
-  --bg-input: #ffffff;
-  --bg-modal: #ffffff;
+  --bg-app: #f6f3ec;
+  --bg-surface: #fbf9f4;
+  --bg-raised: #efeae0;
+  --bg-card: #fbf9f4;
+  --bg-card-hover: #f3efe6;
+  --bg-sidebar: #efebe2;
+  --bg-input: #fffdf8;
+  --bg-modal: #fbf9f4;
 
-  --border-subtle: #e2e5e9;
-  --border-medium: #cbd0d6;
-  --border-active: #9ca3af;
+  --border-subtle: rgba(33, 30, 26, 0.10);
+  --border-medium: rgba(33, 30, 26, 0.20);
+  --border-active: #7a5c2e;
+  --border-bold: rgba(122, 92, 46, 0.5);
 
-  --text-primary: #1a1d21;
-  --text-secondary: #525b68;
-  --text-muted: #6b7280;
-  --text-dim: #9ca3af;
+  --text-primary: #211e1a;
+  --text-secondary: #4a453e;
+  --text-muted: #6f6a62;
+  --text-dim: #a19b91;
 
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-cyan: #0d9488;
-  --accent-blue: #2563eb;
-  --accent-amber: #b45309;
-  --status-green: #15803d;
-  --status-red: #b91c1c;
-  --defense-pass: #15803d;
-  --defense-review: #b45309;
-  --defense-block: #b91c1c;
+  --accent: #7a5c2e;
+  --accent-gold: #7a5c2e;
+  --accent-hover: #5f4721;
+  --accent-blue-subtle: rgba(122, 92, 46, 0.08);
+  --accent-blue-border: rgba(122, 92, 46, 0.28);
+  --accent-pink-subtle: rgba(122, 92, 46, 0.08);
+  --accent-pink-border: rgba(122, 92, 46, 0.28);
+  --accent-amber: #8a6320;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.12);
+  --status-green: #2f6b48;
+  --status-red: #9c3b32;
+  --status-amber: #8a6320;
+
+  --shadow-md: 0 1px 0 rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 12px 32px rgba(33, 30, 26, 0.12);
 }
 
-/* ==========================================================================
-   Reduced Motion Accessibility
-   ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

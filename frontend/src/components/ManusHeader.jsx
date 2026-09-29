@@ -1,239 +1,149 @@
-import React, { useState } from 'react';
-import ShieldToggle from './ShieldToggle';
-import ModeIndicator from './ModeIndicator';
-import {
-  ChevronDownIcon,
-  CpuIcon,
-  SparklesIcon,
-  GraphIcon,
-  LibraryIcon,
-  AuditIcon,
-  CodeIcon,
-  ClearIcon,
-  CheckShieldIcon,
-  SettingsIcon
-} from './Icons';
-import CloudFallbackModal from './CloudFallbackModal';
+import React, { useEffect, useRef, useState } from 'react';
+import { apiClient } from '../api/client';
+import { ChevronDownIcon, ClearIcon, CheckShieldIcon, GlobeIcon } from './Icons';
 
+const VIEW_TITLES = {
+  chat: 'Legal Copilot',
+  graph: 'Citation Graph',
+  statutes: 'Statute Library',
+  hardware: 'Hardware & Models',
+  sources: 'Sources & Research',
+  security: 'Security & Integrity',
+  settings: 'Settings',
+};
+
+/**
+ * Top bar. The model selector lists ONLY models installed in the local runtime; switching
+ * activates the model on the server (verify -> warm -> health -> persist). The conversation is kept.
+ */
 export default function ManusHeader({
-  selectedModel,
-  setSelectedModel,
-  recommendedModels,
-  shieldOn,
-  setShieldOn,
-  onToggleHardwareDrawer,
   activeView,
-  onClearThread
+  onClearThread,
+  models,          // { installed: [], active: string|null, runtimeOnline: bool, loading: bool }
+  onActivateModel, // async (name) => void
+  onOpenModels,
 }) {
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
-  const [fallbackModalOpen, setFallbackModalOpen] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [switching, setSwitching] = useState(null);
+  const [switchError, setSwitchError] = useState('');
+  const [mode, setMode] = useState(null);
+  const menuRef = useRef(null);
 
-  const viewTitles = {
-    chat: { title: 'Legal Copilot', icon: SparklesIcon, color: 'var(--accent-blue)', badge: null },
-    graph: { title: 'Citation Graph', icon: GraphIcon, color: 'var(--accent-pink)', badge: 'BETA' },
-    statutes: { title: 'Statute Knowledge', icon: LibraryIcon, color: 'var(--accent-blue)', badge: null },
-    audit: { title: 'Cryptographic Audit', icon: AuditIcon, color: 'var(--accent-pink)', badge: null },
-    hardware: { title: 'Hardware Engine', icon: CpuIcon, color: 'var(--accent-blue)', badge: null },
-    mcp: { title: 'API & MCP Tools', icon: CodeIcon, color: 'var(--accent-pink)', badge: null },
+  useEffect(() => {
+    let active = true;
+    apiClient.getNetworkMode().then((m) => active && setMode(m.mode)).catch(() => active && setMode(null));
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  const installed = models?.installed || [];
+  const active = models?.active || null;
+
+  const choose = async (name) => {
+    if (name === active) { setOpen(false); return; }
+    setSwitching(name);
+    setSwitchError('');
+    try {
+      await onActivateModel(name);
+      setOpen(false);
+    } catch (err) {
+      setSwitchError(err.message || 'Could not activate this model.');
+    } finally {
+      setSwitching(null);
+    }
   };
 
-  const currentView = viewTitles[activeView] || viewTitles.chat;
-  const ViewIcon = currentView.icon;
-
-  const defaultModelsList = [
-    { model_id: 'dfrag-legal:7b', display_name: 'DFrag Legal 7B (Indian Law)', tier: 'Tier 1' },
-    { model_id: 'saullm:7b', display_name: 'SaulLM 7B (Legal Domain)', tier: 'Tier 1' },
-    { model_id: 'qwen2.5:7b', display_name: 'Qwen 2.5 7B (High Accuracy)', tier: 'Tier 1' },
-    { model_id: 'qwen2.5:3b', display_name: 'Qwen 2.5 3B (Standard Floor)', tier: 'Tier 0' },
-    { model_id: 'gemma2:2b', display_name: 'Gemma 2 2B (Lightweight Floor)', tier: 'Tier 0' },
-    { model_id: 'qwen2.5:14b', display_name: 'Qwen 2.5 14B (Enterprise)', tier: 'Tier 2' },
-  ];
-
-  const modelsToShow = recommendedModels && recommendedModels.length > 0
-    ? recommendedModels
-    : defaultModelsList;
-
+  let modelLabel;
+  if (models?.loading) modelLabel = 'Checking models…';
+  else if (!models?.runtimeOnline) modelLabel = 'Model runtime offline';
+  else if (!active) modelLabel = 'No local model active';
+  else modelLabel = active;
 
   return (
-    <header
-      style={{
-        height: '54px',
-        borderBottom: '1px solid var(--border-subtle)',
-        padding: '0 24px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        background: 'var(--bg-sidebar)',
-        boxSizing: 'border-box',
-        zIndex: 20,
-      }}
-    >
-      {/* Left: View Breadcrumb & Section Title */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <ViewIcon size={18} color={currentView.color} />
-        <span style={{ fontFamily: 'var(--font-title)', fontWeight: 700, fontSize: '1.05rem', color: 'var(--text-primary)' }}>
-          {currentView.title}
-        </span>
-        {currentView.badge && (
-          <span style={{ fontSize: '0.62rem', background: 'rgba(255, 0, 127, 0.15)', color: 'var(--accent-pink)', border: '1px solid rgba(255, 0, 127, 0.35)', padding: '1px 6px', borderRadius: '10px', fontWeight: 700 }}>
-            {currentView.badge}
-          </span>
-        )}
-      </div>
+    <header style={st.bar}>
+      <h1 style={st.title}>{VIEW_TITLES[activeView] || VIEW_TITLES.chat}</h1>
 
-      {/* Center: Model Selector Dropdown */}
-      <div style={{ position: 'relative' }}>
-        <button
-          type="button"
-          onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-          style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-medium)',
-            borderRadius: '20px',
-            padding: '6px 14px',
-            color: 'var(--text-primary)',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            boxShadow: 'var(--shadow-sm)',
-          }}
-        >
-          <span style={{ color: 'var(--accent-blue)', fontSize: '0.75rem', fontWeight: 700 }}>MODEL:</span>
-          <span>{selectedModel ? selectedModel.toUpperCase() : 'GEMMA2:2B'}</span>
+      <div style={{ position: 'relative' }} ref={menuRef}>
+        <button type="button" style={st.modelBtn} onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open}>
+          <span style={st.modelKey}>Model</span>
+          <span style={{ color: active ? 'var(--text-primary)' : 'var(--status-amber)' }}>{modelLabel}</span>
           <ChevronDownIcon size={13} color="var(--text-muted)" />
         </button>
-
-        {modelDropdownOpen && (
-          <div
-            style={{
-              position: 'absolute',
-              top: '42px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              background: 'var(--bg-modal)',
-              border: '1px solid var(--border-medium)',
-              borderRadius: '12px',
-              width: '280px',
-              padding: '8px 0',
-              boxShadow: 'var(--shadow-lg)',
-              zIndex: 100,
-            }}
-          >
-            <div style={{ padding: '6px 14px', fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Local AI Model Selection
-            </div>
-            {modelsToShow.map((m) => {
-              const mId = m.model_id || m.model || m;
-              const isSelected = selectedModel === mId;
-              return (
-                <div
-                  key={mId}
-                  onClick={() => {
-                    setSelectedModel(mId);
-                    setModelDropdownOpen(false);
-                  }}
-                  style={{
-                    padding: '9px 14px',
-                    fontSize: '0.83rem',
-                    color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)',
-                    background: isSelected ? 'rgba(0, 132, 255, 0.12)' : 'transparent',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    transition: 'background 0.15s ease',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: isSelected ? 700 : 500 }}>{m.display_name || mId}</div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{m.tier || 'Local Model'}</div>
-                  </div>
-                  {isSelected && <SparklesIcon size={14} color="var(--accent-cyan)" />}
-                </div>
-              );
-            })}
+        {open && (
+          <div style={st.menu} role="listbox">
+            {installed.length === 0 && (
+              <div style={st.empty}>
+                {models?.runtimeOnline
+                  ? 'No models are installed in the local runtime yet.'
+                  : 'The local model runtime (Ollama) is not reachable.'}
+              </div>
+            )}
+            {installed.map((m) => (
+              <button
+                type="button"
+                key={m.name}
+                role="option"
+                aria-selected={m.name === active}
+                disabled={!!switching}
+                style={{ ...st.option, ...(m.name === active ? st.optionOn : null) }}
+                onClick={() => choose(m.name)}
+                title={m.fit_reason || ''}
+              >
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{m.name}</span>
+                <span style={st.optionMeta}>
+                  {[m.parameter_size, m.quantization, m.safety_tier && m.safety_tier !== 'SAFE' ? m.safety_tier.toLowerCase() : null]
+                    .filter(Boolean).join(' · ')}
+                  {switching === m.name ? ' · loading…' : ''}
+                  {m.name === active ? ' · active' : ''}
+                </span>
+              </button>
+            ))}
+            {switchError && <div role="alert" style={st.err}>{switchError}</div>}
+            <button type="button" style={st.manage} onClick={() => { setOpen(false); onOpenModels(); }}>
+              Download or manage models →
+            </button>
           </div>
         )}
       </div>
 
-      {/* Right Controls: Clear Thread, Hardware Specs & Security Shield */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        {activeView === 'chat' && onClearThread && (
-          <button
-            type="button"
-            onClick={onClearThread}
-            style={{
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '8px',
-              padding: '6px 12px',
-              color: 'var(--text-secondary)',
-              fontSize: '0.78rem',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-            title="Clear active conversation"
-          >
-            <ClearIcon size={13} />
-            <span>Clear</span>
+      <div style={st.right}>
+        {mode && (
+          <span style={st.chip} title={mode === 'OFFLINE' ? 'No outbound network calls are made.' : 'Research may query allowlisted sources.'}>
+            <GlobeIcon size={13} color={mode === 'OFFLINE' ? 'var(--text-muted)' : 'var(--status-amber)'} /> {mode === 'OFFLINE' ? 'Offline' : 'Online research'}
+          </span>
+        )}
+        <span style={st.chip} title="Input, context and output guards run on every request.">
+          <CheckShieldIcon size={13} color="var(--defense-pass)" /> Shield enforced
+        </span>
+        {activeView === 'chat' && (
+          <button type="button" style={st.ghost} onClick={onClearThread} title="Start a fresh view of this thread">
+            <ClearIcon size={13} /> Clear
           </button>
         )}
-
-        <button
-          type="button"
-          onClick={onToggleHardwareDrawer}
-          style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '8px',
-            padding: '6px 12px',
-            color: 'var(--text-secondary)',
-            fontSize: '0.78rem',
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
-        >
-          <CpuIcon size={14} color="var(--accent-cyan)" />
-          <span>Hardware Specs</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setFallbackModalOpen(true)}
-          style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '8px',
-            padding: '6px 12px',
-            color: 'var(--text-secondary)',
-            fontSize: '0.78rem',
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            cursor: 'pointer',
-          }}
-          title="Configure Cloud Fallback (Grok API & Z.ai)"
-        >
-          <SettingsIcon size={14} color="#f59e0b" />
-          <span>Cloud Fallback</span>
-        </button>
-
-        <ModeIndicator />
-        <ShieldToggle shieldOn={shieldOn} onToggle={setShieldOn} />
       </div>
-
-      <CloudFallbackModal
-        isOpen={fallbackModalOpen}
-        onClose={() => setFallbackModalOpen(false)}
-      />
     </header>
   );
 }
 
+const st = {
+  bar: { height: 56, borderBottom: '1px solid var(--border-subtle)', padding: '0 24px', display: 'flex', alignItems: 'center', gap: 16, background: 'var(--bg-app)', zIndex: 20 },
+  title: { fontFamily: 'var(--font-serif)', fontWeight: 600, fontSize: '1.15rem', color: 'var(--text-primary)', flex: '0 0 auto', minWidth: 180 },
+  modelBtn: { display: 'flex', alignItems: 'center', gap: 10, background: 'transparent', border: '1px solid var(--border-medium)', borderRadius: 'var(--radius-sm)', padding: '6px 12px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '0.82rem' },
+  modelKey: { color: 'var(--text-muted)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em' },
+  menu: { position: 'absolute', top: 40, left: 0, width: 320, background: 'var(--bg-modal)', border: '1px solid var(--border-medium)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-lg)', padding: 6, zIndex: 50 },
+  empty: { padding: '10px 10px', color: 'var(--text-muted)', fontSize: '0.82rem' },
+  option: { width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, background: 'transparent', border: 'none', borderRadius: 'var(--radius-sm)', padding: '8px 10px', color: 'var(--text-primary)', cursor: 'pointer', textAlign: 'left' },
+  optionOn: { background: 'var(--accent-blue-subtle)' },
+  optionMeta: { color: 'var(--text-muted)', fontSize: '0.72rem' },
+  err: { color: 'var(--status-red)', fontSize: '0.78rem', padding: '6px 10px' },
+  manage: { width: '100%', background: 'transparent', border: 'none', borderTop: '1px solid var(--border-subtle)', marginTop: 4, padding: '8px 10px', textAlign: 'left', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.8rem' },
+  right: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 },
+  chip: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.76rem', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-full)', padding: '4px 10px' },
+  ghost: { display: 'inline-flex', alignItems: 'center', gap: 6, background: 'transparent', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.78rem' },
+};

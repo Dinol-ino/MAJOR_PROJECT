@@ -1,4 +1,10 @@
-/* Self-Hosted Offline Fonts via @fontsource (Zero External Network Requests) */
+/* ==========================================================================
+   Self-Hosted Typography via @fontsource (Zero External Network Requests)
+   ========================================================================== */
+@import "@fontsource/source-serif-4/400.css";
+@import "@fontsource/source-serif-4/400-italic.css";
+@import "@fontsource/source-serif-4/600.css";
+@import "@fontsource/source-serif-4/700.css";
 @import "@fontsource/inter/400.css";
 @import "@fontsource/inter/500.css";
 @import "@fontsource/inter/600.css";
@@ -6,7 +12,7 @@
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
 
-/* Design Tokens System (Spec 06) */
+/* Design Tokens System */
 @import "./styles/tokens.css";
 
 * {
@@ -26,10 +32,46 @@ html, body, #root {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom Scrollbars */
+/* ==========================================================================
+   Paper Grain Texture & Architectural 4-Grid Lines
+   ========================================================================== */
+/* Decorative overlays are retired (kept as no-ops so older markup renders nothing). */
+.editorial-paper-noise,
+.editorial-grid-overlay { display: none !important; }
+
+.editorial-paper-noise-legacy {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 99;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+.editorial-grid-overlay-legacy {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 32px;
+  opacity: 0.12;
+}
+
+.editorial-grid-line {
+  border-right: 1px solid var(--border-medium);
+  height: 100vh;
+}
+
+/* ==========================================================================
+   Custom Scrollbars (Editorial Thin Lines)
+   ========================================================================== */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -38,45 +80,228 @@ html, body, #root {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-medium);
-  border-radius: 4px;
+  border-radius: 0px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--border-active);
+  background: var(--accent-gold);
 }
 
-/* Base Card Styles */
-.glass-card {
+/* ==========================================================================
+   Luxury & Editorial Components Architecture
+   ========================================================================== */
+
+/* Cards defined by 1px architectural lines */
+.glass-card,
+.luxury-card {
   background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-top: 1px solid var(--border-active);
+  border-left: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0px !important;
   box-shadow: var(--shadow-sm);
-  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+  transition: all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-.glass-card:hover {
-  border-color: var(--border-medium);
+.glass-card:hover,
+.luxury-card:hover {
+  border-top-color: var(--accent-gold);
+  border-bottom-color: var(--border-medium);
   box-shadow: var(--shadow-md);
+  background: var(--bg-card-hover);
 }
 
-/* Interactive Buttons */
+.justice-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-top: 2px solid var(--accent-gold);
+  border-radius: 0px !important;
+  box-shadow: var(--shadow-lg);
+  position: relative;
+}
+
+/* Primary Button: Luxury Gold Slide Hover Effect */
+.luxury-btn-primary {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+  border-radius: 0px !important;
+  padding: 12px 28px;
+  font-family: var(--font-sans);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.luxury-btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent-gold);
+  transform: translateX(-100%);
+  transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  z-index: 1;
+}
+
+.luxury-btn-primary:hover::before {
+  transform: translateX(0);
+}
+
+.luxury-btn-primary:hover {
+  color: #1A1A1A !important;
+  border-color: var(--accent-gold);
+  box-shadow: none;
+}
+
+.luxury-btn-primary > * {
+  position: relative;
+  z-index: 2;
+  transition: color 0.4s ease;
+}
+
+/* Secondary Button: Editorial Invert */
+.luxury-btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+  border-radius: 0px !important;
+  padding: 10px 20px;
+  font-family: var(--font-sans);
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.45s ease;
+  cursor: pointer;
+}
+
+.luxury-btn-secondary:hover {
+  background: var(--text-primary);
+  color: var(--bg-surface) !important;
+  border-color: var(--text-primary);
+}
+
+/* Underline-Only Inputs with Italic Serif Placeholders */
+.luxury-input {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid var(--border-medium) !important;
+  border-radius: 0px !important;
+  padding: 10px 4px !important;
+  color: var(--text-primary) !important;
+  font-family: var(--font-sans) !important;
+  font-size: 0.92rem !important;
+  transition: border-color 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.4s ease !important;
+}
+
+.luxury-input::placeholder {
+  font-family: var(--font-serif) !important;
+  font-style: italic !important;
+  color: var(--text-muted) !important;
+  letter-spacing: 0.03em;
+}
+
+.luxury-input:focus {
+  border-bottom-color: var(--accent-gold) !important;
+  outline: none !important;
+  box-shadow: 0 1px 0 var(--accent-gold) !important;
+}
+
+/* Image Treatment: Grayscale with Cinematic (1800ms) Color Reveal */
+.editorial-image-container {
+  overflow: hidden;
+  position: relative;
+  box-shadow: var(--shadow-image);
+  border: 1px solid var(--border-subtle);
+}
+
+.editorial-image {
+  filter: grayscale(100%);
+  transition: filter 1800ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              transform 1800ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.editorial-image-container:hover .editorial-image,
+.editorial-image:hover {
+  filter: grayscale(0%);
+  transform: scale(1.03);
+}
+
+/* Drop Caps for Editorial Intros */
+.editorial-drop-cap::first-letter {
+  float: left;
+  font-family: var(--font-serif);
+  font-size: 3.4rem;
+  line-height: 0.8;
+  padding-top: 4px;
+  padding-right: 12px;
+  padding-bottom: 2px;
+  color: var(--accent-gold);
+  font-weight: 700;
+}
+
+/* Mixed Italic Headlines */
+.editorial-title {
+  font-family: var(--font-serif);
+  letter-spacing: -0.01em;
+  line-height: 1.08;
+  font-weight: 700;
+}
+
+.editorial-title em,
+.editorial-title .editorial-italic {
+  font-style: italic;
+  color: var(--accent-gold);
+  font-weight: 400;
+}
+
+/* Vertical Text Accents */
+.editorial-vertical-label {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* General button reset */
 button {
   cursor: pointer;
   font-family: inherit;
-  transition: background-color 0.14s ease-out, border-color 0.14s ease-out, color 0.14s ease-out;
+  transition: background-color 0.25s ease-out, border-color 0.25s ease-out, color 0.25s ease-out;
 }
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.45;
   filter: none;
 }
 
-/* Clean view animation */
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(2px);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
@@ -85,49 +310,19 @@ button:disabled {
 }
 
 .view-container {
-  animation: fadeIn 0.16s ease-out forwards;
+  animation: fadeIn 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
 }
 
-/* Shimmer Skeleton Animation */
-@keyframes skeleton-shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
-.shimmer-line {
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.04) 25%,
-    rgba(255, 255, 255, 0.1) 50%,
-    rgba(255, 255, 255, 0.04) 75%
-  );
-  background-size: 200% 100%;
-  animation: skeleton-shimmer 1.8s infinite ease-in-out;
-  border-radius: 4px;
-}
-
-body.light-theme .shimmer-line {
-  background: linear-gradient(
-    90deg,
-    rgba(0, 0, 0, 0.04) 25%,
-    rgba(0, 0, 0, 0.09) 50%,
-    rgba(0, 0, 0, 0.04) 75%
-  );
-}
-
-/* Form Elements */
+/* Form Elements General */
 input, textarea, select {
   font-family: inherit;
   color: var(--text-primary);
   background-color: var(--bg-input);
   border: 1px solid var(--border-subtle);
+  border-radius: 0px !important;
 }
 
 input:focus, textarea:focus, select:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-gold);
 }

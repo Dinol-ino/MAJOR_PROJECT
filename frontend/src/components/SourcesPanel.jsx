@@ -28,8 +28,8 @@ export default function SourcesPanel({ sources }) {
         {sources.map((src, index) => {
           const actName = src.act || src.title || 'Source Reference';
           const sectionNum = src.section ? `Section ${src.section}` : null;
-          const trustPct = src.trust_score ? Math.round(src.trust_score * 100) : null;
-          const simPct = src.similarity_score ? Math.round(src.similarity_score * 100) : null;
+          const trustPct = src.trust_score != null ? Math.round(src.trust_score * (src.trust_score > 1.0 ? 1 : 100)) : null;
+          const simPct = src.similarity_score != null ? Math.round(src.similarity_score * (src.similarity_score > 1.0 ? 1 : 100)) : null;
           const isUserDoc = src.doc_type === 'user_document' || actName.endsWith('.pdf');
 
           return (
