@@ -41,11 +41,16 @@ audit_logger = AuditLogger()
 _auth_cfg = settings.auth
 if _auth_cfg.jwt_secret:
     AUTH_SECRET = _auth_cfg.jwt_secret
-else:
+elif os.environ.get("DFRAG_TEST_MODE") == "1" or "pytest" in sys.modules:
     AUTH_SECRET = secrets.token_urlsafe(48)
-    logger.warning(
-        "JWT_SECRET_KEY is not set: using an ephemeral per-process signing key. "
-        "All sessions will be invalidated when the backend restarts. Set JWT_SECRET_KEY in .env."
+else:
+    # Failing closed: an ephemeral key silently breaks multi-worker deployments (each
+    # worker signs with a different secret, so tokens fail at random) and drops every
+    # session on restart. That is a deployment error, not something to warn about and
+    # carry on with.
+    raise RuntimeError(
+        "JWT_SECRET_KEY is not set. Generate one with "
+        "`python -c \"import secrets; print(secrets.token_urlsafe(48))\"` and set it in .env."
     )
 AUTH_ALGORITHM = _auth_cfg.jwt_algorithm
 AUTH_TOKEN_EXPIRE_SECONDS = _auth_cfg.session_ttl_seconds
@@ -102,7 +107,14 @@ class _BoundedTokenCache:
 
 
 class _RevocationList:
-    """Revoked token ids (jti) kept until the token would have expired anyway. Process-local."""
+    """Revoked token ids (jti) kept until the token would have expired anyway.
+
+    Process-local, like the token cache and the failed-login throttle. Under more than
+    one worker a logout, lockout or revocation is only seen by the worker that handled
+    it; the others keep honouring the token until it expires from their own cache
+    (bounded to _TOKEN_CACHE_TTL_SECONDS). Run a single worker, or move this state to
+    a shared store (Redis) before scaling out.
+    """
 
     def __init__(self, max_entries: int):
         self._max = max(64, max_entries)
@@ -124,6 +136,12 @@ class _RevocationList:
         with self._lock:
             return jti in self._data
 
+
+# A verified token is cached only briefly. The cache exists to avoid a database read
+# per request, not to extend a session: caching until the token's own expiry (up to
+# AUTH_SESSION_TTL_SECONDS, 7 days by default) would let a revoked, deleted or demoted
+# user keep working access for that long.
+_TOKEN_CACHE_TTL_SECONDS = 60
 
 _TOKEN_CACHE = _BoundedTokenCache(_auth_cfg.token_cache_max_entries)
 _REVOKED = _RevocationList(_auth_cfg.token_cache_max_entries)
@@ -168,20 +186,55 @@ def _decode_token(token: str) -> Optional[str]:
     return payload.get("sub") if payload else None
 
 
-def _hash_password(password: str, salt: Optional[str] = None) -> str:
-    """PBKDF2-HMAC-SHA256 with a per-user random salt."""
+# OWASP's current floor for PBKDF2-HMAC-SHA256. The count is stored in the hash so
+# existing hashes keep verifying at whatever cost they were written with, and can be
+# upgraded transparently on next login.
+_PBKDF2_ITERATIONS = 600_000
+_LEGACY_PBKDF2_ITERATIONS = 100_000
+
+
+def _hash_password(password: str, salt: Optional[str] = None, iterations: Optional[int] = None) -> str:
+    """PBKDF2-HMAC-SHA256 with a per-user random salt: salt$iterations$key."""
     salt = salt or secrets.token_hex(16)
-    key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000)
-    return f"{salt}${key.hex()}"
+    iterations = iterations or _PBKDF2_ITERATIONS
+    key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
+    return f"{salt}${iterations}${key.hex()}"
 
 
 def _verify_password(password: str, stored_hash: str) -> bool:
     try:
-        salt, key_hex = stored_hash.split("$")
-        check_key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000)
+        parts = (stored_hash or "").split("$")
+        if len(parts) == 3:
+            salt, iter_str, key_hex = parts
+            iterations = int(iter_str)
+        elif len(parts) == 2:
+            # Pre-upgrade hash: salt$key at the old fixed cost.
+            salt, key_hex = parts
+            iterations = _LEGACY_PBKDF2_ITERATIONS
+        else:
+            return False
+        check_key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
         return secrets.compare_digest(key_hex, check_key.hex())
     except Exception:
         return False
+
+
+# A hash of a value no password can produce, used to spend the same work on a failed
+# lookup as on a real one (see _verify_login).
+_DUMMY_HASH = _hash_password(secrets.token_urlsafe(32))
+
+
+def _verify_login(password: str, stored_hash: Optional[str]) -> bool:
+    """Constant-work password check.
+
+    Verifying only when the user exists leaks account existence through response time:
+    an unknown username skips the PBKDF2 rounds entirely and answers measurably faster.
+    Always do the work.
+    """
+    if not stored_hash:
+        _verify_password(password, _DUMMY_HASH)
+        return False
+    return _verify_password(password, stored_hash)
 
 
 def _auth_disabled_for_tests() -> bool:
@@ -283,7 +336,12 @@ def get_current_user(
     if candidate:
         cached = _TOKEN_CACHE.get(candidate)
         if cached:
-            return cached
+            # The cache is not an authority on revocation: a token revoked since it was
+            # cached must stop working immediately, so re-check before trusting the hit.
+            if _REVOKED.is_revoked(cached.get("_jti")):
+                _TOKEN_CACHE.discard(candidate)
+            else:
+                return {k: v for k, v in cached.items() if k != "_jti"}
         payload = _decode_payload(candidate)
         if payload:
             try:
@@ -291,7 +349,8 @@ def get_current_user(
                     db_user = session.execute(select(User).where(User.id == payload["sub"])).scalar_one_or_none()
                     if db_user:
                         user_dict = db_user.to_dict()
-                        _TOKEN_CACHE.put(candidate, user_dict, float(payload["exp"]))
+                        cache_until = min(float(payload["exp"]), time.time() + _TOKEN_CACHE_TTL_SECONDS)
+                        _TOKEN_CACHE.put(candidate, {**user_dict, "_jti": payload.get("jti")}, cache_until)
                         return user_dict
             except DatabaseUnavailableError:
                 raise HTTPException(status_code=503, detail="Authentication service unavailable: database is not reachable.")
@@ -368,7 +427,6 @@ def register(request: Request, req: RegisterRequest):
         raise HTTPException(status_code=503, detail="Database is not reachable.")
 
     token = _generate_token(user_dict["id"])
-    _TOKEN_CACHE.put(token, user_dict, time.time() + AUTH_TOKEN_EXPIRE_SECONDS)
     audit_logger.log(action=f"account_registered:{_identifier_fingerprint(username)}", layer="security")
     return AuthResponse(token=token, user=user_dict)
 
@@ -386,7 +444,7 @@ def login(request: Request, req: LoginRequest):
         with get_sync_session() as session:
             stmt = select(User).where((User.username == identifier) | (User.email == identifier.lower()))
             user = session.execute(stmt).scalars().first()
-            valid = bool(user) and _verify_password(req.password, user.hashed_password)
+            valid = _verify_login(req.password, user.hashed_password if user else None)
             user_dict = user.to_dict() if (user and valid) else None
     except DatabaseUnavailableError:
         raise HTTPException(status_code=503, detail="Database is not reachable.")
@@ -398,7 +456,6 @@ def login(request: Request, req: LoginRequest):
 
     _clear_failed_logins(throttle_key)
     token = _generate_token(user_dict["id"])
-    _TOKEN_CACHE.put(token, user_dict, time.time() + AUTH_TOKEN_EXPIRE_SECONDS)
     audit_logger.log(action=f"login_success:{_identifier_fingerprint(identifier)}", layer="security")
     return AuthResponse(token=token, user=user_dict)
 

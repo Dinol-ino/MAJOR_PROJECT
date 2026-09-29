@@ -63,6 +63,7 @@ async def lifespan(app: FastAPI):
 from app.security.rate_limit import limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
+from slowapi.middleware import SlowAPIMiddleware
 
 app = FastAPI(
     title="Defensive RAG (DFrag) Enterprise API",
@@ -73,6 +74,10 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# Without this middleware slowapi applies only the per-route @limiter.limit decorators,
+# so default_limits (RATE_LIMIT_DEFAULT) never takes effect and the expensive endpoints
+# (/chat, /upload, /research) are unlimited.
+app.add_middleware(SlowAPIMiddleware)
 
 
 @app.exception_handler(DatabaseUnavailableError)
@@ -86,14 +91,15 @@ async def _database_unavailable_handler(request: Request, exc: DatabaseUnavailab
 # Correlation Tracking Middleware (Phase 11)
 app.add_middleware(CorrelationMiddleware)
 
-# Setup CORS (explicit allow-list from settings; wildcard never combined with credentials)
+# Explicit allow-list from settings. A wildcard origin is never combined with
+# credentials: browsers reject that pairing outright, and allowing it would mean any
+# site could make authenticated calls on a signed-in practitioner's behalf.
 _origins = settings.ALLOWED_ORIGINS
-if "*" in _origins and not settings.security.allow_credentials:
-    _origins = ["*"]
+_wildcard = "*" in _origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_origins,
-    allow_credentials="*" not in _origins,
+    allow_origins=["*"] if _wildcard else _origins,
+    allow_credentials=not _wildcard,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Correlation-ID"],
 )
@@ -159,7 +165,9 @@ async def health_check():
         "ollama": {
             "status": "running" if ollama_ok else "offline",
             "version": ollama_version,
-            "installed_models": installed_models,
+            # Count only: /health is unauthenticated, and the model inventory is
+            # workspace configuration. The full list is on /models (authenticated).
+            "installed_model_count": len(installed_models),
         },
     }
 

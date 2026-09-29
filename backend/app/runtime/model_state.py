@@ -156,6 +156,11 @@ class ModelStateService:
             return requested
         active = await self.get_active()
         if active["model"]:
+            # Deliberately returned even when get_active() reports available=False.
+            # The pipeline must still run: retrieval happens, the evidence is shown, and
+            # the model failure is reported downstream as failure_kind="model_unavailable"
+            # with its sources intact. Raising here instead would turn an honest degraded
+            # answer into a bare 409 and throw the retrieved evidence away.
             return active["model"]
         raise ModelNotAvailable(
             "No local model is active. Open Hardware & Models to download or activate one.",
