@@ -219,3 +219,12 @@ coverage.xml
 docs/
 
 faults/
+
+# Playwright artifacts
+frontend/test-results/
+frontend/playwright-report/
+
+# Playwright / test output
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
