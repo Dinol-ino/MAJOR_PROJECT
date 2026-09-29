@@ -22,30 +22,38 @@ def is_admin(user: Dict[str, Any]) -> bool:
     return (user or {}).get("role") == "admin"
 
 
-def owns(resource_owner: Optional[str], user: Dict[str, Any]) -> bool:
-    """True when the authenticated user owns the resource (admins may read across users)."""
-    if is_admin(user):
+def owns(resource_owner: Optional[str], user: Dict[str, Any], write: bool = False) -> bool:
+    """True when the user may act on the resource.
+
+    Admins may READ across users so they can administer the workspace, but not write:
+    a practitioner's matter files are privileged, and silently letting an admin edit or
+    delete another practitioner's vault would break the isolation this product sells.
+    Pass write=True on any mutating path to require actual ownership.
+    """
+    owned = bool(resource_owner) and resource_owner == current_user_id(user)
+    if owned:
         return True
-    return bool(resource_owner) and resource_owner == current_user_id(user)
+    return is_admin(user) and not write
 
 
-def require_vault(session, vault_id: str, user: Dict[str, Any], include_deleted: bool = False):
+def require_vault(session, vault_id: str, user: Dict[str, Any], include_deleted: bool = False,
+                  write: bool = False):
     from app.db.models import ProjectVault
 
     query = session.query(ProjectVault).filter(ProjectVault.id == vault_id)
     if not include_deleted:
         query = query.filter(ProjectVault.deleted_at.is_(None))
     vault = query.first()
-    if not vault or not owns(vault.user_id, user):
+    if not vault or not owns(vault.user_id, user, write=write):
         raise HTTPException(status_code=404, detail="Project vault not found.")
     return vault
 
 
-def require_conversation(session, conversation_id: str, user: Dict[str, Any]):
+def require_conversation(session, conversation_id: str, user: Dict[str, Any], write: bool = False):
     from app.db.models import Conversation
 
     conv = session.query(Conversation).filter(Conversation.conversation_id == conversation_id).first()
-    if not conv or not owns(conv.user_id, user):
+    if not conv or not owns(conv.user_id, user, write=write):
         raise HTTPException(status_code=404, detail="Conversation not found.")
     return conv
 

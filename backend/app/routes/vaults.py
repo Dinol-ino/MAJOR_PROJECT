@@ -17,9 +17,10 @@ router = APIRouter(prefix="/vaults", tags=["vaults"])
 audit_logger = AuditLogger()
 
 
-def _verify_vault_access(vault: ProjectVault, current_user: Dict[str, Any]) -> None:
+def _verify_vault_access(vault: ProjectVault, current_user: Dict[str, Any], write: bool = False) -> None:
     # 404 (not 403) so another user's vault ids are not disclosed.
-    if not owns(vault.user_id, current_user):
+    # write=True on mutating paths: admins may read across users, never edit or delete.
+    if not owns(vault.user_id, current_user, write=write):
         raise HTTPException(status_code=404, detail="Project vault not found.")
 
 

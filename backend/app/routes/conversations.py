@@ -16,9 +16,10 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 audit_logger = AuditLogger()
 
 
-def _verify_conversation_access(conv: Conversation, current_user: Dict[str, Any]) -> None:
+def _verify_conversation_access(conv: Conversation, current_user: Dict[str, Any], write: bool = False) -> None:
     # 404 (not 403) so another user's conversation ids are not disclosed.
-    if not owns(conv.user_id, current_user):
+    # write=True on mutating paths: admins may read across users, never edit or delete.
+    if not owns(conv.user_id, current_user, write=write):
         raise HTTPException(status_code=404, detail="Conversation not found.")
 
 

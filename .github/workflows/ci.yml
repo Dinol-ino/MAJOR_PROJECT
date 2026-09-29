@@ -92,6 +92,9 @@ jobs:
           AUTO_PULL_ON_STARTUP: "false"
           MODEL_WARMUP_ON_STARTUP: "false"
           CLOUD_FALLBACK_ENABLED: "false"
+          # Registration now defaults to closed once the workspace has an owner; the
+          # E2E global-setup registers a throwaway practitioner on every run.
+          AUTH_REGISTRATION_OPEN: "true"
           JWT_SECRET_KEY: ci-only-not-a-secret-0123456789abcdefghijklmnop
           SECRET_KEY: ci-only-vault-key-0123456789abcdefghijklmnop
         run: |

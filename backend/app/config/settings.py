@@ -63,7 +63,7 @@ class AuthConfig(BaseModel):
     jwt_algorithm: str = Field(default_factory=lambda: os.getenv("JWT_ALGORITHM", "HS256"))
     session_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("AUTH_SESSION_TTL_SECONDS", str(7 * 86400))))
     password_min_length: int = Field(default_factory=lambda: int(os.getenv("AUTH_PASSWORD_MIN_LENGTH", "8")))
-    registration_open: bool = Field(default_factory=lambda: os.getenv("AUTH_REGISTRATION_OPEN", "true").lower() == "true")
+    registration_open: bool = Field(default_factory=lambda: os.getenv("AUTH_REGISTRATION_OPEN", "false").lower() == "true")  # first account is always allowed; further sign-ups are opt-in
     max_failed_attempts: int = Field(default_factory=lambda: int(os.getenv("AUTH_MAX_FAILED_ATTEMPTS", "5")))
     lockout_seconds: int = Field(default_factory=lambda: int(os.getenv("AUTH_LOCKOUT_SECONDS", "900")))
     token_cache_max_entries: int = Field(default_factory=lambda: int(os.getenv("AUTH_TOKEN_CACHE_MAX_ENTRIES", "2048")))

@@ -52,6 +52,11 @@ def _probe_nvml() -> Optional[Dict[str, Any]]:
     except Exception as exc:
         logger.debug("NVML probe failed: %s", type(exc).__name__)
         return None
+    finally:
+        try:
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
 
 
 def _probe_nvidia_smi() -> Optional[Dict[str, Any]]:
