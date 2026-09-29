@@ -1,7 +1,7 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/auth';
 
-test.describe('MCP Gateway & Network Mode Switching', () => {
-  test('always shows ModeIndicator in header across views', async ({ page }) => {
+test.describe('Research View & Network Mode', () => {
+  test('reports the network mode in the header across views', async ({ page }) => {
     // Intercept mode endpoint
     await page.route('**/api/research/mode', async (route) => {
       await route.fulfill({
@@ -13,8 +13,8 @@ test.describe('MCP Gateway & Network Mode Switching', () => {
 
     await page.goto('/');
 
-    // Header ModeIndicator must be visible on main chat view
-    const headerMode = page.locator('header').getByText(/Mode: OFFLINE/i);
+    // The header states the network mode; it is reported, never toggleable from the UI.
+    const headerMode = page.locator('header [title*="No outbound network calls"]');
     await expect(headerMode).toBeVisible();
 
     // Switch view to Citation Graph
@@ -26,7 +26,7 @@ test.describe('MCP Gateway & Network Mode Switching', () => {
     await expect(headerMode).toBeVisible();
   });
 
-  test('navigates to MCP Gateway view and displays server status and network mode', async ({ page }) => {
+  test('research view reports the indexed corpus and external research servers', async ({ page }) => {
     // Intercept MCP status endpoint
     await page.route('**/api/mcp/status', async (route) => {
       await route.fulfill({
@@ -56,26 +56,18 @@ test.describe('MCP Gateway & Network Mode Switching', () => {
 
     await page.goto('/');
 
-    // Navigate to MCP Tools via Sidebar text item
-    await page.getByText(/API & MCP Tools/i).click();
+    // Navigate to the research view via the sidebar
+    await page.locator('aside').getByText('Sources & Research', { exact: true }).click();
 
-    // Check Header & Network Mode in view
-    await expect(page.getByRole('heading', { name: /MCP Gateway & Tool Permissions/i })).toBeVisible();
-    await expect(page.locator('header').getByText(/Mode: OFFLINE/i)).toBeVisible();
+    // Check the research view renders its sections
+    await expect(page.getByRole('heading', { name: /Statutory corpus \(local\)/i })).toBeVisible();
+    await expect(page.locator('header [title*="No outbound network calls"]')).toBeVisible();
 
-    // Check Categories Banner
-    await expect(page.getByText(/Active Tool Categories & Policies/i)).toBeVisible();
-    await expect(page.getByText('LOCAL_RETRIEVAL')).toBeVisible();
-    await expect(page.getByText('DOCUMENT_SEARCH')).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Research capabilities/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /External research servers/i })).toBeVisible();
 
-    // Check Registered Servers
-    await expect(page.getByText('StitchMCP')).toBeVisible();
-    await expect(page.getByText('code-review-graph')).toBeVisible();
-    await expect(page.getByText(/create_project/i)).toBeVisible();
-
-    // Check REST API Reference
-    await expect(page.getByText(/Core REST API Endpoints/i)).toBeVisible();
-    await expect(page.getByText('/chat', { exact: true })).toBeVisible();
-    await expect(page.getByText('/mcp/tool-call')).toBeVisible();
+    // The corpus summary reports what is actually indexed, including whether dense
+    // search is available - it is never presented as working when no model is loaded.
+    await expect(page.getByText(/act\(s\), \d+ sections, \d+ indexed passages/i)).toBeVisible();
   });
 });

@@ -104,6 +104,7 @@ export default function ChatWindow({
             {messages.map((msg, idx) => (
               <div
                 key={idx}
+                data-testid={msg.role === 'user' ? 'user-message' : 'assistant-message'}
                 style={{
                   alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                   maxWidth: '92%',

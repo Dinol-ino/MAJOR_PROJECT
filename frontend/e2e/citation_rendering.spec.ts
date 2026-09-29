@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/auth';
 
 test.describe('Citation Rendering & Grounding Sources', () => {
   test('renders grounded citation sources with section badges and trust metrics', async ({ page }) => {
@@ -36,7 +36,8 @@ test.describe('Citation Rendering & Grounding Sources', () => {
     await page.keyboard.press('Enter');
 
     // Check Citation Header
-    await expect(page.getByText(/Grounded Legal Sources & Citations \(2\)/i)).toBeVisible();
+    // Statutory-only sources get the statutory panel title (SourcesPanel.jsx).
+    await expect(page.getByText(/Grounded Statutory Provisions & Citations \(2\)/i)).toBeVisible();
 
     // Check Source 1 Badges and Content
     await expect(page.getByText(/\[1\] Information Technology Act 2000/i)).toBeVisible();

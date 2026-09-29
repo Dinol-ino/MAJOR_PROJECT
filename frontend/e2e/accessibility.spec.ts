@@ -1,12 +1,14 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/auth';
 
 test.describe('Accessibility & Keyboard Navigation', () => {
   test('supports full keyboard navigation to search and quick pills', async ({ page }) => {
     await page.goto('/');
 
-    // Page must have a proper main heading
-    const h1 = page.locator('h1');
-    await expect(h1).toHaveText(/Legal AI Research Copilot/i);
+    // The workspace header names the active view; the hero states what the tool does.
+    await expect(page.locator('header h1')).toHaveText(/Legal Copilot/i);
+    await expect(
+      page.getByRole('heading', { name: /Legal research, grounded in your sources/i }),
+    ).toBeVisible();
 
     // Focus on command input and type via keyboard
     const input = page.getByPlaceholder(/Ask a legal question/i);
@@ -22,8 +24,9 @@ test.describe('Accessibility & Keyboard Navigation', () => {
     const uploadBtn = page.getByRole('button', { name: /Upload PDF/i });
     await expect(uploadBtn).toBeVisible();
 
-    const pill1 = page.getByRole('button', { name: /Analyze Section 66/i });
-    await expect(pill1).toBeVisible();
+    // Quick-action pills are derived from the indexed corpus, so assert on the
+    // affordance rather than on any particular act being present.
+    await expect(page.getByTestId('quick-action').first()).toBeVisible();
   });
 
   test('sidebar navigation items are visible and interactive', async ({ page }) => {
@@ -33,9 +36,10 @@ test.describe('Accessibility & Keyboard Navigation', () => {
       'Legal Copilot',
       'Citation Graph',
       'Statute Library',
-      'Cryptographic Audit',
-      'Hardware Engine',
-      'API & MCP Tools',
+      'Hardware & Models',
+      'Sources & Research',
+      'Security & Integrity',
+      'Settings',
     ];
 
     const sidebar = page.locator('aside');

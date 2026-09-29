@@ -1,19 +1,16 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/auth';
 
 test.describe('3-Layer Defensive Shield Behavior', () => {
-  test('toggles shield ON/OFF in header', async ({ page }) => {
+  test('shield enforcement is reported in the header and cannot be switched off', async ({ page }) => {
     await page.goto('/');
 
-    const shieldBtn = page.getByRole('button', { name: /Shield:/i });
-    await expect(shieldBtn).toHaveText(/Shield: ON/i);
+    // The three guard layers are not optional: the header reports them as enforced
+    // and offers no control to disable them.
+    const shieldState = page.locator('header').getByText(/Shield enforced/i);
+    await expect(shieldState).toBeVisible();
 
-    // Toggle OFF
-    await shieldBtn.click();
-    await expect(shieldBtn).toHaveText(/Shield: OFF/i);
-
-    // Toggle back ON
-    await shieldBtn.click();
-    await expect(shieldBtn).toHaveText(/Shield: ON/i);
+    await expect(page.getByRole('button', { name: /Shield:\s*(ON|OFF)/i })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /disable shield/i })).toHaveCount(0);
   });
 
   test('displays explicit defensive refusal when query is blocked by security guard', async ({ page }) => {

@@ -1,22 +1,21 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/auth';
 
 test.describe('Chat Streaming & Conversation Flow', () => {
   test('renders initial hero screen with search input and action pills', async ({ page }) => {
     await page.goto('/');
 
     // Hero title & description
-    await expect(page.getByRole('heading', { name: /Legal AI Research Copilot/i })).toBeVisible();
-    await expect(page.getByText(/Ask questions on Indian statutes/i)).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: /Legal research, grounded in your sources/i }),
+    ).toBeVisible();
+    await expect(page.getByText(/Answers cite the passages they rely on/i)).toBeVisible();
 
     // Command input placeholder
     const input = page.getByPlaceholder(/Ask a legal question/i);
     await expect(input).toBeVisible();
 
-    // Quick action pills
-    await expect(page.getByRole('button', { name: /Analyze Section 66/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Research Companies Act/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Draft Legal Notice/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /BNS 2023 Cheating/i })).toBeVisible();
+    // Quick action pills are generated from the indexed corpus, not hardcoded.
+    await expect(page.getByTestId('quick-action').first()).toBeVisible();
   });
 
   test('submits user message, shows generating state, and renders assistant response', async ({ page }) => {
@@ -36,6 +35,8 @@ test.describe('Chat Streaming & Conversation Flow', () => {
               similarity_score: 0.88,
             },
           ],
+          // The UI reads grounding_score on a 0-100 scale (MessageContent.jsx).
+          grounding_score: 92,
           confidence_score: 0.92,
           blocked_by: null,
           block_reason: null,
@@ -57,8 +58,8 @@ test.describe('Chat Streaming & Conversation Flow', () => {
       page.getByText(/Under Section 66 of the Information Technology Act, 2000/i)
     ).toBeVisible();
 
-    // Grounded confidence badge
-    await expect(page.getByText(/Grounded \(92%\)/i)).toBeVisible();
+    // Grounding badge
+    await expect(page.getByText(/Grounded: 92%/i)).toBeVisible();
 
     // Copy and TTS action buttons (first copy button on assistant or user card)
     await expect(page.getByTitle(/Copy message/i).first()).toBeVisible();
@@ -79,10 +80,10 @@ test.describe('Chat Streaming & Conversation Flow', () => {
     });
 
     await page.goto('/');
-    await page.getByRole('button', { name: /Analyze Section 66/i }).click();
-
-    // Message should be submitted
-    await expect(page.getByText(/Analyze IT Act Section 66 penalties/i)).toBeVisible();
+    // The pill submits its own prompt (which differs from its label), so assert that
+    // a user turn was created and the answer rendered - not on any particular wording.
+    await page.getByTestId('quick-action').first().click();
+    await expect(page.getByTestId('user-message')).toHaveCount(1);
     await expect(page.getByText(/Section 66 analysis completed/i)).toBeVisible();
   });
 });

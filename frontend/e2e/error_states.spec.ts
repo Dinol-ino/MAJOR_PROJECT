@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/auth';
 
 test.describe('Error Handling & Resilience States', () => {
   test('gracefully handles backend 500 error during chat inference', async ({ page }) => {
@@ -19,13 +19,15 @@ test.describe('Error Handling & Resilience States', () => {
     await input.fill('Trigger simulated backend error');
     await page.keyboard.press('Enter');
 
-    // Friendly error message should render in conversation
+    // The failure is surfaced in the conversation, carrying the server's reason and
+    // making no legal claim of its own.
+    await expect(page.getByText(/The request could not be completed/i)).toBeVisible();
     await expect(
-      page.getByText(/Error: Failed to fetch response from backend inference engine/i)
+      page.getByText(/Model context length exceeded or Ollama backend disconnected/i),
     ).toBeVisible();
 
-    // Red blocked/system error indicator
-    await expect(page.getByText(/Blocked by SYSTEM Guard/i)).toBeVisible();
-    await expect(page.getByText(/Model context length exceeded or Ollama backend disconnected/i)).toBeVisible();
+    // A failed request must never render sources or a grounding badge.
+    await expect(page.getByText(/Grounded:/i)).toHaveCount(0);
+    await expect(page.getByText(/Citations \(/i)).toHaveCount(0);
   });
 });

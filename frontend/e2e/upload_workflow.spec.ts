@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/auth';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -46,8 +46,8 @@ test.describe('Document Upload Workflow', () => {
     const fileInput = page.locator('input[type="file"]');
     await fileInput.setInputFiles(fixturePath);
 
-    // Verify success indicator badge (+4 chunks)
-    await expect(page.getByText(/\+4 chunks/i)).toBeVisible();
+    // Verify the indexed badge (UploadButton.jsx renders "<file>: Indexed").
+    await expect(page.getByText(/test_document\.pdf: Indexed/i)).toBeVisible();
   });
 
   test('successfully uploads batch of PDF documents', async ({ page }) => {
@@ -72,7 +72,7 @@ test.describe('Document Upload Workflow', () => {
     const fileInput = page.locator('input[type="file"]');
     await fileInput.setInputFiles([docPath, malPath]);
 
-    // Verify batch success indicator badge
-    await expect(page.getByText(/2 PDFs \(\+8 chunks\)/i)).toBeVisible();
+    // Verify the batch indexed badge.
+    await expect(page.getByText(/2 PDFs: Indexed/i)).toBeVisible();
   });
 });

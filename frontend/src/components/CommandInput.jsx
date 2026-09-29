@@ -250,6 +250,7 @@ export default function CommandInput({
             <button
               key={sg.label}
               type="button"
+              data-testid="quick-action"
               onClick={() => handlePillClick(sg.prompt)}
               style={{ background: 'transparent', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-full)', padding: '5px 12px', fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer' }}
             >
