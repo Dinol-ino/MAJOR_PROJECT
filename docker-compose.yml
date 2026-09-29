@@ -66,7 +66,11 @@ services:
       - ./data/acts_raw:/workspace/data/acts_raw:ro
     environment:
       # Container-internal wiring only; model choice, secrets and policy come from .env.
-      - DATABASE_URL=postgresql://${DFRAG_PG_USER:-postgres}:${DFRAG_PG_PASSWORD:-postgrespassword}@postgres:5432/${DFRAG_PG_DB:-dfrag_memory}
+      # DFRAG_PG_HOST defaults to the bundled "postgres" service below. Set it in .env to an
+      # external host (e.g. another machine's LAN IP) to use a Postgres this compose file
+      # doesn't manage; that Postgres must itself be configured to accept remote connections
+      # (listen_addresses, pg_hba.conf) and be reachable from this host.
+      - DATABASE_URL=postgresql://${DFRAG_PG_USER:-postgres}:${DFRAG_PG_PASSWORD:-postgrespassword}@${DFRAG_PG_HOST:-postgres}:${DFRAG_PG_PORT:-5432}/${DFRAG_PG_DB:-dfrag_memory}
       - DB_ALLOW_SQLITE_FALLBACK=false
       - OLLAMA_URL=http://ollama:11434
       - REDIS_URL=redis://redis:6379/0
@@ -82,7 +86,11 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
-        condition: service_healthy
+        # Not health-gated: when DFRAG_PG_HOST points at an external database, this bundled
+        # container may be unused, and the backend's own bounded connect-retry + fail-fast
+        # logic (backend/app/db/engine.py) is what actually governs startup against whichever
+        # host is configured. We still wait for it to start so it isn't racing for the port.
+        condition: service_started
       ollama:
         condition: service_healthy
       redis:
