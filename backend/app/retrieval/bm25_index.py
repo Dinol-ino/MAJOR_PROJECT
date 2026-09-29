@@ -95,8 +95,13 @@ class PersistentBM25Index:
                     "doc_ids": self.doc_ids,
                     "tokenized_corpus": self.tokenized_corpus
                 }
-                with open(self.persist_path, "wb") as f:
+                # Atomic replace: a crash mid-write can never leave a truncated index behind.
+                tmp_path = f"{self.persist_path}.tmp"
+                with open(tmp_path, "wb") as f:
                     pickle.dump(data, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, self.persist_path)
                 self._dirty = False
                 logger.debug(f"Saved BM25 index '{self.index_name}' ({len(self.documents)} docs)")
                 return True
@@ -140,14 +145,16 @@ class PersistentBM25Index:
 
         with self._lock:
             metas = metadatas or [{} for _ in documents]
+            position = {d: i for i, d in enumerate(self.doc_ids)}
             for doc_id, text, meta in zip(doc_ids, documents, metas):
                 tokens = default_tokenizer(text)
-                if doc_id in self.doc_ids:
-                    idx = self.doc_ids.index(doc_id)
+                idx = position.get(doc_id)
+                if idx is not None:
                     self.documents[idx] = text
                     self.metadatas[idx] = meta
                     self.tokenized_corpus[idx] = tokens
                 else:
+                    position[doc_id] = len(self.doc_ids)
                     self.doc_ids.append(doc_id)
                     self.documents.append(text)
                     self.metadatas.append(meta)
@@ -158,6 +165,22 @@ class PersistentBM25Index:
             self._dirty = True
 
         self.save()
+
+    def delete_documents_where(self, predicate: Callable[[str, Dict[str, Any]], bool]) -> int:
+        """Deletes every document whose (id, metadata) matches, rebuilding weights and saving once."""
+        with self._lock:
+            keep = [i for i, (d, m) in enumerate(zip(self.doc_ids, self.metadatas)) if not predicate(d, m)]
+            removed = len(self.doc_ids) - len(keep)
+            if removed == 0:
+                return 0
+            self.doc_ids = [self.doc_ids[i] for i in keep]
+            self.documents = [self.documents[i] for i in keep]
+            self.metadatas = [self.metadatas[i] for i in keep]
+            self.tokenized_corpus = [self.tokenized_corpus[i] for i in keep]
+            self.bm25 = BM25Plus(self.tokenized_corpus) if self.tokenized_corpus else None
+            self._dirty = True
+        self.save()
+        return removed
 
     def delete_document(self, doc_id: str) -> bool:
         """Deletes a document by ID."""

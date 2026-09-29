@@ -8,41 +8,36 @@ from app.mcp.server_manager import mcp_server_manager
 client = TestClient(app)
 
 
-def test_statute_sync_canonical_minimum_17_acts():
+def test_statute_sync_indexes_only_the_local_corpus():
     """
-    Spec 04 §3.5: Verify statute sync registers at minimum 17 Indian statutes
-    spanning all required domains (criminal, cyber, corporate, tax, civil, constitutional, procedural, commercial).
+    The library reflects exactly the files in the corpus directory: no built-in acts,
+    and every act carries its manifest provenance (unverified unless a date was recorded).
     """
-    result = statute_sync_service.sync_all_statutes()
-    assert result["status"] == "success"
-    assert result["statutes_synced"] >= 17
+    import os
+    from app.ingestion.statutory_corpus import acts_dir
 
-    # Verify catalog endpoint
-    resp = client.get("/statutes/catalog")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total_acts"] >= 17
-    assert data["sync_warning"] is False
-    assert "domain_counts" in data
-    assert data["domain_counts"]["Cyber"] >= 2
-    assert data["domain_counts"]["Tax"] >= 2
-    assert data["domain_counts"]["Criminal"] >= 2
+    corpus_files = [f for f in os.listdir(acts_dir()) if f.endswith(".txt")]
+    result = statute_sync_service.sync_all_statutes()
+    assert result["statutes_synced"] == len(corpus_files)
+
+    data = client.get("/statutes/catalog").json()
+    assert data["total_acts"] == len(corpus_files)
+    for item in data["catalog"]:
+        assert item["source"] == "local_corpus"
+        assert item["legal_status"] in ("in_force", "amended", "repealed", "unverified")
+        assert item["indexed_sections_count"] == item["nominal_sections_count"]
 
 
 def test_statutes_catalog_search_and_domain_filter():
-    # Filter by domain
-    resp_tax = client.get("/statutes?domain=tax")
-    assert resp_tax.status_code == 200
-    data_tax = resp_tax.json()
-    assert all(s["domain"] == "tax" for s in data_tax["catalog"])
-    tax_slugs = [s["slug"] for s in data_tax["catalog"]]
-    assert "cgst_act_2017" in tax_slugs
+    data = client.get("/statutes/catalog").json()
+    assert data["catalog"], "corpus fixture must provide at least one act"
+    first = data["catalog"][0]
 
-    # Search by keyword
-    resp_search = client.get("/statutes?q=Data%20Protection")
-    assert resp_search.status_code == 200
-    data_search = resp_search.json()
-    assert any("dpdpa" in s["slug"] for s in data_search["catalog"])
+    by_domain = client.get(f"/statutes?domain={first['domain']}").json()
+    assert all(s["domain"] == first["domain"] for s in by_domain["catalog"])
+    assert first["slug"] in [s["slug"] for s in by_domain["catalog"]]
+
+    assert client.get("/statutes?q=zz-no-such-act-zz").json()["catalog"] == []
 
 
 def test_statute_detail_and_section_endpoint():
@@ -78,7 +73,7 @@ def test_citation_graph_empty_state_and_real_edges():
     # 2. Record real LLM citations
     sample_citations = [
         {"act": "Information Technology Act, 2000", "act_slug": "it_act_2000", "section": "66"},
-        {"act": "Central Goods and Services Tax (CGST) Act, 2017", "act_slug": "cgst_act_2017", "section": "16"}
+        {"act": "Information Technology Act, 2000", "act_slug": "it_act_2000", "section": "43"}
     ]
     edges_added = citation_graph_service.record_citations(
         conversation_id="active_conv_999",
@@ -103,28 +98,30 @@ def test_citation_graph_empty_state_and_real_edges():
 
 def test_mcp_server_manager_lifecycle_and_discovery():
     """
-    Spec 04 §2.1 & §2.2: Verify 4 canonical Indian legal MCP servers are registered,
-    report honest health status, and support auto-discovery.
+    External MCP servers are configuration-driven. With none configured, status is honest:
+    no servers, no invented tools, and reconnecting an unknown server is a 404.
     """
-    # 1. MCP status endpoint
     resp = client.get("/mcp/status")
     assert resp.status_code == 200
     status_data = resp.json()
     assert status_data["enabled"] is True
-    active_srvs = {s["name"]: s for s in status_data["active_servers"]}
-    assert "ansvar-systems-india-law-mcp" in active_srvs
-    assert "themis-mcp" in active_srvs
-    assert "nyaya-mcp" in active_srvs
-    assert "taxbykk-mcp" in active_srvs
+    for srv in status_data["active_servers"]:
+        assert srv["status"] in ("configured", "unavailable", "disabled")  # never a fake "connected"
 
-    # 2. Auto-discovery endpoint
-    resp_disc = client.post("/mcp/discover")
-    assert resp_disc.status_code == 200
-    disc_data = resp_disc.json()
-    assert disc_data["total_discovered"] >= 8
+    disc = client.post("/mcp/discover").json()
+    assert disc["total_discovered"] == sum(s["tools_count"] for s in status_data["active_servers"])
 
-    # 3. Reconnect endpoint
-    resp_recon = client.post("/mcp/servers/themis-mcp/reconnect")
-    assert resp_recon.status_code == 200
-    recon_data = resp_recon.json()
-    assert recon_data["server"]["name"] == "themis-mcp"
+    assert client.post("/mcp/servers/not-a-configured-server/reconnect").status_code == 404
+
+
+def test_online_tools_never_fabricate_results_and_mode_cannot_be_overridden():
+    # Client-supplied network_mode is ignored: OFFLINE policy still blocks ONLINE-only tools.
+    resp = client.post("/mcp/tool-call", json={
+        "tool_name": "kanoon_case_search",
+        "arguments": {"keywords": "privacy"},
+        "network_mode": "ONLINE",
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert body["data"] in (None, {}, [])

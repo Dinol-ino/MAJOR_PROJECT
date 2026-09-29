@@ -40,10 +40,15 @@ class ModelDownloadManager:
 
     async def _run_ollama_pull(self, task_id: str, tag: str):
         url = f"{settings.OLLAMA_URL.rstrip('/')}/api/pull"
-        payload = {"name": tag, "stream": True}
+        entry = self.registry.get(tag)
+        target_tag = entry.ollama_tag if entry and entry.ollama_tag else tag
+        payload = {"name": target_tag, "stream": True}
         
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(25.0, connect=2.0)) as client:
+            # Multi-GB Ollama pulls stream progress for many minutes; a short
+            # read timeout aborts them mid-download. Generous overall timeout
+            # with a normal connect timeout.
+            async with httpx.AsyncClient(timeout=httpx.Timeout(3600.0, connect=5.0)) as client:
                 async with client.stream("POST", url, json=payload) as response:
                     if response.status_code != 200:
                         self._tasks[task_id]["status"] = "error"
@@ -68,11 +73,39 @@ class ModelDownloadManager:
                                 self._tasks[task_id]["total_bytes"] = total
 
                             if status_text == "success":
+                                if tag != target_tag:
+                                    try:
+                                        await client.post(
+                                            f"{settings.OLLAMA_URL.rstrip('/')}/api/create",
+                                            json={
+                                                "model": tag,
+                                                "from": target_tag,
+                                                "system": "You are DFrag Legal, specialized in Indian legal research."
+                                            },
+                                            timeout=30.0
+                                        )
+                                    except Exception as create_err:
+                                        logger.warning(f"Could not create alias model {tag} from {target_tag}: {create_err}")
+
                                 self._tasks[task_id]["status"] = "done"
                                 self._tasks[task_id]["percent"] = 100.0
                                 return
                         except Exception:
                             pass
+
+            if tag != target_tag:
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        await client.post(
+                            f"{settings.OLLAMA_URL.rstrip('/')}/api/create",
+                            json={
+                                "model": tag,
+                                "from": target_tag,
+                                "system": "You are DFrag Legal, specialized in Indian legal research."
+                            }
+                        )
+                except Exception as create_err:
+                    logger.warning(f"Could not create alias model {tag} from {target_tag}: {create_err}")
 
             self._tasks[task_id]["status"] = "done"
             self._tasks[task_id]["percent"] = 100.0

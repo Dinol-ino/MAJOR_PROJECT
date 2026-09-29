@@ -228,3 +228,6 @@ frontend/playwright-report/
 frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
+
+# Stray dev screenshots
+frontend/*.png

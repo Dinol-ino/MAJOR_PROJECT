@@ -114,22 +114,16 @@ def test_hardware_override_validation():
         assert any("claimed 32.0 GB RAM" in w for w in invalid_ram["warnings"])
 
 
-def test_model_registry_includes_specialized_legal_model():
-    """Verify dfrag-legal:7b is indexed in the centralized registry for Tier 1."""
+def test_model_registry_is_configuration_driven_and_honest():
+    """Registry entries come from YAML with complete metadata; no model claims a legal fine-tune it does not have."""
     registry = ModelRegistry()
     models = registry.all_models()
-    model_ids = [m.model_id for m in models]
-
-    assert "dfrag-legal:7b" in model_ids
-    assert "qwen2.5:7b" in model_ids
-    assert "gemma2:2b" in model_ids
-
-    legal_model = next(m for m in models if m.model_id == "dfrag-legal:7b")
-    assert legal_model.tier == "standard"
-    assert legal_model.size_gb == 4.7
-    assert legal_model.ram_required_gb == 8.0
-    assert "Specialized Indian Law" in legal_model.display_name
-
+    assert len(models) >= 1
+    for m in models:
+        assert m.size_gb > 0 and m.ram_required_gb > 0 and m.context_window > 0
+        assert m.ollama_tag or m.hf_repo
+        # Display names must not advertise a domain fine-tune; that would be unverifiable marketing.
+        assert "fine-tuned" not in m.display_name.lower()
 
 def test_recommended_models_endpoint():
     """Verify /models/recommended dynamically evaluates fit and tags."""
@@ -141,7 +135,7 @@ def test_recommended_models_endpoint():
     assert "tier" in data
     assert "recommended" in data
     assert isinstance(data["recommended"], list)
-    assert len(data["recommended"]) >= 5
+    assert len(data["recommended"]) == len(ModelRegistry().all_models())
 
     # Check structure of model entries
     for m in data["recommended"]:
@@ -157,7 +151,11 @@ def test_models_pull_streaming_and_smoke_test():
     """Verify SSE streaming for model pull endpoint and post-pull smoke test."""
     client = TestClient(app)
 
-    resp = client.post("/models/pull?stream=true", json={"model_id": "dfrag-legal:7b"})
+    # Models outside the trusted registry are refused before any download starts.
+    assert client.post("/models/pull?stream=true", json={"model_id": "dfrag-legal:7b"}).status_code == 409
+
+    smallest = min(ModelRegistry().all_models(), key=lambda m: m.size_gb)
+    resp = client.post("/models/pull?stream=true", json={"model_id": smallest.model_id})
     assert resp.status_code == 200
     assert "text/event-stream" in resp.headers.get("content-type", "")
 

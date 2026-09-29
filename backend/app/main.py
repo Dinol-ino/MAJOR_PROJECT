@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import logging
 import time
+import httpx
 from fastapi import Depends, FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,15 +19,17 @@ from app.system.hardware_detector import HardwareDetector
 from app.system.model_registry import ModelRegistry
 
 from app.db.health import check_db_health
-from app.db.engine import init_db_schema
+from app.db.engine import init_db_schema, DatabaseUnavailableError, get_db_backend_info
+from fastapi.responses import JSONResponse
 from app.runtime.manager import runtime_manager
 
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Non-blocking background hardware detection warmup
-    HardwareDetector.detect()
+    # Hardware probing runs in a background thread so startup and requests never wait on it.
+    from app.system.gpu_probe import refresh_in_background
+    refresh_in_background()
     ModelRegistry()
     try:
         await init_db_schema()
@@ -41,9 +44,21 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Background model auto-pull/warmup deferred: {exc}")
 
     app.state.warmup_task = asyncio.create_task(_background_warmup())
-    logger.info("DFrag Enterprise API service & Stage 5 Runtime initialized. Floor model auto-pull/warmup scheduled in background.")
+
+    # Index the local statutory corpus once if the library is empty, off the event loop, so the
+    # first question is not answered against an empty index.
+    async def _background_corpus_index():
+        try:
+            from app.services.statute_sync import statute_sync_service
+            await asyncio.to_thread(statute_sync_service.auto_seed_if_empty)
+        except Exception as exc:
+            logger.warning("Statutory corpus indexing deferred: %s", type(exc).__name__)
+
+    app.state.corpus_task = asyncio.create_task(_background_corpus_index())
+    logger.info("DFrag API started (network mode=%s, runtime=%s).", os.getenv("NETWORK_MODE", settings.network.default_mode), settings.MODEL_RUNTIME)
     yield
     app.state.warmup_task.cancel()
+    app.state.corpus_task.cancel()
 
 from app.security.rate_limit import limiter
 from slowapi.errors import RateLimitExceeded
@@ -59,6 +74,15 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+@app.exception_handler(DatabaseUnavailableError)
+async def _database_unavailable_handler(request: Request, exc: DatabaseUnavailableError):
+    """Fail closed with a safe message instead of silently switching data stores."""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "The workspace database is not reachable. Please try again shortly."},
+    )
+
 # Correlation Tracking Middleware (Phase 11)
 app.add_middleware(CorrelationMiddleware)
 
@@ -70,8 +94,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
     allow_credentials="*" not in _origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Correlation-ID"],
 )
 
 
@@ -80,6 +104,8 @@ app.add_middleware(
 from app.routes.auth import get_current_user
 
 PROTECTED = [Depends(get_current_user)]
+
+from app.routes import settings as settings_route
 
 app.include_router(chat.router, dependencies=PROTECTED)
 app.include_router(upload.router, dependencies=PROTECTED)
@@ -92,7 +118,8 @@ app.include_router(mcp.router, dependencies=PROTECTED)
 app.include_router(research.router, dependencies=PROTECTED)
 app.include_router(diagnostics.router, dependencies=PROTECTED)  # Includes cache metrics & control routes
 app.include_router(statutes.router, dependencies=PROTECTED)
-app.include_router(auth.router)         # Public: register/login/me & settings
+app.include_router(settings_route.router, dependencies=PROTECTED)
+app.include_router(auth.router)         # Public: register/login/me
 app.include_router(vaults.router, dependencies=PROTECTED)
 app.include_router(conversations.router, dependencies=PROTECTED)
 
@@ -119,9 +146,10 @@ async def health_check():
         ollama_ok = False
 
     db_status = await check_db_health()
+    db_status["backend"] = get_db_backend_info()
 
     return {
-        "status": "healthy" if db_status["status"] != "offline" else "degraded",
+        "status": "healthy" if db_status["status"] != "offline" and ollama_ok else "degraded",
         "runtime": settings.MODEL_RUNTIME,
         "database": db_status,
         "model_warmup": {
@@ -138,4 +166,5 @@ async def health_check():
 @app.get("/health/db")
 async def db_health_check():
     return await check_db_health()
+
 

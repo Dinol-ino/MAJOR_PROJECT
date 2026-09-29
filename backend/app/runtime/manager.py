@@ -57,14 +57,28 @@ class ModelLifecycleManager:
         )
         return route_decision
 
+    @staticmethod
+    def _tags_match(wanted: str, reported: str) -> bool:
+        """Exact tag match with implicit ':latest' (prefix match over-matches 3b vs 7b)."""
+        def _norm(name: str) -> str:
+            tag = (name or "").strip().lower()
+            if tag and ":" not in tag:
+                tag = f"{tag}:latest"
+            return tag
+        return _norm(wanted) == _norm(reported)
+
     async def _is_model_installed(self, model_id: str) -> bool:
         """Check if a model is already installed in Ollama."""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(f"{settings.OLLAMA_URL.rstrip('/')}/api/tags")
                 if resp.status_code == 200:
-                    tags = [m.get("name", "").lower() for m in resp.json().get("models", [])]
-                    return model_id.lower() in tags or model_id.split(":")[0].lower() in tags
+                    reported = [m.get("name", "") for m in resp.json().get("models", [])]
+                    entry = self._download_manager.registry.get(model_id)
+                    candidates = [model_id]
+                    if entry and entry.ollama_tag and entry.ollama_tag not in candidates:
+                        candidates.append(entry.ollama_tag)
+                    return any(self._tags_match(cand, name) for cand in candidates for name in reported)
         except Exception as e:
             logger.debug(f"Model install check failed for {model_id}: {e}")
         return False
@@ -75,7 +89,7 @@ class ModelLifecycleManager:
             task_id = await self._download_manager.pull(model_id)
             logger.info(f"Auto-pull started for {model_id}, task_id={task_id}")
             # Poll progress until done
-            for _ in range(600):  # Max 60 seconds polling
+            for _ in range(600):  # 600 x 0.5s = 300s max (multi-GB pulls)
                 progress = self._download_manager.get_progress(task_id)
                 if progress is None:
                     await asyncio.sleep(0.5)
@@ -144,7 +158,7 @@ class ModelLifecycleManager:
         except Exception as exc:
             error_msg = str(exc)
             # Self-heal: if the model is simply missing, auto-pull it and retry once.
-            if settings.model.auto_pull_on_startup and self._is_model_missing_error(error_msg):
+            if settings.model.auto_pull_on_demand and self._is_model_missing_error(error_msg):
                 logger.info(f"Model '{target_model}' missing on first use. Auto-pulling (self-heal)...")
                 pulled = await self._pull_and_wait(target_model)
                 if pulled:
@@ -281,7 +295,7 @@ class ModelLifecycleManager:
             circuit_breaker.record_success(target_model)
         except Exception as exc:
             # Self-heal: auto-pull missing model mid-stream and retry once.
-            if settings.model.auto_pull_on_startup and self._is_model_missing_error(str(exc)):
+            if settings.model.auto_pull_on_demand and self._is_model_missing_error(str(exc)):
                 logger.info(f"Model '{target_model}' missing during stream. Auto-pulling (self-heal)...")
                 pulled = await self._pull_and_wait(target_model)
                 if pulled:
@@ -318,9 +332,43 @@ class ModelLifecycleManager:
         msg = error_msg.lower()
         return "not found" in msg or "no such model" in msg or "file does not exist" in msg
 
+    def _resolve_startup_model(self) -> str:
+        """
+        Hardware-aware startup model: smallest SAFE model for this machine.
+        Keeps the configured DEFAULT_MODEL when it fits (SAFE/CAUTION);
+        otherwise falls back to the smallest SAFE registry model.
+        Never auto-selects an UNSUPPORTED model.
+        """
+        configured = settings.model.default_model
+        try:
+            from app.system.hardware_detector import HardwareDetector
+            registry = ModelRegistry()
+            hw = HardwareDetector.detect()
+            entry = registry.get(configured)
+            if entry is None:
+                for m in registry.all_models():
+                    if (m.ollama_tag or "").lower() == configured.lower():
+                        entry = m
+                        break
+            if entry is not None:
+                fit = registry.evaluate_model_fit(entry, hw)
+                if fit.get("safety_tier") in ("SAFE", "CAUTION"):
+                    return entry.model_id
+            safe = [m for m in registry.recommended_for(hw, safe_only=True)]
+            safe.sort(key=lambda m: m.size_gb)
+            if safe:
+                logger.info(
+                    f"Startup model adjusted for hardware: {configured} -> "
+                    f"{safe[0].model_id} (smallest SAFE)"
+                )
+                return safe[0].model_id
+        except Exception as exc:
+            logger.debug(f"Startup model resolution notice: {exc}")
+        return configured
+
     async def warmup_floor_model(self) -> bool:
         """
-        Warms up the Tier 0 floor model on startup to avoid cold start latency.
+        Warms up the hardware-appropriate floor model on startup to avoid cold start latency.
         Auto-pulls the model if it is not installed in Ollama.
         Does not warm up higher tiers to conserve hardware resources.
         """
@@ -328,9 +376,11 @@ class ModelLifecycleManager:
             logger.info("Model warmup/auto-pull on startup is disabled in configuration.")
             return False
 
-        floor_model = settings.model.default_model
+        from app.runtime.model_state import model_state
+        persisted = model_state.persisted_active_model()
+        floor_model = persisted or self._resolve_startup_model()
 
-        # Check if model is installed; if not, auto-pull
+        # Check if model is installed; if not, auto-pull (only when the operator opted in)
         installed = await self._is_model_installed(floor_model)
         if not installed:
             if not settings.model.auto_pull_on_startup:

@@ -12,11 +12,22 @@ PAN_PATTERN = re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]\b")
 PHONE_PATTERN = re.compile(r"\b(?:\+91[\s-]?)?[6789]\d{9}\b")
 EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")
 
-# Try loading Presidio engines
+# Try loading Presidio engines.
+# NOTE: AnalyzerEngine() with no args defaults to en_core_web_lg and
+# auto-downloads ~400MB via pip at import time on every fresh container
+# (ephemeral overlay, re-downloaded on each recreate). The Docker image only
+# preinstalls en_core_web_sm, so pin to it explicitly via NlpEngineProvider.
 try:
     from presidio_analyzer import AnalyzerEngine
+    from presidio_analyzer.nlp_engine import NlpEngineProvider
     from presidio_anonymizer import AnonymizerEngine
-    _analyzer = AnalyzerEngine()
+    _nlp_provider = NlpEngineProvider(
+        nlp_configuration={
+            "nlp_engine_name": "spacy",
+            "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],
+        }
+    )
+    _analyzer = AnalyzerEngine(nlp_engine=_nlp_provider.create_engine())
     _anonymizer = AnonymizerEngine()
     HAS_PRESIDIO = True
 except Exception as e:

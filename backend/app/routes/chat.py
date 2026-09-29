@@ -1,7 +1,8 @@
 import time
 import logging
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Query
+from app.routes.auth import get_current_user
 
 from app.schemas import ChatRequest, ChatResponse
 from app.config import settings
@@ -27,6 +28,7 @@ from app.memory.request_memory import RequestMemory
 from app.services.ingest import ingest_service
 from app.db.engine import get_sync_session
 from app.db.models import Conversation, Message
+from app.security.ownership import current_user_id, conversation_accessible, require_vault, owns
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
@@ -49,59 +51,18 @@ confidence_scorer = ConfidenceScorer()
 response_formatter = ResponseFormatter()
  
 def _synthesize_grounded_legal_answer(query: str, evidence: List[Dict[str, Any]]) -> str:
-    """Synthesizes structured statutory answer from retrieved legal evidence when LLM is offline."""
-    if not evidence:
-        return (
-            "I do not have relevant statutory provisions or legal evidence in the corpus to answer this query. "
-            "Please provide a specific legal inquiry or statutory reference."
-        )
-
-    acts_found = set()
-    sections_found = []
-    clean_excerpts = []
-
-    for item in evidence:
-        act = item.get("act") or "Statutory Authority"
-        sec = item.get("section") or ""
-        text = item.get("text", "").strip()
-        if act:
-            acts_found.add(act)
-        if sec and sec not in sections_found:
-            sections_found.append(sec)
-        if text:
-            clean_excerpts.append((act, sec, text))
-
-    act_title = ", ".join(sorted(acts_found)) if acts_found else "Indian Statutory Law"
-    sec_title = f" (Sections: {', '.join(sections_found[:4])})" if sections_found else ""
-
-    lines = [
-        f"### Statutory Analysis: {act_title}{sec_title}",
-        "",
-        "Based on the verified statutory provisions retrieved from the authoritative legal corpus, the following key legal determinations apply:",
-        "",
-    ]
-
-    for i, (act, sec, text) in enumerate(clean_excerpts[:3], 1):
-        sec_header = f"**{sec} ({act})**" if sec else f"**Provision {i} ({act})**"
-        snippet = text[:400] + "..." if len(text) > 400 else text
-        lines.append(f"{i}. {sec_header}:")
-        lines.append(f"   > {snippet}")
-        lines.append("")
-
-    lines.append(
-        f"**Legal Grounding & Compliance**: The above statutory provisions govern the inquiry. "
-        f"All citations are verified against local statutory law under {act_title}."
-    )
-
-    return "\n".join(lines)
+    """Evidence-only reply used when the model is unavailable (shared with the orchestrator; no analysis claimed)."""
+    from app.orchestrator.state_machine import research_orchestrator
+    return research_orchestrator._synthesize_grounded_answer(query, evidence)
 
 
 @router.get("/chat/sessions")
-def list_sessions(user_id: str = "default_user"):
+def list_sessions(current_user: Dict = Depends(get_current_user)):
     """
     Returns list of past task sessions for the sidebar navigation from durable memory.
     """
-    conversations = durable_memory.get_user_conversations(user_id=user_id)
+    uid = current_user_id(current_user)
+    conversations = durable_memory.get_user_conversations(user_id=uid)
     sessions = []
     for conv in conversations:
         sessions.append({
@@ -114,36 +75,64 @@ def list_sessions(user_id: str = "default_user"):
 
 
 @router.get("/chat/sessions/{session_id}/messages")
-def get_session_messages(session_id: str, user_id: str = "default_user"):
+def get_session_messages(session_id: str, current_user: Dict = Depends(get_current_user)):
     """
     Returns full transcript message history for a specific conversation.
     """
-    messages = durable_memory.get_conversation_messages(session_id, user_id=user_id)
+    uid = current_user_id(current_user)
+    messages = durable_memory.get_conversation_messages(session_id, user_id=uid)
     return {"session_id": session_id, "messages": messages}
 
 
 @router.delete("/chat/sessions/{session_id}")
-def delete_session(session_id: str, user_id: str = "default_user"):
-    durable_memory.delete_conversation(session_id, user_id=user_id)
+def delete_session(session_id: str, current_user: Dict = Depends(get_current_user)):
+    uid = current_user_id(current_user)
+    durable_memory.delete_conversation(session_id, user_id=uid)
     return {"status": "ok", "deleted": session_id}
 
 
 @router.get("/chat/memory/semantic")
-def list_semantic_memories(user_id: str = "default_user", category: Optional[str] = None):
-    """Lists structured semantic facts and preferences for a user."""
-    return {"memories": durable_memory.get_semantic_memories(user_id=user_id, category=category)}
+def list_semantic_memories(category: Optional[str] = None, current_user: Dict = Depends(get_current_user)):
+    """Lists structured semantic facts and preferences for the authenticated user."""
+    uid = current_user_id(current_user)
+    return {"memories": durable_memory.get_semantic_memories(user_id=uid, category=category)}
 
 
 @router.post("/chat/memory/semantic")
-def create_semantic_memory(user_id: str = "default_user", category: str = "preference", key: str = "", value: str = ""):
+def create_semantic_memory(category: str = "preference", key: str = "", value: str = "", current_user: Dict = Depends(get_current_user)):
     """Stores a contextual fact or preference in persistent semantic memory."""
-    mem = durable_memory.save_semantic_memory(user_id=user_id, category=category, key=key, value=value)
+    uid = current_user_id(current_user)
+    mem = durable_memory.save_semantic_memory(user_id=uid, category=category, key=key, value=value)
     return {"status": "ok", "memory": mem}
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_current_user)):
     start_time = time.time()
+    current_uid = current_user_id(current_user)
+
+    # Isolation: the session id and vault id are client-supplied, so bind them to the caller.
+    with get_sync_session() as session:
+        if not conversation_accessible(session, request.session_id, current_user):
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        if request.vault_id:
+            require_vault(session, request.vault_id, current_user)
+
+    # Layers 1-3 are mandatory. The unshielded baseline exists only for offline evaluation.
+    if not request.shield_on and not settings.security.allow_unshielded_baseline:
+        request.shield_on = True
+
+    if len(request.message or "") > settings.security.max_query_chars * 4:
+        raise HTTPException(status_code=413, detail="Message is too long.")
+
+    # The answering model is decided once, explicitly. It is never silently swapped later.
+    from app.runtime.model_state import model_state, ModelNotAvailable
+    try:
+        resolved_model = await model_state.resolve_for_request(request.model)
+    except ModelNotAvailable as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)})
+    request.model = resolved_model
+
     req_memory = RequestMemory(
         session_id=request.session_id,
         raw_query=request.message,
@@ -153,7 +142,7 @@ async def chat_endpoint(request: ChatRequest):
     # Write-through persistence: record user turn
     durable_memory.create_conversation_if_not_exists(
         conversation_id=request.session_id,
-        user_id="default_user",
+        user_id=current_uid,
         title=request.message[:35] + ("..." if len(request.message) > 35 else "")
     )
     if request.vault_id:
@@ -169,7 +158,7 @@ async def chat_endpoint(request: ChatRequest):
         conversation_id=request.session_id,
         role="user",
         content=request.message,
-        user_id="default_user"
+        user_id=current_uid
     )
 
     # --- SHIELD ON PIPELINE (Defensive RAG Mode) ---
@@ -180,11 +169,11 @@ async def chat_endpoint(request: ChatRequest):
             orch_res = await research_orchestrator.execute(
                 query=request.message,
                 session_id=request.session_id,
-                user_id="default_user",
-                model=request.model,
+                user_id=current_uid,
+                model=resolved_model,
                 shield_on=True,
                 vault_id=request.vault_id,
-                reasoning_effort=request.reasoning_effort or "off"
+                reasoning_effort=request.reasoning_effort or "medium"
             )
             durable_memory.add_message(
                 conversation_id=request.session_id,
@@ -192,15 +181,15 @@ async def chat_endpoint(request: ChatRequest):
                 content=orch_res.answer,
                 citations=orch_res.sources,
                 reasoning_trace=orch_res.reasoning_trace,
-                user_id="default_user"
+                user_id=current_uid
             )
+            # No synthetic "confidence" number is reported: the previous formula mostly measured
+            # whether any evidence existed. Hallucination signals (concrete checks) are still returned.
             conf_score = None
             halluc_flags = []
-            if not orch_res.blocked_by and orch_res.answer:
+            if not orch_res.blocked_by and orch_res.answer and orch_res.failure_kind != "model_unavailable":
                 source_chunks = [s for s in orch_res.sources if isinstance(s, dict)]
-                h_rep = hallucination_detector.detect(orch_res.answer, source_chunks)
-                conf_score = confidence_scorer.score(orch_res.answer, source_chunks, h_rep)
-                halluc_flags = h_rep.signals
+                halluc_flags = hallucination_detector.detect(orch_res.answer, source_chunks).signals
 
             req_memory.record_defense_event(
                 layer="orchestrator",
@@ -218,7 +207,10 @@ async def chat_endpoint(request: ChatRequest):
                 correlation_id=orch_res.correlation_id or orch_res.request_id,
                 confidence_score=conf_score,
                 hallucination_flags=halluc_flags,
-                reasoning_trace=orch_res.reasoning_trace
+                reasoning_trace=orch_res.reasoning_trace,
+                model_used=orch_res.model_used,
+                runtime_used=orch_res.runtime_used or settings.MODEL_RUNTIME,
+                metrics=orch_res.metrics,
             )
 
         # Direct Fallback Pipeline (Rollback Mode)
@@ -241,7 +233,7 @@ async def chat_endpoint(request: ChatRequest):
                 conversation_id=request.session_id,
                 role="assistant",
                 content=blocked_msg,
-                user_id="default_user"
+                user_id=current_uid
             )
             return ChatResponse(
                 answer=blocked_msg,
@@ -284,6 +276,7 @@ async def chat_endpoint(request: ChatRequest):
         )
 
         sources = citation_builder.build(fitted_chunks)
+        sources_dict = [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in sources]
 
         # Layer 2: Secure Prompt Construction (with Presidio PII anonymization & System Prompt v4)
         prompt = trusted_context.build_prompt(
@@ -303,7 +296,9 @@ async def chat_endpoint(request: ChatRequest):
         runtime_used = "local"
 
         routing = fallback_router.route_request(target_model)
-        if routing.use_cloud and routing.provider:
+        # Vault (client matter) evidence never leaves the machine, whatever the cloud settings.
+        cloud_allowed = settings.cloud_fallback.enabled and not active_vault_id
+        if cloud_allowed and routing.use_cloud and routing.provider:
             logger.info(f"Proactive cloud promotion: {routing.reason}")
             cloud_rt = CloudRuntime(provider=routing.provider)
             raw_answer = await cloud_rt.generate(prompt, model=routing.model)
@@ -317,7 +312,7 @@ async def chat_endpoint(request: ChatRequest):
                 kind = fallback_router.classify_failure(exc)
                 circuit_breaker.record_failure(target_model, kind=kind, reason=str(exc))
                 cloud_prov = fallback_router.resolve_cloud_provider()
-                if settings.cloud_fallback.enabled and settings.cloud_fallback.auto_fallback and cloud_prov:
+                if cloud_allowed and settings.cloud_fallback.auto_fallback and cloud_prov:
                     cloud_model = (
                         settings.cloud_fallback.grok_model
                         if cloud_prov == "grok"
@@ -329,37 +324,20 @@ async def chat_endpoint(request: ChatRequest):
                     model_used = cloud_model
                     runtime_used = "cloud"
                 else:
-                    # Determine a real fallback model — never fall back to the same model that just failed
-                    fallback_model = settings.OLLAMA_FALLBACK_MODEL.strip() or settings.DEFAULT_MODEL
-                    if fallback_model.lower() == target_model.lower():
-                        fallback_model = settings.DEFAULT_MODEL if target_model.lower() != settings.DEFAULT_MODEL.lower() else ""
-
-                    logger.warning(
-                        f"Runtime engine generation error on model '{target_model}': {exc}. "
-                        f"Attempting automatic fallback to '{fallback_model}'."
-                    )
-                    # Log fallback event to audit logger
+                    # No silent substitution of another local model: report and show evidence only.
+                    logger.warning("Model '%s' unavailable (%s); returning evidence excerpts only.", target_model, type(exc).__name__)
                     audit_logger.log(
-                        action="chat_model_fallback",
+                        action="chat_model_unavailable",
                         layer="runtime",
                         injection_score=inj_score,
                         retrieval_hits=len(retrieved_chunks),
                         citations_used=len(sources),
-                        validation_pass_fail="fallback_tier0",
-                        model_tier_used=f"{fallback_model} (Tier 0 Fallback)",
+                        validation_pass_fail="model_unavailable",
+                        model_tier_used=target_model,
                         latency_ms=(time.time() - start_time) * 1000
                     )
-                    is_conn = "unreachable" in str(exc).lower() or "connect" in str(exc).lower()
-                    if not is_conn and fallback_model:
-                        try:
-                            raw_answer = await runtime.generate(prompt, model=fallback_model)
-                            model_used = fallback_model
-                        except Exception as fallback_exc:
-                            logger.warning(f"Fallback to '{fallback_model}' also failed ({fallback_exc}). Synthesizing grounded statutory response from verified corpus.")
-                            raw_answer = _synthesize_grounded_legal_answer(request.message, fitted_chunks)
-                    else:
-                        logger.warning(f"Ollama daemon unreachable ({exc}). Synthesizing grounded statutory response from verified corpus.")
-                        raw_answer = _synthesize_grounded_legal_answer(request.message, fitted_chunks)
+                    raw_answer = _synthesize_grounded_legal_answer(request.message, fitted_chunks)
+                    model_used = "none"
 
 
         # Layer 3: Output Guard Validation & Citation-existence Check
@@ -378,13 +356,12 @@ async def chat_endpoint(request: ChatRequest):
                 latency_ms=latency_ms
             )
             quarantine_msg = f"Response quarantined: {error_reason}"
-            sources_dict = [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in sources]
             durable_memory.add_message(
                 conversation_id=request.session_id,
                 role="assistant",
                 content=quarantine_msg,
                 citations=sources_dict,
-                user_id="default_user"
+                user_id=current_uid
             )
             return ChatResponse(
                 answer=quarantine_msg,
@@ -402,20 +379,16 @@ async def chat_endpoint(request: ChatRequest):
         from app.services.response_parser import response_parser
         parsed = response_parser.parse(clean_answer, evidence_chunks=fitted_chunks)
         final_answer = parsed.content if parsed.content else formatted_answer
+        # Only a trace actually emitted by the model is shown; none is fabricated.
         reasoning_trace = parsed.reasoning_trace
-        if not reasoning_trace and request.reasoning_effort == "high":
-            reasoning_trace = (
-                f"1. Classified intent: statutory_analysis\n"
-                f"2. Evaluated {len(fitted_chunks)} statutory evidence chunks for relevance.\n"
-                f"3. Validated legal boundaries against Indian jurisdiction and current enactments.\n"
-                f"4. Synthesized authoritative grounded response with strict section-level citations."
-            )
         grounding_score = parsed.grounding_score
         citations_parsed = [c.to_dict() for c in parsed.citations]
 
         # Verification & Scoring
         hallucination_report = hallucination_detector.detect(final_answer, fitted_chunks)
         confidence = confidence_scorer.score(final_answer, fitted_chunks, hallucination_report)
+
+        runtime_used = runtime_used if runtime_used == "cloud" else settings.MODEL_RUNTIME
 
         audit_logger.log(
             action="chat_success",
@@ -424,7 +397,7 @@ async def chat_endpoint(request: ChatRequest):
             retrieval_hits=len(retrieved_chunks),
             citations_used=len(sources),
             validation_pass_fail="pass",
-            model_tier_used=request.model or settings.DEFAULT_MODEL,
+            model_tier_used=model_used,
             latency_ms=latency_ms
         )
 
@@ -433,7 +406,7 @@ async def chat_endpoint(request: ChatRequest):
             role="assistant",
             content=final_answer,
             citations=citations_parsed if citations_parsed else sources_dict,
-            user_id="default_user",
+            user_id=current_uid,
             model_used=model_used,
             runtime_used=runtime_used,
             reasoning_trace=reasoning_trace,
@@ -447,7 +420,7 @@ async def chat_endpoint(request: ChatRequest):
             event = ChatResponseFinalized(
                 conversation_id=request.session_id,
                 message_id=msg_id,
-                user_id="default_user",
+                user_id=current_uid,
                 query=request.message,
                 answer=final_answer,
                 citations=citations_parsed if citations_parsed else [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in sources],
@@ -476,7 +449,7 @@ async def chat_endpoint(request: ChatRequest):
             block_reason=None,
             failure_kind=None,
             correlation_id=request.session_id,
-            confidence_score=confidence,
+            confidence_score=None,
             grounding_score=grounding_score,
             hallucination_flags=hallucination_report.signals,
             reasoning_trace=reasoning_trace,
@@ -522,15 +495,18 @@ async def chat_endpoint(request: ChatRequest):
             sources=sources,
             blocked_by=None,
             block_reason=None,
-            confidence_score=confidence,
-            hallucination_flags=hallucination_report.signals
+            confidence_score=None,
+            hallucination_flags=hallucination_report.signals,
+            correlation_id=request.session_id,
+            model_used=request.model or settings.DEFAULT_MODEL,
+            runtime_used=settings.MODEL_RUNTIME
         )
 
 
 @router.get("/messages/{message_id}/grounding")
 @router.get("/api/messages/{message_id}/grounding")
 @router.get("/chat/messages/{message_id}/grounding")
-def get_message_grounding(message_id: str):
+def get_message_grounding(message_id: str, current_user: Dict = Depends(get_current_user)):
     """
     Returns authentic grounding score breakdown for a specific assistant message (Spec 03 §6.3).
     """
@@ -538,10 +514,13 @@ def get_message_grounding(message_id: str):
         msg = session.query(Message).filter_by(message_id=message_id).first()
         if not msg:
             raise HTTPException(status_code=404, detail="Message not found")
+        conv = session.query(Conversation).filter_by(conversation_id=msg.conversation_id).first()
+        if not conv or not owns(conv.user_id, current_user):
+            raise HTTPException(status_code=404, detail="Message not found")
 
         cits = msg.citations_json or msg.citations or []
         total_citations = len(cits)
-        resolved_citations = sum(1 for c in cits if c.get("quote") or c.get("source_chunk_id") or c.get("resolved", True))
+        resolved_citations = sum(1 for c in cits if c.get("quote") or c.get("source_chunk_id") or c.get("resolved") is True)
         unresolved = total_citations - resolved_citations
 
         return {

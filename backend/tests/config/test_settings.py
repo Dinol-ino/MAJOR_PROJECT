@@ -32,13 +32,14 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(settings.INJECTION_RISK_THRESHOLD, settings.security.injection_risk_threshold)
 
     def test_model_registry_loads_yaml(self):
+        import yaml
         registry = ModelRegistry()
-        models = registry.all_models()
-        self.assertTrue(len(models) >= 4)
-        model_ids = [m.model_id for m in models]
-        self.assertIn("gemma2:2b", model_ids)
-        self.assertIn("qwen2.5:3b", model_ids)
-        self.assertIn("qwen2.5:7b", model_ids)
+        with open(registry.yaml_path, encoding="utf-8") as f:
+            declared = [m["model_id"] for m in (yaml.safe_load(f) or {}).get("models", [])]
+        model_ids = [m.model_id for m in registry.all_models()]
+        # The registry reflects exactly what the YAML declares (no code-side defaults mixed in).
+        self.assertEqual(sorted(model_ids), sorted(declared))
+        self.assertTrue(len(model_ids) >= 1)
 
     def test_security_config_thresholds(self):
         sec = SecurityConfig(injection_risk_threshold=0.85, grounding_overlap_threshold=0.1)

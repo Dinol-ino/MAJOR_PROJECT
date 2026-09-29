@@ -1,6 +1,10 @@
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Query, Header
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
+
+from app.routes.auth import get_current_user
+from app.security.ownership import current_user_id, require_conversation
+from app.db.engine import get_sync_session
 
 from app.memory import (
     semantic_memory,
@@ -22,12 +26,13 @@ class SemanticMemoryProposal(BaseModel):
 
 @router.get("/semantic")
 def list_semantic_memories(
-    user_id: str = Query("default_user", description="Authenticated user ID"),
-    category: Optional[str] = Query(None, description="Optional category filter")
+    category: Optional[str] = Query(None, description="Optional category filter"),
+    current_user: Dict = Depends(get_current_user),
 ):
     """
-    Transparency requirement: lists a user's explicit semantic memory entries.
+    Transparency requirement: lists the authenticated user's explicit semantic memory entries.
     """
+    user_id = current_user_id(current_user)
     memories = semantic_memory.get_user_memories(user_id=user_id, category=category)
     return {"user_id": user_id, "count": len(memories), "memories": memories}
 
@@ -35,11 +40,12 @@ def list_semantic_memories(
 @router.post("/semantic")
 def propose_semantic_memory(
     proposal: SemanticMemoryProposal,
-    user_id: str = Query("default_user", description="Authenticated user ID")
+    current_user: Dict = Depends(get_current_user),
 ):
     """
     Proposes a semantic fact/preference. Runs through the strict L3 Validation Gate.
     """
+    user_id = current_user_id(current_user)
     try:
         saved = semantic_memory.propose_and_save(
             user_id=user_id,
@@ -51,32 +57,35 @@ def propose_semantic_memory(
         return {"status": "saved", "entry": saved}
     except ValueError as val_err:
         raise HTTPException(status_code=400, detail=str(val_err))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Internal memory error: {exc}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal memory error.")
 
 
 @router.delete("/semantic/{memory_id}")
 def delete_semantic_memory(
     memory_id: str,
-    user_id: str = Query("default_user", description="Authenticated user ID")
+    current_user: Dict = Depends(get_current_user),
 ):
     """
     Explicit user-initiated deletion of an L3 semantic memory entry.
     """
+    user_id = current_user_id(current_user)
     try:
         success = semantic_memory.delete_memory(memory_id=memory_id, user_id=user_id)
         if not success:
             raise HTTPException(status_code=404, detail="Memory entry not found")
         return {"status": "deleted", "memory_id": memory_id}
-    except PermissionError as p_err:
-        raise HTTPException(status_code=403, detail=str(p_err))
+    except PermissionError:
+        raise HTTPException(status_code=404, detail="Memory entry not found")
 
 
 @router.get("/research/{session_id}")
-def get_research_session(session_id: str):
+def get_research_session(session_id: str, current_user: Dict = Depends(get_current_user)):
     """
     Retrieves an L5 research session's findings, provenance sources, and citations.
     """
+    with get_sync_session() as db:
+        require_conversation(db, session_id, current_user)
     session_data = research_memory.get_research_session(session_id=session_id)
     if not session_data:
         raise HTTPException(status_code=404, detail="Research session not found")
@@ -86,11 +95,14 @@ def get_research_session(session_id: str):
 @router.delete("/documents/{doc_id}")
 def delete_document_cascade(
     doc_id: str,
-    session_id: str = Query(..., description="Session identifier for the document")
+    session_id: str = Query(..., description="Session identifier for the document"),
+    current_user: Dict = Depends(get_current_user),
 ):
     """
     L4 Deletion Cascade: removes document metadata from PostgreSQL and embeddings from ChromaDB.
     """
+    with get_sync_session() as db:
+        require_conversation(db, session_id, current_user)
     success = document_memory.delete_document_cascade(doc_id=doc_id, session_id=session_id)
     if not success:
         raise HTTPException(status_code=404, detail="Document not found")

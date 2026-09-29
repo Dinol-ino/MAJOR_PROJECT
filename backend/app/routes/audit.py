@@ -1,6 +1,9 @@
 import time
 from typing import Optional
-from fastapi import APIRouter, Query, Response
+from typing import Dict
+from fastapi import APIRouter, Query, Response, Depends, HTTPException
+from app.routes.auth import get_current_user
+from app.security.ownership import is_admin
 from app.schemas import AuditLogResponse, AuditLogRow
 from app.config import settings
 from app.defense.audit_log import AuditLogger
@@ -24,10 +27,12 @@ def verify_audit_ledger_endpoint():
 
 
 @router.get("/audit/export/json")
-def export_audit_trail_endpoint(limit: Optional[int] = Query(None, ge=1, le=10000)):
+def export_audit_trail_endpoint(limit: Optional[int] = Query(None, ge=1, le=10000), current_user: Dict = Depends(get_current_user)):
     """
-    Task 8.1.3: Exports full tamper-evident audit trail with SHA-256 integrity report as JSON.
+    Exports the tamper-evident audit trail (administrators only) with a live integrity report.
     """
+    if not is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Audit export is restricted to administrators.")
     logs = audit_logger.fetch_all()
     if limit:
         logs = logs[-limit:]
@@ -45,12 +50,13 @@ def export_audit_trail_endpoint(limit: Optional[int] = Query(None, ge=1, le=1000
 
 
 @router.get("/audit/{session_id}", response_model=AuditLogResponse)
-async def audit_endpoint(session_id: str):
+async def audit_endpoint(session_id: str, current_user: Dict = Depends(get_current_user)):
     """
-    Returns audit log rows with category counts and tamper verification status (Task 8.1.1 & 8.1.2).
+    Security & integrity summary: category counts plus a LIVE hash-chain verification.
+    Individual event rows are workspace-wide security records and are returned to administrators only.
     """
-    # Fetch log rows from database
     logs = audit_logger.fetch_all()
+    verification = audit_ledger.verify_chain()
 
     chat_count = sum(1 for l in logs if "chat" in str(l.get("action", "")).lower())
     blocked_count = sum(1 for l in logs if "block" in str(l.get("action", "")).lower() or "quarantine" in str(l.get("action", "")).lower() or l.get("validation_pass_fail") == "fail")
@@ -68,15 +74,15 @@ async def audit_endpoint(session_id: str):
             injection_score=log.get("injection_score"),
             validation_pass_fail=log.get("validation_pass_fail")
         )
-        for log in logs
+        for log in (logs if is_admin(current_user) else [])
     ]
 
     return AuditLogResponse(
         rows=rows,
-        total_count=len(rows),
+        total_count=len(logs),
         chat_count=chat_count,
         blocked_count=blocked_count,
         upload_count=upload_count,
         mcp_count=mcp_count,
-        verified=True
+        verified=bool(verification.get("valid")),
     )

@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional
 # pyrefly: ignore [missing-import]
 import chromadb
 
-from app.retrieval.client import get_shared_chroma_client
+from app.retrieval.client import get_shared_chroma_client, DenseRetrievalUnavailable
 from app.retrieval.hybrid_rank import fuse_bm25_dense
 from app.retrieval.bm25_index import tier1_bm25_index
 from app.retrieval.fusion_router import fusion_router
@@ -66,14 +66,13 @@ class Tier1LawRetrieval:
             logger.debug(f"BM25 index sync check deferred: {exc}")
 
     def add_document(self, doc_id: str, text: str, metadata: Dict[str, Any]):
-        """Adds a document to both ChromaDB dense index and persistent BM25 index."""
-        self.collection.add(
-            ids=[doc_id],
-            documents=[text],
-            metadatas=[metadata]
-        )
+        """Adds a document to the persistent BM25 index and (when an embedding model is loaded) ChromaDB."""
         self.bm25_index.add_document(doc_id, text, metadata)
         self.bm25_index.save()
+        try:
+            self.collection.add(ids=[doc_id], documents=[text], metadatas=[metadata])
+        except DenseRetrievalUnavailable:
+            pass
 
     def query(self, text: str, top_k: Optional[int] = None) -> List[Dict[str, Any]]:
         k = top_k or settings.retrieval.top_k
@@ -94,14 +93,16 @@ class Tier1LawRetrieval:
         try:
             count = self.collection.count()
         except Exception:
+            count = 0
+
+        if count == 0 and self.bm25_index.count() == 0:
             return []
 
-        if count == 0:
-            return []
-
-        # 2. Dense query (ChromaDB)
+        # 2. Dense query (ChromaDB) — skipped when no embedding model is loaded
         dense_docs = []
         try:
+            if count == 0:
+                raise DenseRetrievalUnavailable("empty dense index")
             dense_results = self.collection.query(
                 query_texts=[text],
                 n_results=min(k * 2, count)
@@ -116,12 +117,14 @@ class Tier1LawRetrieval:
                         "act": metas[i].get("act", "General Law"),
                         "section": metas[i].get("section", "General"),
                         "text": docs[i],
-                        "score": 1.0 - distances[i],
+                        "score": 1.0 / (1.0 + max(0.0, float(distances[i]))),
                         "doc_type": "statutory_law",
                         "metadata": metas[i]
                     })
+        except DenseRetrievalUnavailable:
+            pass
         except Exception as exc:
-            logger.warning(f"ChromaDB tier1 query warning: {exc}")
+            logger.warning("ChromaDB tier1 query warning: %s", type(exc).__name__)
 
         # 3. Fast Sparse BM25 query (Persistent Index with Zero Rebuild)
         bm25_docs = self.bm25_index.search(text, top_k=k * 2)

@@ -2,22 +2,29 @@ import uuid
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 
 from app.db.engine import get_sync_session
 from app.db.models import Conversation, Message, ProjectVault
 from app.defense.audit_log import AuditLogger
+from app.routes.auth import get_current_user
+from app.security.ownership import current_user_id, owns, require_vault
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 audit_logger = AuditLogger()
 
 
+def _verify_conversation_access(conv: Conversation, current_user: Dict[str, Any]) -> None:
+    # 404 (not 403) so another user's conversation ids are not disclosed.
+    if not owns(conv.user_id, current_user):
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+
+
 class CreateConversationRequest(BaseModel):
     project_vault_id: Optional[str] = Field(None, description="Optional Vault ID to bind this chat to")
     title: Optional[str] = Field("New Legal Chat", max_length=255)
-    user_id: Optional[str] = Field("default_user")
 
 
 class UpdateConversationRequest(BaseModel):
@@ -26,18 +33,17 @@ class UpdateConversationRequest(BaseModel):
 
 
 @router.post("", status_code=201)
-def create_conversation(req: CreateConversationRequest):
+def create_conversation(req: CreateConversationRequest, current_user: Dict = Depends(get_current_user)):
     """Creates a new durable conversation, optionally associated with a project vault."""
+    effective_user_id = current_user_id(current_user)
     with get_sync_session() as session:
         if req.project_vault_id:
-            vault = session.query(ProjectVault).filter(ProjectVault.id == req.project_vault_id).first()
-            if not vault:
-                raise HTTPException(status_code=404, detail="Specified project vault does not exist.")
+            require_vault(session, req.project_vault_id, current_user)
 
         conv = Conversation(
             conversation_id=str(uuid.uuid4()),
             project_vault_id=req.project_vault_id,
-            user_id=req.user_id or "default_user",
+            user_id=effective_user_id,
             title=req.title or "New Legal Chat",
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
@@ -53,13 +59,14 @@ def create_conversation(req: CreateConversationRequest):
 @router.get("")
 def list_conversations(
     vault_id: Optional[str] = Query(None, description="Filter chats by Project Vault ID"),
-    user_id: str = Query("default_user", description="Filter by user ID"),
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=50, ge=1, le=100)
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: Dict = Depends(get_current_user),
 ):
     """Lists conversations, ordered by updated_at desc, with server-side pagination."""
+    effective_uid = current_user_id(current_user)
     with get_sync_session() as session:
-        query = session.query(Conversation).filter(Conversation.user_id == user_id)
+        query = session.query(Conversation).filter(Conversation.user_id == effective_uid)
         if vault_id is not None:
             if vault_id == "unfiled":
                 query = query.filter(Conversation.project_vault_id.is_(None))
@@ -85,12 +92,13 @@ def list_conversations(
 
 
 @router.get("/{conversation_id}")
-def get_conversation_history(conversation_id: str):
+def get_conversation_history(conversation_id: str, current_user: Dict = Depends(get_current_user)):
     """Retrieves conversation metadata and full ordered message history for L2 rehydration."""
     with get_sync_session() as session:
         conv = session.query(Conversation).filter(Conversation.conversation_id == conversation_id).first()
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found.")
+        _verify_conversation_access(conv, current_user)
 
         messages = [m.to_dict() for m in conv.messages]
         res = conv.to_dict()
@@ -100,20 +108,19 @@ def get_conversation_history(conversation_id: str):
 
 
 @router.patch("/{conversation_id}")
-def update_conversation(conversation_id: str, req: UpdateConversationRequest):
+def update_conversation(conversation_id: str, req: UpdateConversationRequest, current_user: Dict = Depends(get_current_user)):
     """Renames a conversation or reassigns it to another vault (Spec 01 §3.3)."""
     with get_sync_session() as session:
         conv = session.query(Conversation).filter(Conversation.conversation_id == conversation_id).first()
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found.")
+        _verify_conversation_access(conv, current_user)
 
         if req.title is not None:
             conv.title = req.title.strip()
         if req.project_vault_id is not None:
             if req.project_vault_id != "":
-                vault = session.query(ProjectVault).filter(ProjectVault.id == req.project_vault_id).first()
-                if not vault:
-                    raise HTTPException(status_code=404, detail="Target project vault does not exist.")
+                require_vault(session, req.project_vault_id, current_user)
                 conv.project_vault_id = req.project_vault_id
             else:
                 conv.project_vault_id = None
@@ -127,14 +134,20 @@ def update_conversation(conversation_id: str, req: UpdateConversationRequest):
 
 
 @router.delete("/{conversation_id}")
-def delete_conversation(conversation_id: str):
+def delete_conversation(conversation_id: str, current_user: Dict = Depends(get_current_user)):
     """Deletes a conversation and cascades deletion to all messages."""
     with get_sync_session() as session:
         conv = session.query(Conversation).filter(Conversation.conversation_id == conversation_id).first()
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found.")
+        _verify_conversation_access(conv, current_user)
 
         session.delete(conv)
 
+    try:
+        from app.services.citation_graph_service import citation_graph_service
+        citation_graph_service.delete_conversation_edges(conversation_id)
+    except Exception as exc:
+        logger.warning("Graph purge for deleted conversation failed: %s", type(exc).__name__)
     audit_logger.log(action=f"conversation_deleted:{conversation_id}", layer="persistence")
     return {"status": "deleted", "conversation_id": conversation_id}

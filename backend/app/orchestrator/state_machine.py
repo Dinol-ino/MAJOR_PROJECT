@@ -95,6 +95,9 @@ class OrchestrationResult(BaseModel):
     steps_trace: List[StateStepTrace] = Field(default_factory=list)
     budget_snapshot: Dict[str, Any] = Field(default_factory=dict)
     latency_ms: float = 0.0
+    model_used: Optional[str] = None
+    runtime_used: Optional[str] = None
+    metrics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ResearchStateMachine:
@@ -134,7 +137,14 @@ class ResearchStateMachine:
         """
         start_time = time.time()
         req_id = request_id or str(uuid.uuid4())
-        budget = custom_budget or ExecutionBudget()
+        profile = settings.reasoning.for_effort(reasoning_effort)
+        cfg = settings.orchestrator
+        # Reasoning level sets real budgets, always capped by the orchestrator hard ceilings.
+        budget = custom_budget or ExecutionBudget(
+            max_tool_calls=min(int(profile["max_tool_calls"]), cfg.max_tool_calls),
+            retry_budget=min(int(profile["retry_budget"]), cfg.retry_budget),
+            max_retrieved_docs=min(int(profile["max_evidence_chunks"]) * 3, cfg.max_retrieved_docs),
+        )
         cancellation_manager.register(req_id)
 
         # Context accumulator across states
@@ -145,7 +155,9 @@ class ResearchStateMachine:
             "model": model or settings.DEFAULT_MODEL,
             "shield_on": shield_on,
             "vault_id": vault_id,
-            "reasoning_effort": reasoning_effort or "off",
+            "reasoning_effort": profile["level"],
+            "profile": profile,
+            "metrics": {"reasoning_level": profile["level"]},
             "reasoning_trace": None,
             "request_id": req_id,
             "intent": "general_legal",
@@ -175,7 +187,7 @@ class ResearchStateMachine:
         try:
             # Fast-Path for Simple Statutory Lookups (Fault 01 §10-State FSM)
             # Trivial queries like "Section 302 IPC" bypass planning, tools, and multi-pass verification.
-            if (reasoning_effort == "off" or not reasoning_effort) and self._is_simple_statutory_lookup(query):
+            if profile["level"] == "low" and self._is_simple_statutory_lookup(query):
                 current_state = self._transition(current_state, AgentState.SECURITY_CHECK, req_id)
                 sec_trace = await self._run_security_check(ctx, budget)
                 traces.append(sec_trace)
@@ -261,7 +273,7 @@ class ResearchStateMachine:
                 current_state = self._transition(current_state, AgentState.COMPLETED, req_id)
             else:
                 # If failed and retry budget exists, attempt synthesis once more
-                if budget.retries_attempted < budget.retry_budget:
+                if budget.retries_attempted < budget.retry_budget and ctx.get("failure_kind") != "model_unavailable":
                     budget.record_retry()
                     current_state = self._transition(current_state, AgentState.SYNTHESIS, req_id)
                     retry_trace = await self._run_synthesis(ctx, budget, retry_note=ctx.get("block_reason"))
@@ -382,7 +394,27 @@ class ResearchStateMachine:
                 details={"intent": "adversarial_probe"}
             )
 
-        if is_explicit_non_legal or (not has_legal_terms and len(q.split()) > 3):
+        # Check for conversational greetings, capability questions, and chatbot interaction
+        conversational_patterns = [
+            r"(?i)^(?:hi|hello|hey|heya|howdy|namaste|greetings)\b",
+            r"(?i)\b(?:how\s+are\s+you|are\s+you\s+(?:working|online|there|alive|ok|alright|ready))\b",
+            r"(?i)\b(?:who\s+are\s+you|what\s+is\s+your\s+name|what\s+can\s+you\s+do|introduce\s+yourself|tell\s+me\s+about\s+yourself)\b",
+            r"(?i)\b(?:good\s+(?:morning|afternoon|evening|day|night))\b",
+            r"(?i)^(?:test|testing|check|help|can\s+you\s+help|start|info)\b",
+        ]
+        is_conversational = any(re.search(pat, q.strip()) for pat in conversational_patterns)
+        if is_conversational and not has_legal_terms:
+            ctx["intent"] = "conversational"
+            ctx["is_conversational"] = True
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.CLASSIFY.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="success",
+                details={"intent": "conversational"}
+            )
+
+        if is_explicit_non_legal or (not has_legal_terms and len(q.split()) > 5):
             ctx["is_out_of_scope"] = True
             ctx["intent"] = "out_of_scope"
             ctx["failure_kind"] = "out_of_scope"
@@ -460,12 +492,21 @@ class ResearchStateMachine:
     async def _run_plan(self, ctx: Dict[str, Any], budget: ExecutionBudget) -> StateStepTrace:
         t0 = time.time()
         budget.record_step()
-        # Code-controlled planning: determine if tools should be invoked
+        # Dynamic planning: determine if tools should be invoked based on query intent
         q = ctx["query"].lower()
-        if "amendment" in q or "in force" in q or "live status" in q:
+        import re
+
+        if any(term in q for term in ["amendment", "in force", "live status", "repealed", "validity", "currency check"]):
             ctx["requires_tool_call"] = True
             ctx["planned_tool"] = "live_statute_checker"
-        elif "lookup provision" in q or "specific section" in q:
+        elif any(term in q for term in ["case law", "precedent", "judgment", "court ruling", "kanoon", " landmark "]):
+            ctx["requires_tool_call"] = True
+            ctx["planned_tool"] = "kanoon_case_search"
+        elif any(term in q for term in ["gazette", "official publication", "indiacode", "enactment date", "registry"]):
+            ctx["requires_tool_call"] = True
+            ctx["planned_tool"] = "indiacode_fetcher"
+        elif re.search(r"\b(?:section|sec\.?)\s*\d+[a-z]*\b", q) and any(act in q for act in ["act", "code", "sanhita", "adhiniyam", "ipc", "crpc", "bns", "it"]):
+            # Specific section lookup via MCP tool
             ctx["requires_tool_call"] = True
             ctx["planned_tool"] = "local_provision_lookup"
         else:
@@ -483,29 +524,71 @@ class ResearchStateMachine:
     async def _run_retrieve(self, ctx: Dict[str, Any], budget: ExecutionBudget) -> StateStepTrace:
         t0 = time.time()
         budget.record_step()
-        t1_results = self.tier1_retriever.query(ctx["query"])
-        t2_results = self.tier2_retriever.query(ctx["session_id"], ctx["query"])
 
-        # Vault-scoped evidence retrieval (Spec 01 §5 / Task 2.3)
+        if ctx.get("is_conversational"):
+            ctx["retrieved_chunks"] = []
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.RETRIEVE.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="success",
+                details={"chunks_found": 0, "conversational": True}
+            )
+
+        profile = ctx.get("profile") or settings.reasoning.for_effort("medium")
+        top_k = int(profile["retrieval_top_k"])
+        t_lex = time.perf_counter()
+        t1_results = self.tier1_retriever.query(ctx["query"], top_k=top_k)
+        t2_results = self.tier2_retriever.query(ctx["session_id"], ctx["query"], top_k=top_k, user_id=ctx.get("user_id"))
+
+        # Vault-scoped evidence retrieval (ownership already enforced by the API layer)
         vault_id = ctx.get("vault_id")
         if vault_id:
             try:
                 from app.services.ingest import ingest_service
-                vault_evidence = ingest_service.query_vault(vault_id, ctx["query"], top_k=3)
-                t2_results.extend(vault_evidence)
+                t2_results.extend(ingest_service.query_vault(vault_id, ctx["query"], top_k=top_k))
             except Exception as e:
-                logger.debug(f"Vault retrieval notice: {e}")
+                logger.debug("Vault retrieval notice: %s", type(e).__name__)
+        retrieval_ms = (time.perf_counter() - t_lex) * 1000
+
+        # Citation-graph context expansion: statutory sections that retrieved sections cite in their own text.
+        graph_added = 0
+        graph_ms = 0.0
+        if int(profile.get("graph_expansion", 0)) and t1_results:
+            t_g = time.perf_counter()
+            try:
+                from app.services.citation_graph_service import citation_graph_service
+                neighbors = citation_graph_service.corpus_neighbors(
+                    t1_results, limit=max(1, int(profile["max_evidence_chunks"]) // 3)
+                )
+                have = {(str(c.get("act")), str(c.get("section"))) for c in t1_results}
+                for n in neighbors:
+                    if (str(n.get("act")), str(n.get("section"))) not in have:
+                        t1_results.append(n)
+                        graph_added += 1
+            except Exception as e:
+                logger.debug("Graph expansion skipped: %s", type(e).__name__)
+            graph_ms = (time.perf_counter() - t_g) * 1000
 
         combined = t1_results + t2_results
+        # Cap to the budget instead of failing the request when many sources match.
+        remaining = max(0, budget.max_retrieved_docs - budget.docs_retrieved)
+        combined = combined[:remaining]
         budget.record_docs(len(combined))
-        ctx["retrieved_chunks"] = combined[:budget.max_retrieved_docs]
+        ctx["retrieved_chunks"] = combined
+        ctx["metrics"].update({
+            "retrieval_ms": round(retrieval_ms, 2),
+            "graph_expansion_ms": round(graph_ms, 2),
+            "graph_neighbors_added": graph_added,
+            "retrieved_chunks": len(combined),
+        })
 
         return StateStepTrace(
             step_number=budget.steps_taken,
             state=AgentState.RETRIEVE.value,
             duration_ms=(time.time() - t0) * 1000,
             outcome="success",
-            details={"chunks_found": len(combined)}
+            details={"chunks_found": len(combined), "graph_neighbors_added": graph_added, "top_k": top_k}
         )
 
     def _extract_tool_arguments(self, tool_name: str, query: str, session_id: str) -> Dict[str, Any]:
@@ -514,10 +597,12 @@ class ResearchStateMachine:
         q = query.strip()
         
         act_match = re.search(r"(?i)\b([A-Za-z\s]+?)\s+(?:Act|Code|Sanhita)(?:\s*,?\s*\d{4})?", q)
-        act_name = act_match.group(0).strip() if act_match else "Information Technology Act, 2000"
-        
+        act_name = act_match.group(0).strip() if act_match else ""
+
         sec_match = re.search(r"(?i)\b(?:section|sec\.?)\s*(\d+[A-Za-z]*)", q)
-        section = f"Section {sec_match.group(1)}" if sec_match else "Section 66"
+        section = f"Section {sec_match.group(1)}" if sec_match else ""
+        if tool_name in ("local_provision_lookup", "live_statute_checker") and not (act_name and section):
+            return {}  # never substitute a default statute the user did not ask about
 
         if tool_name == "local_statute_search":
             return {"query": q, "top_k": 5}
@@ -552,15 +637,23 @@ class ResearchStateMachine:
                 details={"circuit_breaker": "OPEN", "skipped": True}
             )
 
-        budget.record_tool_call()
         tool_args = self._extract_tool_arguments(tool_name, ctx["query"], ctx["session_id"])
+        if not tool_args:
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.TOOL_CALL.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="skipped",
+                details={"tool_name": tool_name, "reason": "query does not name a specific act and section"}
+            )
+        budget.record_tool_call()
         try:
             # Safe dispatch through MCP gateway with output sanitization
             res: MCPResponse = mcp_gateway.execute_tool(
                 tool_name=tool_name,
                 arguments=tool_args,
                 session_id=ctx["session_id"],
-                network_mode=settings.network.default_mode
+                network_mode=None
             )
             if res.success:
                 circuit_breaker.record_success("TOOL_CALL")
@@ -584,8 +677,53 @@ class ResearchStateMachine:
     async def _run_evidence_validation(self, ctx: Dict[str, Any], budget: ExecutionBudget) -> StateStepTrace:
         t0 = time.time()
         budget.record_step()
-        # Consolidate retrieved chunks and tool results
+        # Consolidate retrieved chunks and MCP tool results
         valid_chunks = list(ctx.get("retrieved_chunks", []))
+        
+        # Incorporate verified MCP tool results directly into model evidence context
+        for tr in ctx.get("tool_results", []):
+            if isinstance(tr, dict):
+                if "results" in tr and isinstance(tr["results"], list):
+                    for r in tr["results"]:
+                        if isinstance(r, dict):
+                            r_copy = dict(r)
+                            r_copy["doc_type"] = "mcp_tool_result"
+                            valid_chunks.append(r_copy)
+                elif tr.get("found") and tr.get("text"):
+                    valid_chunks.append({
+                        "act": tr.get("act", "Statutory Provision"),
+                        "section": tr.get("section", ""),
+                        "text": tr.get("text", ""),
+                        "doc_type": "mcp_tool_result",
+                        "source": "mcp_provision_lookup"
+                    })
+                elif "cases" in tr and isinstance(tr["cases"], list):
+                    for c in tr["cases"]:
+                        if isinstance(c, dict):
+                            valid_chunks.append({
+                                "act": c.get("title", "Case Precedent"),
+                                "section": c.get("citation", ""),
+                                "text": f"Judicial Precedent: {c.get('title')} ({c.get('citation')}). Relevance: {c.get('relevance', 'High')}.",
+                                "doc_type": "mcp_tool_result",
+                                "source": "mcp_case_search"
+                            })
+                elif tr.get("details"):
+                    valid_chunks.append({
+                        "act": tr.get("act_name", "Statutory Authority"),
+                        "section": tr.get("section") or "Enactment Status",
+                        "text": f"Status: {tr.get('status', 'In Force')}. {tr.get('details')}",
+                        "doc_type": "mcp_tool_result",
+                        "source": "mcp_statute_checker"
+                    })
+                elif tr.get("official_title"):
+                    valid_chunks.append({
+                        "act": tr.get("official_title", "Official Gazette"),
+                        "section": tr.get("gazette_ref") or "Gazette Reference",
+                        "text": f"Official Enactment Date: {tr.get('enactment_date', 'N/A')}. Gazette Reference: {tr.get('gazette_ref', 'N/A')}",
+                        "doc_type": "mcp_tool_result",
+                        "source": "mcp_indiacode"
+                    })
+
         query_text = ctx.get("query", "").lower()
         
         # Statutory enactment relevancy gate (Task 1.2.1)
@@ -622,12 +760,27 @@ class ResearchStateMachine:
 
                 matched_act_chunks = []
                 for c in valid_chunks:
+                    # Preserve user, vault documents, and verified MCP tool results from pure statutory enactment pruning
+                    if c.get("doc_type") in ("user_document", "vault_document", "mcp_tool_result"):
+                        matched_act_chunks.append(c)
+                        continue
                     chunk_act = (c.get("act") or "").lower()
                     chunk_words = set(re.findall(r"\b[a-z]+\b", chunk_act))
                     if any(tok in chunk_act or tok in chunk_words for tok in expanded_tokens):
                         matched_act_chunks.append(c)
                 valid_chunks = matched_act_chunks
         
+        if ctx.get("is_conversational"):
+            ctx["validated_evidence"] = []
+            ctx["sources"] = []
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.EVIDENCE_VALIDATION.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="success",
+                details={"conversational": True}
+            )
+
         # Numeric threshold gate (Task 1.2.1): Require valid retrieved evidence
         if not valid_chunks:
             ctx["insufficient_evidence"] = True
@@ -642,12 +795,30 @@ class ResearchStateMachine:
                 details={"reason": "No relevant statutory chunks found in corpus matching the queried legal enactment"}
             )
 
-        fitted_chunks, _ = self.token_budget_manager.fit_chunks(
-            base_prompt_tokens=500,
-            chunks=valid_chunks
+        profile = ctx.get("profile") or settings.reasoning.for_effort("medium")
+        context_window = self._model_context_window(ctx.get("model"))
+        budget_mgr = TokenBudgetManager(
+            context_limit=int(context_window * float(profile["context_fraction"])),
+            max_output_tokens=int(profile["max_output_tokens"]),
+        )
+        system_prompt_tokens = max(1, len(self.trusted_context.get_v4_system_prompt()) // 4)
+        ranked = self._dedupe_evidence(valid_chunks)[: int(profile["max_evidence_chunks"])]
+        fitted_chunks, dropped = budget_mgr.fit_chunks(
+            base_prompt_tokens=system_prompt_tokens + len(ctx.get("query", "")) // 4,
+            chunks=ranked,
         )
         ctx["validated_evidence"] = fitted_chunks
         ctx["sources"] = self.citation_builder.build(fitted_chunks)
+        evidence_tokens = sum(len(c.get("text", "")) // 4 for c in fitted_chunks)
+        ctx["metrics"].update({
+            "max_context_tokens": context_window,
+            "context_budget_tokens": budget_mgr.available_prompt_tokens,
+            "system_prompt_tokens_est": system_prompt_tokens,
+            "evidence_tokens_est": evidence_tokens,
+            "evidence_chunks_used": len(fitted_chunks),
+            "evidence_chunks_dropped": dropped + max(0, len(valid_chunks) - len(ranked)),
+            "remaining_context_budget_est": max(0, budget_mgr.available_prompt_tokens - evidence_tokens - system_prompt_tokens),
+        })
 
         return StateStepTrace(
             step_number=budget.steps_taken,
@@ -660,12 +831,48 @@ class ResearchStateMachine:
     async def _run_synthesis(self, ctx: Dict[str, Any], budget: ExecutionBudget, retry_note: Optional[str] = None) -> StateStepTrace:
         t0 = time.time()
         budget.record_step()
+
+        if ctx.get("is_conversational"):
+            runtime = RuntimeManager.get()
+            target_model = ctx["model"]
+            conversational_prompt = (
+                f"You are DFrag Legal Copilot, an AI legal workspace assistant specializing in Indian Law. "
+                f"Respond to the user in a warm, polite, and natural human-to-human conversational tone. "
+                f"Acknowledge their greeting or query, confirm that you are running and ready to help, "
+                f"and guide them on how you can assist with Indian statutory research, case precedents, contract clauses, or legal drafting.\n\n"
+                f"User: {ctx['query']}\n\nAssistant:"
+            )
+            ctx["prompt"] = conversational_prompt
+            prompt_token_estimate = len(conversational_prompt) // 4
+            budget.record_tokens(prompt_token_estimate)
+            try:
+                raw_answer = await runtime.generate(
+                    conversational_prompt, model=target_model, options={"num_predict": 256}
+                )
+            except Exception as exc:
+                logger.warning("Conversational generation unavailable: %s", type(exc).__name__)
+                ctx["failure_kind"] = "model_unavailable"
+                raw_answer = (
+                    "The local model is not available right now, so I can't reply conversationally. "
+                    "You can still ask about statutes, sections or your uploaded documents; retrieved excerpts "
+                    "will be shown even without the model. Check Hardware & Models to activate a model."
+                )
+            ctx["raw_answer"] = raw_answer
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.SYNTHESIS.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="success",
+                details={"raw_length": len(raw_answer), "model": target_model, "conversational": True}
+            )
+
         # Build secure prompt
         evidence = ctx.get("validated_evidence", [])
+        profile = ctx.get("profile") or settings.reasoning.for_effort("medium")
         prompt = self.trusted_context.build_prompt(
             ctx["query"],
             evidence,
-            reasoning_effort=ctx.get("reasoning_effort", "off")
+            reasoning_effort="high" if int(profile.get("deep_thinking", 0)) else "off",
         )
         if retry_note:
             prompt += f"\n\n[CONSTRAINED_RETRY_INSTRUCTION: Ensure all claims cite the provided legal sections strictly. Prior rejection reason: {retry_note}]"
@@ -678,25 +885,31 @@ class ResearchStateMachine:
         prompt_token_estimate = len(prompt) // 4
         budget.record_tokens(prompt_token_estimate)
 
+        options = {
+            "num_predict": int(profile["max_output_tokens"]),
+            "num_ctx": self._model_context_window(target_model),
+        }
+        gen_metrics: Dict[str, Any] = {}
+        t_gen = time.perf_counter()
         try:
-            raw_answer = await runtime.generate(prompt, model=target_model)
-        except Exception as exc:
-            is_conn_error = "unreachable" in str(exc).lower() or "connect" in str(exc).lower() or "timeout" in str(exc).lower()
-            if not is_conn_error:
-                fallback_model = settings.OLLAMA_FALLBACK_MODEL.strip() or settings.DEFAULT_MODEL
-                if fallback_model.lower() == target_model.lower():
-                    fallback_model = "qwen2.5:3b" if target_model.lower() != "qwen2.5:3b" else "gemma2:2b"
-                logger.warning(f"Synthesis primary model error on '{target_model}': {exc}. Trying fallback '{fallback_model}'.")
-                try:
-                    raw_answer = await runtime.generate(prompt, model=fallback_model)
-                except Exception as fallback_exc:
-                    logger.warning(f"Synthesis fallback model also unavailable ({fallback_exc}). Grounding answer from validated evidence chunks.")
-                    ctx["failure_kind"] = "model_unavailable"
-                    raw_answer = self._synthesize_grounded_answer(ctx["query"], evidence)
+            # The answering model is exactly the resolved model: no silent substitution on failure.
+            if hasattr(runtime, "generate_with_metrics"):
+                raw_answer, gen_metrics = await runtime.generate_with_metrics(prompt, model=target_model, options=options)
             else:
-                logger.warning(f"Ollama daemon unreachable ({exc}). Grounding answer directly from validated evidence chunks.")
-                ctx["failure_kind"] = "model_unavailable"
-                raw_answer = self._synthesize_grounded_answer(ctx["query"], evidence)
+                raw_answer = await runtime.generate(prompt, model=target_model, options=options)
+        except Exception as exc:
+            logger.warning("Model '%s' unavailable for synthesis (%s); returning evidence excerpts only.", target_model, type(exc).__name__)
+            ctx["failure_kind"] = "model_unavailable"
+            ctx["model_error"] = str(exc)[:300]
+            raw_answer = self._synthesize_grounded_answer(ctx["query"], evidence)
+        ctx["metrics"].update({
+            "model_latency_ms": round((time.perf_counter() - t_gen) * 1000, 2),
+            "max_output_tokens": options["num_predict"],
+            **{k: v for k, v in gen_metrics.items() if v is not None},
+        })
+        if gen_metrics.get("hit_output_limit"):
+            # Distinguish "ran out of generation budget" from "the evidence only supports a short answer".
+            ctx["output_truncated"] = True
 
         # Extract <deep_thinking> CoT reasoning tags if present
         import re
@@ -704,16 +917,9 @@ class ResearchStateMachine:
         if dt_match:
             ctx["reasoning_trace"] = dt_match.group(1).strip()
             raw_answer = re.sub(r"<deep_thinking>.*?</deep_thinking>", "", raw_answer, flags=re.DOTALL | re.IGNORECASE).strip()
-        elif ctx.get("reasoning_effort") == "high":
-            ctx["reasoning_trace"] = (
-                f"1. Classified intent: {ctx.get('intent', 'statutory_analysis')}\n"
-                f"2. Evaluated {len(evidence)} statutory evidence chunks for relevance.\n"
-                f"3. Validated legal boundaries against Indian jurisdiction and current enactments.\n"
-                f"4. Synthesized authoritative grounded response with strict section-level citations."
-            )
 
-        answer_token_estimate = len(raw_answer) // 4
-        budget.record_tokens(answer_token_estimate)
+        answer_tokens = gen_metrics.get("generation_tokens") if gen_metrics else None
+        budget.record_tokens(int(answer_tokens) if isinstance(answer_tokens, int) else len(raw_answer) // 4)
 
         ctx["raw_answer"] = raw_answer
 
@@ -731,7 +937,31 @@ class ResearchStateMachine:
         evidence = ctx.get("validated_evidence", [])
         raw_ans = ctx.get("raw_answer", "")
 
+        if ctx.get("is_conversational"):
+            ctx["verification_passed"] = True
+            ctx["clean_answer"] = raw_ans
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.LEGAL_VERIFICATION.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="success",
+                details={"is_valid": True, "conversational": True}
+            )
+
+        if ctx.get("failure_kind") == "model_unavailable":
+            ctx["verification_passed"] = True
+            ctx["clean_answer"] = raw_ans
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.LEGAL_VERIFICATION.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="success",
+                details={"is_valid": True, "evidence_only": True}
+            )
+
+        t_v = time.perf_counter()
         is_valid, error_reason = self.output_guard.validate(raw_ans, evidence, ctx["prompt"])
+        ctx["metrics"]["output_validation_ms"] = round((time.perf_counter() - t_v) * 1000, 2)
         ctx["verification_passed"] = is_valid
 
         if not is_valid:
@@ -742,6 +972,11 @@ class ResearchStateMachine:
         else:
             clean_ans = self.output_guard.last_clean_answer
             ctx["clean_answer"] = self.response_formatter.format(clean_ans)
+            if ctx.get("output_truncated"):
+                ctx["clean_answer"] += (
+                    "\n\n_Note: the answer reached the output limit for this reasoning level and may be incomplete. "
+                    "Ask again with a higher reasoning level for a fuller analysis._"
+                )
 
         return StateStepTrace(
             step_number=budget.steps_taken,
@@ -751,6 +986,36 @@ class ResearchStateMachine:
             details={"is_valid": is_valid, "error_reason": error_reason}
         )
 
+    @staticmethod
+    def _model_context_window(model: Optional[str]) -> int:
+        """Smaller of the configured context and the model's registry context window (if known)."""
+        configured = int(settings.GENERATOR_CONTEXT_TOKENS)
+        try:
+            from app.system.model_registry import ModelRegistry
+            from app.runtime.model_state import normalize_tag
+            reg = ModelRegistry()
+            entry = reg.get(model or "") or next(
+                (m for m in reg.all_models() if normalize_tag(m.ollama_tag) == normalize_tag(model)), None
+            )
+            if entry and entry.context_window:
+                return min(configured, int(entry.context_window))
+        except Exception:
+            pass
+        return configured
+
+    @staticmethod
+    def _dedupe_evidence(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Drops exact-duplicate evidence (same source/section/text) while keeping rank order."""
+        seen = set()
+        out = []
+        for c in chunks:
+            key = (str(c.get("act")), str(c.get("section")), (c.get("text") or "")[:200])
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(c)
+        return out
+
     def _format_insufficient_evidence_refusal(self, ctx: Dict[str, Any]) -> str:
         """
         Formats an honest, structured refusal when retrieval returns no relevant provisions (Task 1.2.1, Doc 04 §4.1).
@@ -758,20 +1023,32 @@ class ResearchStateMachine:
         q = ctx.get("query", "").strip()
         import re
         act_match = re.search(r"(?i)\b(?:the\s+)?([a-z\s]{3,35}\s+(?:act|code|sanhita|adhiniyam)(?:\s*,?\s*\d{4})?)\b", q)
-        targeted_act_display = act_match.group(1).strip().title() if act_match else None
+        targeted_act_display = None
+        if act_match:
+            name = re.sub(r"(?i)^.*?\b(?:of|under|in|per)\s+(?:the\s+)?", "", act_match.group(1)).strip()
+            targeted_act_display = name.title() if name else None
+        indexed = self._indexed_act_matching(targeted_act_display) if targeted_act_display else None
 
-        if targeted_act_display:
+        if targeted_act_display and indexed:
+            lines = [
+                "### Insufficient verified evidence",
+                "",
+                f"*{indexed}* is indexed, but no passage in its indexed text matched this question closely enough to answer it reliably.",
+                "",
+                "**What you can do**: name the specific section, rephrase using the statute's own wording, or check the section list in the Statute Library.",
+            ]
+        elif targeted_act_display:
             lines = [
                 "### Statutory Corpus Scope Notice: Insufficient Grounded Evidence",
                 "",
-                f"The requested statute (*{targeted_act_display}*) is not currently present in the seeded statutory corpus.",
+                f"The requested statute (*{targeted_act_display}*) is not in the indexed statutory corpus.",
                 "",
                 "DFrag operates under a strict grounding policy where legal facts must reside in verified retrieval evidence rather than parametric model memory.",
                 "",
                 "**Recommended Actions**:",
                 f"1. **Upload Statute to Project Vault**: Upload '{targeted_act_display}' (PDF or text) into your active Project Vault for custom indexing and analysis.",
                 "2. **Browse Statute Library**: View indexed statutory enactments in the Statute Library catalog.",
-                "3. **Query Seeded Acts**: Core seeded Acts include *BNS 2023*, *BNSS 2023*, *BSA 2023*, *IT Act 2000*, *DPDPA 2023*, *Companies Act 2013*, *Contract Act 1872*, and *Consumer Protection Act 2019*."
+                f"3. **Query Indexed Acts**: {self._indexed_acts_sentence()}"
             ]
         else:
             lines = [
@@ -787,6 +1064,46 @@ class ResearchStateMachine:
                 "3. **Refine Terminology**: Avoid conversational phrasing; use canonical Indian legal terminology."
             ]
         return "\n".join(lines)
+
+    @staticmethod
+    def _indexed_act_matching(name: Optional[str]) -> Optional[str]:
+        """Title of an indexed statute whose title contains all distinctive words of `name`."""
+        if not name:
+            return None
+        import re as _re
+        stop = {"the", "act", "code", "of", "and"}
+        words = [w for w in _re.findall(r"[a-z]+", name.lower()) if w not in stop]
+        if not words:
+            return None
+        try:
+            from app.db.engine import get_sync_session
+            from app.db.models import Statute
+            with get_sync_session() as session:
+                for (title,) in session.query(Statute.title).all():
+                    title_words = [w for w in _re.findall(r"[a-z]+", title.lower()) if w not in stop]
+                    # Whole-word match ("contract" -> Indian Contract Act), or a single token that is
+                    # the title's acronym ("IT" -> Information Technology Act). Substring matching
+                    # would let "it" match "digital".
+                    if all(w in title_words for w in words):
+                        return title
+                    if len(words) == 1 and len(title_words) > 1 and words[0] == "".join(t[0] for t in title_words):
+                        return title
+        except Exception:
+            return None
+        return None
+
+    @staticmethod
+    def _indexed_acts_sentence() -> str:
+        try:
+            from app.db.engine import get_sync_session
+            from app.db.models import Statute
+            with get_sync_session() as session:
+                titles = [t for (t,) in session.query(Statute.title).order_by(Statute.title).limit(12).all()]
+        except Exception:
+            titles = []
+        if not titles:
+            return "No statutes are indexed yet. Add act texts to the statutory corpus and re-index."
+        return "Currently indexed: " + ", ".join(f"*{t}*" for t in titles) + "."
 
     def _synthesize_grounded_answer(self, query: str, evidence: List[Dict[str, Any]]) -> str:
         """
@@ -819,9 +1136,10 @@ class ResearchStateMachine:
         sec_title = f" (Sections: {', '.join(sections_found[:4])})" if sections_found else ""
 
         lines = [
-            f"### Statutory Analysis: {act_title}{sec_title}",
+            f"### Retrieved provisions: {act_title}{sec_title}",
             "",
-            "Based on the verified statutory provisions retrieved from the authoritative legal corpus, the following key legal determinations apply:",
+            "The local model did not produce an answer, so no legal analysis was generated. "
+            "These are the most relevant excerpts retrieved from the indexed corpus; read them directly:",
             "",
         ]
 
@@ -833,8 +1151,8 @@ class ResearchStateMachine:
             lines.append("")
 
         lines.append(
-            f"**Legal Grounding & Compliance**: The above statutory provisions govern the inquiry. "
-            f"All citations are verified against local statutory law under {act_title}."
+            "_Excerpts are quoted from the local corpus; whether they fully answer your question, "
+            "and whether the text is current, has not been assessed._"
         )
 
         return "\n".join(lines)
@@ -862,14 +1180,10 @@ class ResearchStateMachine:
             latency_ms=latency_ms
         )
 
-        reasoning_trace = ctx.get("reasoning_trace")
-        if not reasoning_trace and ctx.get("reasoning_effort") == "high":
-            reasoning_trace = (
-                f"1. Classified intent: {ctx.get('intent', 'statutory_analysis')}\n"
-                f"2. Evaluated {len(ctx.get('validated_evidence', []))} statutory evidence chunks for relevance.\n"
-                f"3. Validated legal boundaries against Indian jurisdiction and current enactments.\n"
-                f"4. Synthesized authoritative grounded response with strict section-level citations."
-            )
+        reasoning_trace = ctx.get("reasoning_trace")  # only what the model actually emitted
+        metrics = dict(ctx.get("metrics", {}))
+        metrics["total_latency_ms"] = round(latency_ms, 2)
+        model_used = None if ctx.get("failure_kind") == "model_unavailable" and not ctx.get("is_conversational") else ctx.get("model")
 
         final_answer = ctx.get("clean_answer") or ctx.get("raw_answer", "")
 
@@ -884,8 +1198,8 @@ class ResearchStateMachine:
                 answer=final_answer,
                 citations=sources_dict,
                 sources=sources_dict,
-                model_used=ctx.get("model", settings.DEFAULT_MODEL),
-                runtime_used="local",
+                model_used=model_used or "none",
+                runtime_used=settings.MODEL_RUNTIME,
                 reasoning_trace=reasoning_trace,
                 grounding_score=None,
                 injection_score=ctx.get("injection_score", 0.0),
@@ -914,7 +1228,10 @@ class ResearchStateMachine:
             reasoning_trace=reasoning_trace,
             steps_trace=traces,
             budget_snapshot=budget.snapshot(),
-            latency_ms=latency_ms
+            latency_ms=latency_ms,
+            model_used=model_used,
+            runtime_used=settings.MODEL_RUNTIME,
+            metrics=metrics,
         )
 
 

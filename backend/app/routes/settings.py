@@ -17,9 +17,12 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 class FallbackSettingsUpdateRequest(BaseModel):
     enabled: Optional[bool] = None
     auto_fallback: Optional[bool] = None
+    auto_fallback_enabled: Optional[bool] = None
     active_provider: Optional[Literal["grok", "zai"]] = None
+    provider: Optional[Literal["grok", "zai"]] = None
     grok_key: Optional[str] = None
     zai_key: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 class FallbackTestRequest(BaseModel):
@@ -40,34 +43,48 @@ def get_fallback_settings():
 def update_fallback_settings(req: FallbackSettingsUpdateRequest):
     """
     Updates cloud fallback settings and encrypts new API keys into the vault.
+    Supports both canonical and convenience UI field names.
     """
     try:
+        provider = req.active_provider or req.provider
+        auto_fallback = req.auto_fallback if req.auto_fallback is not None else req.auto_fallback_enabled
+
         api_vault.update_settings(
             enabled=req.enabled,
-            auto_fallback=req.auto_fallback,
-            active_provider=req.active_provider
+            auto_fallback=auto_fallback,
+            active_provider=provider
         )
 
-        if req.grok_key is not None:
-            if req.grok_key.strip():
-                api_vault.set_from_ui("grok", req.grok_key.strip())
+        g_key = req.grok_key
+        z_key = req.zai_key
+        if req.api_key is not None:
+            target_prov = provider or api_vault.active_provider or "grok"
+            if target_prov == "grok":
+                g_key = req.api_key
+            elif target_prov == "zai":
+                z_key = req.api_key
+
+        if g_key is not None:
+            if g_key.strip():
+                api_vault.set_from_ui("grok", g_key.strip())
             else:
                 api_vault.delete("grok")
 
-        if req.zai_key is not None:
-            if req.zai_key.strip():
-                api_vault.set_from_ui("zai", req.zai_key.strip())
+        if z_key is not None:
+            if z_key.strip():
+                api_vault.set_from_ui("zai", z_key.strip())
             else:
                 api_vault.delete("zai")
 
-        return {
-            "status": "success",
-            "message": "Fallback settings updated successfully.",
-            "settings": api_vault.get_status()
-        }
+        vault_status = api_vault.get_status()
+        res = dict(vault_status)
+        res["status"] = "success"
+        res["message"] = "Fallback settings updated successfully."
+        res["settings"] = vault_status
+        return res
     except Exception as exc:
-        logger.error(f"Failed to update fallback settings: {exc}")
-        raise HTTPException(status_code=400, detail=str(exc))
+        logger.error("Failed to update fallback settings: %s", type(exc).__name__)
+        raise HTTPException(status_code=400, detail="Could not update fallback settings.")
 
 
 @router.post("/fallback/test")
@@ -76,6 +93,11 @@ async def test_fallback_key(req: FallbackTestRequest):
     Tests connectivity and authentication against Grok API or Z.ai endpoint.
     Masks credential in all outputs.
     """
+    from app.network.mode_enforcer import mode_enforcer
+    if mode_enforcer.is_offline():
+        # OFFLINE means no outbound calls, including credential checks against cloud providers.
+        raise HTTPException(status_code=409, detail="The workspace is OFFLINE. Switch to ONLINE to test a cloud provider key.")
+
     provider = req.provider.lower()
     test_key = req.key.strip() if req.key else api_vault.get(provider)
 

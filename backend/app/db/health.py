@@ -42,7 +42,7 @@ async def check_db_health() -> Dict[str, Any]:
         }
     except Exception as exc:
         status = "offline"
-        error_msg = str(exc)
+        error_msg = type(exc).__name__
         latency_ms = round((time.perf_counter() - start) * 1000, 2)
         logger.debug(f"Database health check offline: {exc}")
 

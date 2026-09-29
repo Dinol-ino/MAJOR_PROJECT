@@ -11,12 +11,13 @@ class CitationBuilder:
         seen = set()
         citations = []
 
-        # Sort by trust_score descending if available
+        # Keep retrieval rank order; trust score only breaks ties (stable sort).
         sorted_chunks = sorted(chunks, key=lambda c: c.get("trust_score", 0.5), reverse=True)
 
         for chunk in sorted_chunks:
-            act = chunk.get("act", "General Law")
-            section = chunk.get("section", "General")
+            meta = chunk.get("metadata") or {}
+            act = chunk.get("act") or meta.get("act") or meta.get("filename") or "Unknown source"
+            section = str(chunk.get("section") or meta.get("section") or "")
             key = (act.lower(), section.lower())
 
             if key in seen:
@@ -35,7 +36,16 @@ class CitationBuilder:
                     trust_score=chunk.get("trust_score"),
                     freshness_score=chunk.get("freshness_score"),
                     injection_risk_score=chunk.get("injection_risk_score"),
-                    confidence_score=chunk.get("confidence_score")
+                    confidence_score=None,
+                    act_slug=meta.get("act_slug") or chunk.get("act_slug"),
+                    doc_type=chunk.get("doc_type") or meta.get("doc_type"),
+                    source_url=meta.get("source_url") or None,
+                    document_version=meta.get("document_version") or None,
+                    legal_status=meta.get("legal_status") or None,
+                    verified_at=meta.get("verified_at") or None,
+                    filename=meta.get("filename") or None,
+                    retrieval_score=chunk.get("score"),
+                    via=meta.get("via"),
                 )
             )
 

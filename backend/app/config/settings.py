@@ -1,11 +1,27 @@
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
-# Load .env from backend directory or project root
-load_dotenv()
-_root_env = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
+# Load .env from the backend directory, then the project root.
+#
+# Precedence, strongest first:
+#   1. real environment variables (Docker Compose `environment:`, shell exports)
+#   2. backend/.env         — native-run configuration
+#   3. <project root>/.env  — Compose configuration; fills gaps only
+#
+# load_dotenv() never overrides an already-set value, so loading backend/.env
+# first is what gives it priority over the root file. Both paths are derived
+# explicitly rather than via find_dotenv()'s upward walk, which resolves against
+# the calling frame and so previously returned backend/.env for both calls —
+# leaving the project-root file unread outside Docker.
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+_backend_env = os.path.join(_BACKEND_DIR, ".env")
+if os.path.exists(_backend_env):
+    load_dotenv(_backend_env)
+
+_root_env = os.path.join(os.path.dirname(_BACKEND_DIR), ".env")
 if os.path.exists(_root_env):
     load_dotenv(_root_env)
 
@@ -20,14 +36,37 @@ class ModelConfig(BaseModel):
     runtime: str = Field(default_factory=lambda: os.getenv("MODEL_RUNTIME", "ollama"))  # ollama | llamacpp | transformers | mock
     llamacpp_gpu: bool = Field(default_factory=lambda: os.getenv("LLAMACPP_GPU", "false").lower() == "true")
     llamacpp_model_path: str = Field(default_factory=lambda: os.getenv("LLAMACPP_MODEL_PATH", ""))
-    num_gpu_layers: int = Field(default_factory=lambda: int(os.getenv("OLLAMA_NUM_GPU_LAYERS", "0")))  # -1=auto, 0=CPU-only
+    num_gpu_layers: int = Field(default_factory=lambda: int(os.getenv("OLLAMA_NUM_GPU_LAYERS", "-1")))  # -1=let Ollama decide, 0=CPU-only, N=layers
     context_tokens: int = Field(default_factory=lambda: int(os.getenv("GENERATOR_CONTEXT_TOKENS", "8192")))
     max_output_tokens: int = Field(default_factory=lambda: int(os.getenv("GENERATOR_MAX_OUTPUT_TOKENS", "2048")))
     models_dir: str = Field(default_factory=lambda: os.getenv("MODELS_DIR", "./models"))
     routing_enabled: bool = Field(default_factory=lambda: os.getenv("MODEL_ROUTING_ENABLED", "true").lower() == "true")
     model_warmup_on_startup: bool = Field(default_factory=lambda: os.getenv("MODEL_WARMUP_ON_STARTUP", "true").lower() == "true")
-    auto_pull_on_startup: bool = Field(default_factory=lambda: os.getenv("AUTO_PULL_ON_STARTUP", "true").lower() == "true")
+    # Downloads are an explicit user action by default. Opting in via env is itself an explicit operator decision.
+    auto_pull_on_startup: bool = Field(default_factory=lambda: os.getenv("AUTO_PULL_ON_STARTUP", "false").lower() == "true")
+    # Never download a model in the middle of a chat request unless the operator explicitly allows it.
+    auto_pull_on_demand: bool = Field(default_factory=lambda: os.getenv("AUTO_PULL_ON_DEMAND", "false").lower() == "true")
+    generation_retries: int = Field(default_factory=lambda: int(os.getenv("OLLAMA_GENERATION_RETRIES", "2")))
+    tags_cache_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_TAGS_CACHE_SECONDS", "5")))
+    probe_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_PROBE_TIMEOUT_SECONDS", "3")))
+    warmup_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("MODEL_WARMUP_TIMEOUT_SECONDS", "180")))
     model_idle_unload_seconds: int = Field(default_factory=lambda: int(os.getenv("MODEL_IDLE_UNLOAD_SECONDS", "600")))
+
+
+def _csv_env(name: str, default: str) -> List[str]:
+    return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
+
+class AuthConfig(BaseModel):
+    """Session/JWT authentication policy. Secrets are read from the environment only."""
+    jwt_secret: str = Field(default_factory=lambda: os.getenv("JWT_SECRET_KEY", ""))
+    jwt_algorithm: str = Field(default_factory=lambda: os.getenv("JWT_ALGORITHM", "HS256"))
+    session_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("AUTH_SESSION_TTL_SECONDS", str(7 * 86400))))
+    password_min_length: int = Field(default_factory=lambda: int(os.getenv("AUTH_PASSWORD_MIN_LENGTH", "8")))
+    registration_open: bool = Field(default_factory=lambda: os.getenv("AUTH_REGISTRATION_OPEN", "true").lower() == "true")
+    max_failed_attempts: int = Field(default_factory=lambda: int(os.getenv("AUTH_MAX_FAILED_ATTEMPTS", "5")))
+    lockout_seconds: int = Field(default_factory=lambda: int(os.getenv("AUTH_LOCKOUT_SECONDS", "900")))
+    token_cache_max_entries: int = Field(default_factory=lambda: int(os.getenv("AUTH_TOKEN_CACHE_MAX_ENTRIES", "2048")))
 
 
 class SecurityConfig(BaseModel):
@@ -36,12 +75,15 @@ class SecurityConfig(BaseModel):
     enable_pii_scanning: bool = Field(default_factory=lambda: os.getenv("ENABLE_PII_SCANNING", "true").lower() == "true")
     pii_entities: List[str] = ["PHONE_NUMBER", "EMAIL_ADDRESS", "AADHAAR_NUMBER", "PAN_NUMBER", "CREDIT_CARD", "IP_ADDRESS"]
     max_query_chars: int = 2000
-    allowed_origins: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "tauri://localhost"]
+    allowed_origins: List[str] = Field(default_factory=lambda: _csv_env("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,tauri://localhost"))
+    # The unshielded baseline bypasses Layers 1-3 and exists only for offline security evaluation.
+    allow_unshielded_baseline: bool = Field(default_factory=lambda: os.getenv("ALLOW_UNSHIELDED_BASELINE", "false").lower() == "true")
     allow_credentials: bool = Field(default_factory=lambda: os.getenv("ALLOW_CREDENTIALS", "true").lower() == "true")
 
 
 
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Same directory as _BACKEND_DIR above; kept under its original name for callers.
+_BASE_DIR = _BACKEND_DIR
 
 class RetrievalConfig(BaseModel):
     chroma_persist_dir: str = Field(default_factory=lambda: os.getenv("CHROMA_PERSIST_DIR", os.path.join(_BASE_DIR, "chroma_db")))
@@ -104,12 +146,44 @@ class OrchestratorConfig(BaseModel):
     max_steps: int = Field(default_factory=lambda: int(os.getenv("MAX_STEPS_PER_REQUEST", "8")))
     max_tool_calls: int = Field(default_factory=lambda: int(os.getenv("MAX_TOOL_CALLS_PER_REQUEST", "5")))
     max_tokens: int = Field(default_factory=lambda: int(os.getenv("MAX_TOKENS_PER_REQUEST", "8192")))
-    max_execution_time_seconds: float = Field(default_factory=lambda: float(os.getenv("MAX_EXECUTION_TIME_SECONDS", "60.0")))
+    max_execution_time_seconds: float = Field(default_factory=lambda: float(os.getenv("MAX_EXECUTION_TIME_SECONDS", "180.0")))
     max_retrieved_docs: int = Field(default_factory=lambda: int(os.getenv("MAX_RETRIEVED_DOCS_PER_REQUEST", "15")))
     max_network_requests: int = Field(default_factory=lambda: int(os.getenv("MAX_NETWORK_REQUESTS_PER_REQUEST", "5")))
     retry_budget: int = Field(default_factory=lambda: int(os.getenv("RETRY_BUDGET", "2")))
     circuit_breaker_failure_threshold: int = Field(default_factory=lambda: int(os.getenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "3")))
     circuit_breaker_recovery_seconds: float = Field(default_factory=lambda: float(os.getenv("CIRCUIT_BREAKER_RECOVERY_SECONDS", "120.0")))
+
+
+def _profile(level: str, **defaults) -> Dict[str, Any]:
+    """Reasoning profile with per-field env overrides, e.g. REASONING_HIGH_MAX_OUTPUT_TOKENS=3072."""
+    out: Dict[str, Any] = {}
+    for key, default in defaults.items():
+        raw = os.getenv(f"REASONING_{level.upper()}_{key.upper()}")
+        out[key] = type(default)(raw) if raw not in (None, "") else default
+    return out
+
+
+class ReasoningConfig(BaseModel):
+    """
+    LOW / MEDIUM / HIGH change real resource budgets (retrieval depth, evidence volume,
+    tool calls, generation length, verification retries). All values stay under the
+    orchestrator hard ceilings in OrchestratorConfig.
+    """
+    low: Dict[str, Any] = Field(default_factory=lambda: _profile(
+        "low", retrieval_top_k=3, max_evidence_chunks=4, max_tool_calls=0, max_output_tokens=512,
+        retry_budget=0, context_fraction=0.5, graph_expansion=0, deep_thinking=0))
+    medium: Dict[str, Any] = Field(default_factory=lambda: _profile(
+        "medium", retrieval_top_k=5, max_evidence_chunks=8, max_tool_calls=2, max_output_tokens=1024,
+        retry_budget=1, context_fraction=0.75, graph_expansion=1, deep_thinking=0))
+    high: Dict[str, Any] = Field(default_factory=lambda: _profile(
+        "high", retrieval_top_k=8, max_evidence_chunks=12, max_tool_calls=4, max_output_tokens=2048,
+        retry_budget=2, context_fraction=0.9, graph_expansion=1, deep_thinking=1))
+
+    def for_effort(self, effort: Optional[str]) -> Dict[str, Any]:
+        level = (effort or "medium").lower()
+        level = {"off": "low", "none": "low", "minimal": "low"}.get(level, level)
+        profile = getattr(self, level, None) or self.medium
+        return {"level": level if level in ("low", "medium", "high") else "medium", **profile}
 
 
 class ObservabilityConfig(BaseModel):
@@ -121,8 +195,8 @@ class ObservabilityConfig(BaseModel):
 
 
 class CloudFallbackConfig(BaseModel):
-    enabled: bool = Field(default_factory=lambda: os.getenv("CLOUD_FALLBACK_ENABLED", "true").lower() == "true")
-    auto_fallback: bool = Field(default_factory=lambda: os.getenv("CLOUD_AUTO_FALLBACK", "true").lower() == "true")
+    enabled: bool = Field(default_factory=lambda: os.getenv("CLOUD_FALLBACK_ENABLED", "false").lower() == "true")
+    auto_fallback: bool = Field(default_factory=lambda: os.getenv("CLOUD_AUTO_FALLBACK", "false").lower() == "true")
     active_provider: str = Field(default_factory=lambda: os.getenv("CLOUD_PROVIDER", "grok").lower())  # grok | zai
     grok_api_base: str = Field(default_factory=lambda: os.getenv("GROK_API_BASE", "https://api.x.ai/v1"))
     grok_model: str = Field(default_factory=lambda: os.getenv("GROK_MODEL", "grok-2"))
@@ -144,6 +218,7 @@ class Settings(BaseModel):
     Provides structured concern objects and flat backward-compatible property accessors.
     """
     model: ModelConfig = Field(default_factory=ModelConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
@@ -154,11 +229,19 @@ class Settings(BaseModel):
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     cloud_fallback: CloudFallbackConfig = Field(default_factory=CloudFallbackConfig)
     graph: GraphConfig = Field(default_factory=GraphConfig)
+    reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
 
     # Flat backward-compatible aliases
     @property
     def OLLAMA_URL(self) -> str:
-        return self.model.ollama_url
+        url = self.model.ollama_url
+        if "://ollama:" in url:
+            import socket
+            try:
+                socket.gethostbyname("ollama")
+            except Exception:
+                return url.replace("://ollama:", "://127.0.0.1:")
+        return url
 
     @property
     def HF_TOKEN(self) -> str:

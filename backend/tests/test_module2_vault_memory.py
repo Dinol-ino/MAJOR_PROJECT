@@ -50,39 +50,54 @@ def test_write_through_memory_rehydration():
 def test_user_isolation_no_cross_leakage():
     """
     Module 2 Task 2.1.2 / Acceptance Criteria:
-    ProjectVault and Conversation entities are strictly scoped to server-side user_id.
-    User A cannot see User B's vaults or conversations.
+    ProjectVault and Conversation entities are strictly scoped to the authenticated user.
+    Client-supplied user_id values are ignored; User A cannot list, read or chat against User B's vault.
     """
-    user_a = f"attorney_a_{uuid.uuid4().hex[:6]}"
-    user_b = f"attorney_b_{uuid.uuid4().hex[:6]}"
+    from tests.auth_helpers import register_user
 
-    # Create vault for User A
+    user_a, headers_a = register_user(client, "attorney_a")
+    user_b, headers_b = register_user(client, "attorney_b")
+
     v_a = client.post("/vaults", json={
         "vault_name": "Matter Alpha (Confidential)",
-        "user_id": user_a,
+        "user_id": user_b["id"],  # spoof attempt: must be ignored
         "description": "User A private case"
-    }).json()
+    }, headers=headers_a).json()
     vault_a_id = v_a["id"]
+    assert v_a["user_id"] == user_a["id"]
 
-    # Create vault for User B
     v_b = client.post("/vaults", json={
         "vault_name": "Matter Beta (Confidential)",
-        "user_id": user_b,
         "description": "User B private case"
-    }).json()
+    }, headers=headers_b).json()
     vault_b_id = v_b["id"]
 
-    # List vaults for User A
-    resp_a = client.get(f"/vaults?user_id={user_a}").json()
-    vault_ids_a = [v["id"] for v in resp_a["vaults"]]
+    vault_ids_a = [v["id"] for v in client.get("/vaults", headers=headers_a).json()["vaults"]]
     assert vault_a_id in vault_ids_a
     assert vault_b_id not in vault_ids_a
 
-    # List vaults for User B
-    resp_b = client.get(f"/vaults?user_id={user_b}").json()
-    vault_ids_b = [v["id"] for v in resp_b["vaults"]]
+    # Spoofed ?user_id must not widen the listing.
+    spoof = client.get(f"/vaults?user_id={user_b['id']}", headers=headers_a).json()
+    assert vault_b_id not in [v["id"] for v in spoof["vaults"]]
+
+    vault_ids_b = [v["id"] for v in client.get("/vaults", headers=headers_b).json()["vaults"]]
     assert vault_b_id in vault_ids_b
     assert vault_a_id not in vault_ids_b
+
+    # Direct object access across users is indistinguishable from "not found".
+    assert client.get(f"/vaults/{vault_b_id}", headers=headers_a).status_code == 404
+    assert client.get(f"/vaults/{vault_b_id}/documents", headers=headers_a).status_code == 404
+    assert client.get(f"/vaults/{vault_b_id}/conversations", headers=headers_a).status_code == 404
+    assert client.delete(f"/vaults/{vault_b_id}", headers=headers_a).status_code == 404
+
+    # Chat cannot be pointed at another user's vault.
+    resp = client.post("/chat", json={
+        "message": "Summarise the matter documents",
+        "session_id": f"sess_{vault_a_id[:8]}",
+        "shield_on": True,
+        "vault_id": vault_b_id,
+    }, headers=headers_a)
+    assert resp.status_code == 404
 
 
 def test_vault_file_cap_enforced():
@@ -186,6 +201,8 @@ def test_deep_thinking_fsm_reasoning_trace():
     assert resp.status_code == 200
     data = resp.json()
     assert data["blocked_by"] is None
-    # Reasoning trace must be populated for high reasoning effort
-    assert data["reasoning_trace"] is not None
-    assert len(data["reasoning_trace"]) > 20
+    # HIGH applies a real, larger budget...
+    assert data["metrics"]["reasoning_level"] == "high"
+    # ...but a reasoning trace is only shown if the model actually produced one. In tests no model
+    # runs, so there must be no fabricated trace.
+    assert data["reasoning_trace"] is None

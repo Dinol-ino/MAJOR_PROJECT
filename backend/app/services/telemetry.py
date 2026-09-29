@@ -7,14 +7,6 @@ import platform
 import psutil
 from typing import Dict, Any, Optional
 
-try:
-    import pynvml
-    pynvml.nvmlInit()
-    NVML_AVAILABLE = True
-except (ImportError, Exception):
-    NVML_AVAILABLE = False
-
-
 def cpu_name() -> str:
     """Resolve clean CPU brand name via winreg on Windows or /proc/cpuinfo on Linux."""
     try:
@@ -47,155 +39,25 @@ def cpu_name() -> str:
     return f"{platform.machine()} Processor"
 
 
-_cached_gpu_info: Optional[Dict[str, Any]] = None
-_cached_gpu_time: float = 0.0
-
-def _get_static_gpu_info() -> Dict[str, Any]:
-    global _cached_gpu_info, _cached_gpu_time
-    now = time.time()
-    if _cached_gpu_info is not None and (now - _cached_gpu_time) < 60.0:
-        return _cached_gpu_info
-
-    # 1. NVML
-    if NVML_AVAILABLE:
-        try:
-            device_count = pynvml.nvmlDeviceGetCount()
-            if device_count > 0:
-                handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-                name_bytes = pynvml.nvmlDeviceGetName(handle)
-                name = name_bytes.decode("utf-8") if isinstance(name_bytes, bytes) else str(name_bytes)
-                mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                total_mb = int(mem.total // (1024**2))
-                _cached_gpu_info = {
-                    "detected": True,
-                    "name": name,
-                    "vram_total_mb": total_mb,
-                    "vram_total_gb": round(total_mb / 1024, 1),
-                    "cuda": True,
-                    "mode": "cuda",
-                    "handle": handle
-                }
-                _cached_gpu_time = now
-                return _cached_gpu_info
-        except Exception:
-            pass
-
-    # 2. Torch CUDA
-    try:
-        import torch
-        if torch.cuda.is_available():
-            name = torch.cuda.get_device_name(0)
-            vram_bytes = torch.cuda.get_device_properties(0).total_memory
-            total_mb = int(vram_bytes // (1024**2))
-            _cached_gpu_info = {
-                "detected": True,
-                "name": name,
-                "vram_total_mb": total_mb,
-                "vram_total_gb": round(total_mb / 1024, 1),
-                "cuda": True,
-                "mode": "cuda"
-            }
-            _cached_gpu_time = now
-            return _cached_gpu_info
-    except Exception:
-        pass
-
-    # 3. nvidia-smi probe (PATH or standard directories)
-    nvsmi_candidates = ["nvidia-smi"]
-    if sys.platform == "win32":
-        nvsmi_candidates.extend([
-            r"C:\Windows\System32\nvidia-smi.exe",
-            r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
-        ])
-    for cmd in nvsmi_candidates:
-        try:
-            import subprocess
-            res = subprocess.run(
-                [cmd, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
-            if res.returncode == 0 and res.stdout.strip():
-                parts = res.stdout.strip().split("\n")[0].split(",")
-                if len(parts) >= 2:
-                    name = parts[0].strip()
-                    total_mb = int(float(parts[1].strip()))
-                    _cached_gpu_info = {
-                        "detected": True,
-                        "name": name,
-                        "vram_total_mb": total_mb,
-                        "vram_total_gb": round(total_mb / 1024, 1),
-                        "cuda": True,
-                        "mode": "cuda"
-                    }
-                    _cached_gpu_time = now
-                    return _cached_gpu_info
-        except Exception:
-            continue
-
-    # 4. Windows WMI fallback
-    if sys.platform == "win32":
-        try:
-            import subprocess, json
-            wmi_cmd = 'Get-CimInstance Win32_VideoController | Where-Object { $_.Name -like "*NVIDIA*" -or $_.Name -like "*Radeon*" } | Select-Object -First 1 Name, AdapterRAM | ConvertTo-Json'
-            res = subprocess.run(["powershell", "-NoProfile", "-Command", wmi_cmd], capture_output=True, text=True, timeout=3)
-            if res.returncode == 0 and res.stdout.strip():
-                data = json.loads(res.stdout.strip())
-                name = data.get("Name")
-                raw_ram = data.get("AdapterRAM", 0)
-                total_mb = int(raw_ram // (1024**2)) if raw_ram else 4096
-                _cached_gpu_info = {
-                    "detected": True,
-                    "name": name,
-                    "vram_total_mb": total_mb,
-                    "vram_total_gb": round(total_mb / 1024, 1),
-                    "cuda": "nvidia" in (name or "").lower(),
-                    "mode": "cuda" if "nvidia" in (name or "").lower() else "directx"
-                }
-                _cached_gpu_time = now
-                return _cached_gpu_info
-        except Exception:
-            pass
-
-    _cached_gpu_info = {
-        "detected": False,
-        "name": "No Dedicated GPU (CPU Only)",
-        "vram_total_mb": 0,
-        "vram_used_mb": 0,
-        "vram_total_gb": 0.0,
-        "vram_used_gb": 0.0,
-        "util_percent": 0,
-        "cuda": False,
-        "mode": "cpu"
-    }
-    _cached_gpu_time = now
-    return _cached_gpu_info
-
-
 def _gpu_sample() -> Dict[str, Any]:
-    """Fast non-blocking GPU sample with multi-tier hardware probe."""
-    info = dict(_get_static_gpu_info())
-    if not info.get("detected"):
-        return info
-
-    handle = info.get("handle")
-    if handle and NVML_AVAILABLE:
-        try:
-            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-            util = pynvml.nvmlDeviceGetUtilizationRates(handle)
-            used_mb = int(mem.used // (1024**2))
-            info["vram_used_mb"] = used_mb
-            info["vram_used_gb"] = round(used_mb / 1024, 1)
-            info["util_percent"] = int(util.gpu)
-            return info
-        except Exception:
-            pass
-
-    info["vram_used_mb"] = info.get("vram_used_mb", 0)
-    info["vram_used_gb"] = info.get("vram_used_gb", 0.0)
-    info["util_percent"] = info.get("util_percent", 0)
-    return info
+    """Non-blocking GPU view from the shared probe (never imports torch, never blocks a request)."""
+    from app.system.gpu_probe import get_gpu_info
+    info = get_gpu_info(block=False)
+    total_mb = int(info.get("vram_total_mb") or 0)
+    return {
+        "detected": bool(info.get("detected")),
+        "name": info.get("name") or ("Probing..." if info.get("status") == "probing" else "No dedicated GPU"),
+        "vram_total_mb": total_mb,
+        "vram_total_gb": round(total_mb / 1024, 1),
+        "vram_reliable": bool(info.get("vram_reliable")),
+        "backend": info.get("backend"),
+        "cuda": info.get("backend") == "cuda",
+        "mode": info.get("backend") or "cpu",
+        "source": info.get("source"),
+        "status": info.get("status"),
+        "reason": info.get("reason"),
+        "probed_at": info.get("probed_at"),
+    }
 
 
 def compute_hardware_tier(gpu_data: Dict[str, Any], ram_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -206,8 +68,9 @@ def compute_hardware_tier(gpu_data: Dict[str, Any], ram_data: Dict[str, Any]) ->
     Tier 2: VRAM 12-23 GB -> 13-14B models
     Tier 3: VRAM >= 24 GB -> 32B+ / quantized 70B
     """
-    vram_gb = gpu_data.get("vram_total_gb", 0.0)
-    ram_gb = ram_data.get("total_gb", 8.0)
+    # Unreliable VRAM (e.g. Windows WMI) is not used for tiering.
+    vram_gb = gpu_data.get("vram_total_gb", 0.0) if gpu_data.get("vram_reliable", True) else 0.0
+    ram_gb = ram_data.get("total_gb", 0.0)
     gpu_detected = gpu_data.get("detected", False)
     gpu_name = gpu_data.get("name", "Unknown GPU")
 
@@ -250,6 +113,25 @@ def compute_hardware_tier(gpu_data: Dict[str, Any], ram_data: Dict[str, Any]) ->
     }
 
 
+_cached_disk_info: Optional[tuple] = None
+_cached_disk_time: float = 0.0
+
+
+def _get_disk_usage() -> tuple:
+    """Free/total space where models are stored (MODELS_DISK_PATH), cached 5 s. None when unmeasurable."""
+    global _cached_disk_info, _cached_disk_time
+    now = time.time()
+    if _cached_disk_info is not None and (now - _cached_disk_time) < 5.0:
+        return _cached_disk_info
+    try:
+        usage = psutil.disk_usage(os.getenv("MODELS_DISK_PATH", os.getcwd()))
+        _cached_disk_info = (round(usage.free / (1024**3), 1), round(usage.total / (1024**3), 1))
+    except Exception:
+        _cached_disk_info = (None, None)
+    _cached_disk_time = now
+    return _cached_disk_info
+
+
 _cached_cpu_name: Optional[str] = None
 
 def sample() -> Dict[str, Any]:
@@ -270,13 +152,7 @@ def sample() -> Dict[str, Any]:
     ram_used_percent = vm.percent
 
     # Disk metrics (safe root check across OS)
-    try:
-        root_path = "C:\\" if sys.platform == "win32" else "/"
-        disk_free_gb = round(psutil.disk_usage(root_path).free / (1024**3), 1)
-        disk_total_gb = round(psutil.disk_usage(root_path).total / (1024**3), 1)
-    except Exception:
-        disk_free_gb = 50.0
-        disk_total_gb = 500.0
+    disk_free_gb, disk_total_gb = _get_disk_usage()
 
     gpu_info = _gpu_sample()
     ram_info = {
@@ -287,6 +163,7 @@ def sample() -> Dict[str, Any]:
     tier_info = compute_hardware_tier(gpu_info, ram_info)
 
     return {
+        "status": "ok",
         "cpu": {
             "name": _cached_cpu_name,
             "load_percent": round(cpu_load, 1),
@@ -301,19 +178,22 @@ def sample() -> Dict[str, Any]:
             "total_gb": disk_total_gb
         },
         "tier": tier_info,
-        "ts": time.time()
+        "ts": time.time(),
+        "probed_at": time.time(),
     }
 
 
-async def telemetry_event_generator(interval_seconds: float = 2.0):
-    """Asynchronously generates SSE data chunks every interval."""
-    while True:
+async def telemetry_event_generator(interval_seconds: float = 2.0, max_seconds: float = 600.0, request=None):
+    """SSE snapshots. Bounded lifetime (the client reconnects) and stops when the client disconnects."""
+    deadline = time.monotonic() + max_seconds
+    while time.monotonic() < deadline:
+        if request is not None and await request.is_disconnected():
+            return
         try:
-            data = sample()
+            data = await asyncio.to_thread(sample)
             yield f"data: {json.dumps(data)}\n\n"
         except asyncio.CancelledError:
-            break
+            return
         except Exception as e:
-            err_data = {"error": str(e), "ts": time.time()}
-            yield f"data: {json.dumps(err_data)}\n\n"
+            yield f"data: {json.dumps({'status': 'error', 'error': type(e).__name__, 'ts': time.time()})}\n\n"
         await asyncio.sleep(interval_seconds)

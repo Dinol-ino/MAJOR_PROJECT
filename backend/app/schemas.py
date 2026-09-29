@@ -8,7 +8,7 @@ class ChatRequest(BaseModel):
     shield_on: bool
     model: Optional[str] = None
     vault_id: Optional[str] = None
-    reasoning_effort: Optional[str] = "off"  # "off" | "low" | "high"
+    reasoning_effort: Optional[str] = "medium"  # "low" | "medium" | "high" ("off" is treated as "low")
 
 class CitationSource(BaseModel):
     act: str
@@ -19,6 +19,16 @@ class CitationSource(BaseModel):
     freshness_score: Optional[float] = None
     injection_risk_score: Optional[float] = None
     confidence_score: Optional[float] = None
+    # Provenance carried from the index so every citation can be inspected and resolved.
+    act_slug: Optional[str] = None
+    doc_type: Optional[str] = None
+    source_url: Optional[str] = None
+    document_version: Optional[str] = None
+    legal_status: Optional[str] = None
+    verified_at: Optional[str] = None
+    filename: Optional[str] = None
+    retrieval_score: Optional[float] = None
+    via: Optional[str] = None  # e.g. "cross_reference" when added by citation-graph expansion
 
 class ChatResponse(BaseModel):
     answer: str
@@ -34,6 +44,8 @@ class ChatResponse(BaseModel):
     citations_parsed: Optional[List[dict]] = None
     model_used: Optional[str] = None
     runtime_used: Optional[str] = None
+    # Real measurements for this request (token counts from the runtime, stage latencies).
+    metrics: Optional[dict] = None
 
 # --- /upload Endpoint Schemas ---
 class UploadResponse(BaseModel):

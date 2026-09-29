@@ -1,4 +1,5 @@
-from fastapi import APIRouter
+import asyncio
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from app.services.telemetry import sample, telemetry_event_generator
 
@@ -7,10 +8,10 @@ router = APIRouter(tags=["hardware", "telemetry"])
 
 @router.get("/telemetry/stream")
 @router.get("/api/telemetry/stream")
-async def get_telemetry_stream():
+async def get_telemetry_stream(request: Request):
     """Real-time SSE stream delivering system telemetry snapshots every 2 seconds."""
     return StreamingResponse(
-        telemetry_event_generator(interval_seconds=2.0),
+        telemetry_event_generator(interval_seconds=2.0, request=request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -22,9 +23,9 @@ async def get_telemetry_stream():
 
 @router.get("/telemetry/sample")
 @router.get("/api/telemetry/sample")
-def get_telemetry_sample():
-    """Instantaneous single telemetry snapshot (<50ms)."""
-    return sample()
+async def get_telemetry_sample():
+    """Instantaneous single telemetry snapshot; GPU values come from the cached background probe."""
+    return await asyncio.to_thread(sample)
 
 
 @router.get("/system/hardware")
@@ -50,8 +51,8 @@ def get_system_hardware():
         "cpu_threads": cpu.get("cores_logical", 1),
         "cpu_name": cpu.get("name", "Multi-Core Processor"),
         "cpu_arch": cpu.get("arch", "x86_64"),
-        "ram_total_gb": ram.get("total_gb", 8.0),
-        "ram_available_gb": ram.get("available_gb", 4.0),
+        "ram_total_gb": ram.get("total_gb"),
+        "ram_available_gb": ram.get("available_gb"),
         "gpu_available": gpu_detected,
         "gpu_name": gpu_name,
         "gpu_vram_gb": gpu_vram,
