@@ -14,7 +14,7 @@ request → auth → input guard (L1) → legal-scope gate → retrieval (BM25 +
 
 | Area | Status |
 |---|---|
-| Statutory corpus | `data/acts_raw/*.txt` + `manifest.yaml` (provenance). Ships with an excerpted IT Act, 2000 marked **unverified**. Add acts and re-index from the Statute Library. |
+| Statutory corpus | `data/acts_raw/*.txt` + `manifest.yaml` (provenance). Ships with excerpts of 8 central Acts (BNS, BNSS, BSA, IT Act, Companies Act, Consumer Protection Act, Indian Contract Act, DPDPA), each carrying its India Code `source_url` and Act number. All are marked **unverified**: the excerpts have not been diffed against the official text, and the Statute Library reports that rather than implying currency. Add acts and re-index from the Statute Library. |
 | Retrieval | Persistent BM25 (authoritative) + Chroma dense vectors when an embedding model is loaded. Without one, dense search is disabled and reported — never faked. |
 | Models | Ollama. Only installed models appear in the top selector; the active model is persisted. Downloads are explicit (Hardware & Models → Download & activate). |
 | Research sources (MCP) | Built-in local tools. Online tools report "no connector configured" rather than returning results. External servers are declared in `backend/app/config/mcp_servers.yaml` (none by default). |
@@ -58,10 +58,24 @@ timeouts, storage paths, reasoning budgets (`REASONING_<LEVEL>_<FIELD>`), networ
 ## Tests
 
 ```bash
-cd backend && python -m pytest -q
+cd backend && python -m pytest -q          # 305 tests, hermetic
 ```
 
-The suite is hermetic (`tests/conftest.py`): temporary stores, no Ollama, no network. It includes
-tenant-isolation, auth, SSRF/offline, upload-limit, prompt-injection and "no fabricated evidence"
-regression tests. CI (`.github/workflows/ci.yml`) runs the backend suite, the frontend build and the
-container build.
+The backend suite is hermetic (`tests/conftest.py`): temporary stores, no Ollama, no network. It
+includes tenant-isolation, auth, SSRF/offline, upload-limit, prompt-injection and "no fabricated
+evidence" regression tests.
+
+End-to-end tests drive the real UI against a running backend:
+
+```bash
+cd frontend && npx playwright install chromium
+npx playwright test                        # 15 specs
+```
+
+`e2e/global-setup.ts` registers one throwaway practitioner and hands its session token to every spec
+through Playwright's `storageState` — one registration per run, because `/auth/register` is rate
+limited to 5/minute. The backend must be reachable at `E2E_API_URL` (default
+`http://127.0.0.1:8000`); Playwright starts the dev server itself.
+
+CI (`.github/workflows/ci.yml`) runs the backend suite, the frontend build, the E2E suite against a
+live backend, and the container build.
