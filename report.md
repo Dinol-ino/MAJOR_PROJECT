@@ -468,7 +468,7 @@ DFrag enforces strict latency and resource budgets across its subsystems:
 
 | Operation / Subsystem | Target SLA | Measured Production Performance | Enforcement Mechanism |
 | :--- | :--- | :--- | :--- |
-| **Hardware Telemetry Scan** | < 50 ms | **12–28 ms** | Windows `winreg` registry reads; no WMI subprocesses. |
+| **Hardware Telemetry Scan** | < 50 ms | **12–28 ms** | Cached background probe (`app/system/gpu_probe.py`): NVML, then `nvidia-smi`, then a bounded WMI/PowerShell fallback whose VRAM figure is flagged unreliable. Never blocks a request. |
 | **Layer 1 Input Hard-Gate** | < 10 ms | **1.8–3.5 ms** | Compiled regex patterns & length checks. |
 | **BM25 Lexical Retrieval** | < 25 ms | **6–12 ms** | Pre-tokenized serialized `BM25Plus` disk index. |
 | **Dense Vector Retrieval** | < 50 ms | **18–35 ms** | ChromaDB cosine similarity with L3 embedding cache. |
@@ -482,7 +482,8 @@ DFrag enforces strict latency and resource budgets across its subsystems:
 ### 12.2 Automated Test Suite Verification
 The DFrag test suite validates system integrity across all architectural layers:
 
-- **Comprehensive Pytest Suite**: 190+ test cases covering configuration, database persistence, memory isolation, cache invalidation, model routing, BM25 indexing, prompt injection defense, PII scanning, output validation, MCP gateway governance, and FSM limits.
+- **Comprehensive Pytest Suite**: **322 test cases** (2026-09-29), hermetic by construction — `tests/conftest.py` redirects every store to a temporary directory and points the model runtime at a dead port, so no test can reach a developer's database, indexes or the network. Covers configuration, database persistence, tenant isolation, cache invalidation, model routing, BM25 indexing, prompt-injection defence, PII scanning, output validation, MCP gateway governance and FSM limits.
+- **End-to-End Suite**: **15 Playwright specs** driving the real UI against a live backend — authentication gate, grounded citation rendering, defensive refusal, upload validation, corpus reporting and accessibility. `e2e/global-setup.ts` provisions one session token per run because `/auth/register` is rate limited.
 - **Authentication & Rate-Limiting Regression**: Complete automated tests verifying PBKDF2 hashing, unique registration, duplicate handling, 5-attempt brute-force lockout, token issuance, and protected route rejection.
 - **Adversarial Security Evaluation**: Tested against 110 diverse adversarial attack vectors (roleplay overrides, jailbreaks, hidden PDF instructions, SQLi, SSRF, directory traversal) with a **100% block rate** at Layer 1 or Layer 2.
 
@@ -633,29 +634,32 @@ c:\defensive rag\MAJOR_PROJECT\
 │       │
 │       └── components/               # React UI Components
 │           ├── Sidebar.jsx           # Collapsible navigation sidebar
-│           ├── ManusHeader.jsx       # Top navigation, model indicator & shield toggle
+│           ├── LoginView.jsx         # Sign-in / first-owner registration gate
+│           ├── ManusHeader.jsx       # Top navigation, model selector, mode & shield state
 │           ├── ChatWindow.jsx        # Legal Copilot conversation surface
 │           ├── CommandInput.jsx      # Consensus search bar, voice mic & case file pills
 │           ├── CitationGraphView.jsx # Dynamic SVG statutory knowledge graph
 │           ├── StatuteLibraryView.jsx# Full-text Indian Statutory Corpus browser
 │           ├── AuditLedgerView.jsx   # Live SHA-256 cryptographic audit ledger
 │           ├── HardwareForm.jsx      # Live hardware telemetry & 1-click model manager
-│           ├── McpToolsView.jsx      # MCP tool registry & network mode toggle
+│           ├── McpToolsView.jsx      # Sources & Research: corpus status, capabilities, servers
 │           ├── SourcesPanel.jsx      # Verified citation cards with trust badges
 │           ├── ProvenancePanel.jsx   # 13-field cryptographic provenance details
-│           ├── ConfidenceIndicator.jsx# Mathematical grounding score indicator
-│           ├── ShieldToggle.jsx      # 3-layer defensive shield toggle button
 │           ├── UploadButton.jsx      # Case PDF upload button
 │           ├── MicButton.jsx         # Speech-to-text recording button
 │           └── Icons.jsx             # Clean, unified SVG icon library
 │
 └── data/                             # Data Assets
-    ├── acts_raw/                     # Authentic statutory text files
+    ├── acts_raw/                     # Statutory text excerpts + provenance manifest
+    │   ├── manifest.yaml              # Per-act slug, domain, Act number, source_url, legal_status
     │   ├── IT_Act.txt
     │   ├── BNS_2023.txt
     │   ├── BNSS_2023.txt
+    │   ├── BSA_2023.txt
     │   ├── Companies_Act_2013.txt
-    │   └── Contract_Act_1872.txt
+    │   ├── Consumer_Protection_Act_2019.txt
+    │   ├── Contract_Act_1872.txt
+    │   └── DPDPA_2023.txt
     └── model_registry.yaml           # Model hardware tier registry
 ```
 
@@ -724,11 +728,81 @@ This initializes:
 
 ---
 
-## 15. Conclusion & Architectural Integrity
+## 15. Known Limitations & Scope Boundaries
 
-The **Defensive RAG (DFrag)** platform establishes a new benchmark for reliable, secure, and verifiable Artificial Intelligence in the legal domain. By replacing generic, trusting RAG pipelines with a **Three-Layer Zero-Trust Shield**, **Two-Tier Hybrid Search**, a **10-State Bounded FSM Orchestrator**, a **Tamper-Evident SHA-256 Audit Ledger**, and an **Intelligent Hardware-Aware Local Runtime**, DFrag guarantees:
+Stated plainly, because a system whose central claim is "it tells you what it does not
+know" has to hold itself to the same standard.
 
-1. **Absolute Hallucination Defense**: Answers are rigorously anchored to canonical statutory authority with token overlap scoring and citation verification.
-2. **Adversarial Resilience**: Malicious prompts, poisoned PDFs, and exfiltration attempts are blocked deterministically.
-3. **Data Sovereignty & Air-Gap Compliance**: Sensitive client case files remain strictly local, preserving legal privilege and international data protection standards.
-4. **Hardware Democratization**: Operates smoothly on consumer laptop hardware (CPUs with 8GB RAM) up to dedicated multi-GPU workstations, without requiring expensive external cloud API dependencies.
+### 15.1 The corpus is excerpts, and none of it is verified
+`data/acts_raw/` ships **excerpts** of eight central Acts, not their complete texts.
+Every entry in `manifest.yaml` carries `legal_status: unverified` and an empty
+`verified_at`: the local text has not been diffed against the official India Code
+source it points at. The Statute Library reports this rather than hiding it, and the
+percentage of verified acts is shown in the UI.
+
+**DFrag is therefore not a citable legal authority.** It is a retrieval and defence
+architecture demonstrated on a statutory sample. The provenance pipeline is real; the
+provenance itself is pending an operator's verification.
+
+### 15.2 Single-worker assumption
+The token cache, session revocation list, failed-login throttle and active-model cache
+are process-local. Under more than one worker, a logout or lockout is seen only by the
+worker that handled it; others honour the token until it falls out of their own cache
+(bounded to 60 seconds). Run a single worker, or move this state to a shared store
+before scaling out.
+
+### 15.3 Grounding is lexical, not semantic
+Layer 3 verifies grounding by n-gram token overlap between the answer and the retrieved
+passages. This reliably catches fabricated citations and unsupported assertions, but a
+claim that paraphrases the source closely while inverting its meaning can still score
+well. The guarantee is "every claim traces to retrieved text", not "every claim is
+correct law".
+
+### 15.4 Dense retrieval degrades to lexical
+When no embedding model is loaded, dense vector search is disabled and the system says
+so; BM25 continues to serve. Results are then lexical only, so a question phrased
+without the statute's own vocabulary may retrieve less well.
+
+### 15.5 Adversarial coverage is bounded by the tested set
+The block-rate figures in §12.2 are measured against the specific adversarial corpus in
+`tests/attack_suite/`. They describe performance on that set, not a general guarantee:
+Layer 1 is a deterministic pattern gate, and novel phrasings outside the tested
+distribution are exactly what it is weakest against. Layer 2 (context sanitisation) and
+Layer 3 (grounding) exist because Layer 1 is assumed to be incomplete.
+
+### 15.6 Security findings addressed in this cycle
+A security review of the authentication and model-state subsystems raised 13 findings.
+Eleven were fixed (see `tests/security/test_phase1_hardening.py` and
+`test_phase4_hardening.py`); two were investigated and withdrawn as non-defects, the
+more interesting being a proposal to raise an error when the active model is
+unavailable — which would have discarded retrieved evidence and replaced an honest
+degraded answer with a bare failure. That trade-off is now documented in code.
+
+---
+
+## 16. Conclusion & Architectural Integrity
+
+The **Defensive RAG (DFrag)** platform replaces the generic, trusting RAG pipeline with one
+that treats retrieved text as untrusted input and refuses to answer beyond its evidence. Built
+from a **Three-Layer Zero-Trust Shield**, **Two-Tier Hybrid Search**, a **10-State Bounded FSM
+Orchestrator**, a **Tamper-Evident SHA-256 Audit Ledger** and an **Intelligent Hardware-Aware
+Local Runtime**, it delivers:
+
+1. **Traceable answers, and an explicit refusal when evidence is thin.** Every claim is scored
+   against the retrieved passages by token overlap and citation verification; when grounding
+   fails, the system says the evidence is insufficient instead of producing fluent text. This
+   is traceability to source, not a guarantee of legal correctness — see §15.3.
+2. **Adversarial resilience in depth.** Prompt injections, poisoned PDFs and exfiltration
+   attempts are caught by a deterministic input gate, a context sanitiser and an output
+   grounding check. The layers exist because no single one is assumed complete (§15.5).
+3. **Data sovereignty.** Client case files are indexed and answered locally; cloud fallback is
+   off by default and never used for requests carrying vault documents. Tenant isolation is
+   enforced from the authenticated identity and regression-tested.
+4. **Hardware democratization.** Runs on consumer laptops (CPU, 8 GB RAM) through to multi-GPU
+   workstations, with model fit decided from measured hardware rather than assumption, and no
+   dependency on paid external APIs.
+
+The engineering claims above are demonstrated by the automated suites in §12.2. The
+**data** claims are bounded by §15.1: the shipped corpus is an unverified statutory sample,
+and DFrag should be presented as a defensible architecture evaluated on that sample rather
+than as a citable legal authority.
