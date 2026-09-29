@@ -1,0 +1,117 @@
+# Statutory corpus manifest.
+#
+# One entry per raw text file in this directory. Every value here is provenance
+# METADATA that an operator records after checking the official source; the
+# application never invents it. Leave a field empty rather than guessing.
+#
+#   legal_status: in_force | amended | repealed | unverified
+#   verified_at:  ISO date on which the file's text was checked against source_url
+#                 (empty => the Statute Library shows the act as "unverified").
+#
+# Files without an entry are still indexed, but marked unverified with no
+# source URL, version or dates.
+
+acts:
+  BNS_2023.txt:
+    slug: bns_2023
+    title: "Bharatiya Nyaya Sanhita, 2023"
+    year: 2023
+    domain: criminal
+    jurisdiction: "India / Union"
+    source_url: "https://www.indiacode.nic.in/handle/123456789/20062"
+    source_version: "Act No. 45 of 2023"
+    publication_date: ""
+    legal_status: unverified
+    verified_at: ""
+    notes: "Local excerpt. Not yet diffed against source_url; set legal_status/verified_at only after checking."
+
+  BNSS_2023.txt:
+    slug: bnss_2023
+    title: "Bharatiya Nagarik Suraksha Sanhita, 2023"
+    year: 2023
+    domain: criminal_procedure
+    jurisdiction: "India / Union"
+    source_url: "https://www.indiacode.nic.in/handle/123456789/20099"
+    source_version: "Act No. 46 of 2023"
+    publication_date: ""
+    legal_status: unverified
+    verified_at: ""
+    notes: "Local excerpt. Not yet diffed against source_url; set legal_status/verified_at only after checking."
+
+  BSA_2023.txt:
+    slug: bsa_2023
+    title: "Bharatiya Sakshya Adhiniyam, 2023"
+    year: 2023
+    domain: evidence
+    jurisdiction: "India / Union"
+    source_url: "https://www.indiacode.nic.in/handle/123456789/20063"
+    source_version: "Act No. 47 of 2023"
+    publication_date: ""
+    legal_status: unverified
+    verified_at: ""
+    notes: "Local excerpt. Not yet diffed against source_url; set legal_status/verified_at only after checking."
+
+  Companies_Act_2013.txt:
+    slug: companies_act_2013
+    title: "Companies Act, 2013"
+    year: 2013
+    domain: corporate
+    jurisdiction: "India / Union"
+    source_url: "https://www.indiacode.nic.in/handle/123456789/2114"
+    source_version: "Act No. 18 of 2013"
+    publication_date: ""
+    legal_status: unverified
+    verified_at: ""
+    notes: "Local excerpt. Heavily amended since enactment - confirm the amendment state before relying on it."
+
+  Consumer_Protection_Act_2019.txt:
+    slug: consumer_protection_act_2019
+    title: "Consumer Protection Act, 2019"
+    year: 2019
+    domain: consumer
+    jurisdiction: "India / Union"
+    source_url: "https://www.indiacode.nic.in/handle/123456789/18964"
+    source_version: "Act No. 35 of 2019"
+    publication_date: ""
+    legal_status: unverified
+    verified_at: ""
+    notes: "Local excerpt. Not yet diffed against source_url; set legal_status/verified_at only after checking."
+
+  Contract_Act_1872.txt:
+    slug: indian_contract_act_1872
+    title: "Indian Contract Act, 1872"
+    year: 1872
+    domain: contract
+    jurisdiction: "India / Union"
+    source_url: "https://www.indiacode.nic.in/handle/123456789/12845"
+    source_version: "Act No. 9 of 1872"
+    publication_date: ""
+    legal_status: unverified
+    verified_at: ""
+    notes: "Local excerpt. Not yet diffed against source_url; set legal_status/verified_at only after checking."
+
+  DPDPA_2023.txt:
+    slug: dpdpa_2023
+    title: "Digital Personal Data Protection Act, 2023"
+    year: 2023
+    domain: data_protection
+    jurisdiction: "India / Union"
+    source_url: "https://www.indiacode.nic.in/handle/123456789/22037"
+    source_version: "Act No. 22 of 2023"
+    publication_date: ""
+    legal_status: unverified
+    verified_at: ""
+    notes: "Local excerpt. Provisions are commenced in phases - confirm which are in force before relying on it."
+
+  IT_Act.txt:
+    slug: it_act_2000
+    title: "Information Technology Act, 2000"
+    year: 2000
+    domain: cyber
+    jurisdiction: "India / Union"
+    source_url: "https://www.indiacode.nic.in/handle/123456789/1999"
+    source_version: "Act No. 21 of 2000"
+    publication_date: "2000-06-09"
+    legal_status: unverified
+    verified_at: ""
+    notes: "Local text copy; excerpted. Verify against the official India Code text before relying on it."

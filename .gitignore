@@ -63,8 +63,11 @@ chroma-data/
 *.sqlite-shm
 *.sqlite-wal
 
-# Local vector/database persistence
-data/
+# Local vector/database persistence.
+# data/acts_raw/ is source material (the statutory corpus + its provenance
+# manifest) and must ship with the repository, so it is re-included below.
+data/*
+!data/acts_raw/
 storage/
 persist/
 vector_store/
@@ -231,3 +234,6 @@ frontend/blob-report/
 
 # Stray dev screenshots
 frontend/*.png
+
+# E2E session state (contains a live auth token)
+frontend/e2e/.auth/
