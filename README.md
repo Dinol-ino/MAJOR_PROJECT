@@ -1,137 +1,67 @@
-# DFrag (Defensive RAG) — Enterprise Legal AI Workspace
+# DFrag — Defensive Legal RAG Workspace
 
-A Security-Hardened, Privacy-Preserving Legal AI Workspace for Indian Law.
+A local-first legal research workspace for Indian law. Answers are drawn from **your indexed
+statutes and uploaded documents**, pass through a three-layer security pipeline, and cite the
+passages they rely on. When the evidence is insufficient, DFrag says so instead of guessing.
 
-DFrag sits as a defensive wrapper system between users and locally running language models. It provides Indian legal knowledge adaptation via persistent retrieval memory while defending every request through a 3-layer security pipeline.
-
----
-
-## Architecture & Key Features
-
-1. **Two-Tier Persistent Retrieval Memory**:
-   - **Tier 1 (Statutory Law)**: Indian Law DB pre-seeded and indexed by Act, Chapter, and Section.
-   - **Tier 2 (User Documents)**: Per-session PDF document ingestion (up to 300 files) using `pdfplumber` with section-aware chunking.
-   - **Hybrid Retrieval**: Dense vector embeddings fused with sparse BM25 ranking via Reciprocal Rank Fusion (RRF). Supported storage backends: PostgreSQL + pgvector with ChromaDB fallback.
-
-2. **Three-Layer Security Defense Pipeline**:
-   - **Layer 1 (Input Guard)**: Enforces input bounds, detects prompt injection payloads, jailbreak probes, and SQL/command injection strings before model execution.
-   - **Layer 2 (Trusted Context)**: Strips embedded instructions from retrieved context chunks, wrapping them inside secure `<data>` XML tags with strict defensive prompt isolation.
-   - **Layer 3 (Output Guard)**: Deterministic token overlap grounding check (Jaccard similarity thresholding) and system-prompt leak detection to prevent hallucinations and model leakage.
-
-3. **Stage 5 Intelligent Model Runtime**:
-   - Multi-backend model runtime manager supporting **Ollama**, **llama.cpp**, **Transformers**, and **Mock** runtimes.
-   - Non-blocking hardware detection, automatic model registry recommendations based on VRAM/RAM profile, and dynamic model downloading.
-   - Dynamic token budgeting, context building, hallucination detection, confidence scoring, and citation generation.
-
-4. **Auditing & Cryptographic Integrity**:
-   - Cryptographically hash-chained SQLite audit logger verifying query sanitization and generation history against tampering.
-
----
-
-## Directory Structure
-
-```text
-defensive_rag/
-└── project/
-    ├── backend/
-    │   ├── alembic/              # Database schema migrations
-    │   ├── app/
-    │   │   ├── defense/          # Layer 1, 2, 3 security guards & audit log
-    │   │   ├── ingestion/        # PDF extraction & section chunker
-    │   │   ├── model/            # Ollama client connection manager
-    │   │   ├── retrieval/        # Statutory & user document hybrid rankers
-    │   │   ├── routes/           # FastAPI routers (chat, upload, audit, recommend, models)
-    │   │   ├── runtime/          # Stage 5 runtime abstraction, context & confidence engines
-    │   │   ├── system/           # Hardware detector & model registry
-    │   │   ├── config.py         # Application settings
-    │   │   ├── main.py           # FastAPI entrypoint
-    │   │   └── schemas.py        # Request/response Pydantic models
-    │   ├── scripts/              # Seed scripts (seed_tier1.py)
-    │   ├── tests/                # Test suite & attack suite benchmarks
-    │   ├── Dockerfile
-    │   └── requirements.txt
-    ├── frontend/                 # React + Vite application
-    ├── data/                     # Acts raw data & evaluation datasets
-    ├── docs/                     # Architectural & evaluation documentation
-    │   ├── security-testing/     # Attack benchmarks & evaluation reports
-    │   └── ollama-service-architecture.md
-    ├── phase/                    # Project build status & phase logs
-    ├── skills/                   # Dev conventions, security checklist & API contract
-    ├── advanced_stages/          # Enterprise stage specifications (00-07)
-    ├── docker-compose.yml        # Docker orchestrator
-    ├── PLAN.md                   # Core execution plan
-    └── README.md                 # Primary workspace reference guide
+```
+request → auth → input guard (L1) → legal-scope gate → retrieval (BM25 + dense, RRF; own vaults only)
+        → citation-graph expansion → evidence packing (token budget) → context sanitiser (L2)
+        → ACTIVE local model → output guard / grounding (L3) → persist + graph + audit → answer
 ```
 
----
+## What is actually in this repository
 
-## Setup & Execution
+| Area | Status |
+|---|---|
+| Statutory corpus | `data/acts_raw/*.txt` + `manifest.yaml` (provenance). Ships with an excerpted IT Act, 2000 marked **unverified**. Add acts and re-index from the Statute Library. |
+| Retrieval | Persistent BM25 (authoritative) + Chroma dense vectors when an embedding model is loaded. Without one, dense search is disabled and reported — never faked. |
+| Models | Ollama. Only installed models appear in the top selector; the active model is persisted. Downloads are explicit (Hardware & Models → Download & activate). |
+| Research sources (MCP) | Built-in local tools. Online tools report "no connector configured" rather than returning results. External servers are declared in `backend/app/config/mcp_servers.yaml` (none by default). |
+| Cloud fallback | Off by default; legacy direct pipeline only; never used for requests that include vault documents. |
 
-### Prerequisites
-* Docker & Docker Desktop (recommended) OR Python 3.10+ and Node.js 18+
-* [Ollama](https://ollama.com/) running locally with target model (e.g. `ollama pull qwen2.5:3b`)
-
----
-
-### Option 1: Running with Docker (Recommended)
-
-From the `project` root directory:
+## Run with Docker
 
 ```bash
+cp .env.example .env
+# Set JWT_SECRET_KEY and SECRET_KEY (python -c "import secrets; print(secrets.token_urlsafe(48))")
 docker compose up -d --build
 ```
 
-* **Frontend UI**: [http://localhost:3000](http://localhost:3000)
-* **Backend API & Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+Open http://localhost:3000. The first account you register administers the workspace.
+All ports are bound to `127.0.0.1`. Data lives in named volumes (`pg-data`, `chroma-data`,
+`bm25-data`, `sqlite-data`, `ollama-models`) and survives `docker compose down` (not `down -v`).
 
-*Note: Subsequent runs can omit `--build` for instant cached startup (`docker compose up -d`).*
+Then: **Hardware & Models → Download & activate** a recommended model.
 
----
+## Run natively (development)
 
-### Option 2: Local Manual Setup
-
-#### 1. Backend Service
 ```bash
-cd project/backend
-python -m venv venv
-
-# Windows:
-.\venv\Scripts\activate
-# Linux/macOS:
-source venv/bin/activate
-
+# backend
+cd backend && python -m venv venv && . venv/bin/activate    # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+# frontend
+cd frontend && npm ci && npm run dev
 ```
 
-#### 2. Frontend Service
+With `DATABASE_URL` empty the backend uses local SQLite. If you set a PostgreSQL URL it is used
+strictly: when unreachable the API returns 503 (set `DB_ALLOW_SQLITE_FALLBACK=true` only for local
+experiments — `/health` will then report the fallback).
+
+## Configuration
+
+Everything environment-specific is in `.env` (see `.env.example`): secrets, model runtime URL and
+timeouts, storage paths, reasoning budgets (`REASONING_<LEVEL>_<FIELD>`), network mode, upload limits.
+
+## Tests
+
 ```bash
-cd project/frontend
-npm install
-npm run dev
+cd backend && python -m pytest -q
 ```
-Open [http://localhost:3000](http://localhost:3000) in your web browser.
 
----
-
-## Testing & Efficacy Verification
-
-* **Execute Unit Tests**:
-  ```bash
-  cd project/backend
-  .\venv\Scripts\python.exe -m unittest discover tests
-  ```
-
-* **Evaluate Security Attack Suite**:
-  ```bash
-  cd project/backend
-  .\venv\Scripts\python.exe tests/attack_suite/run_comparison.py
-  ```
-
----
-
-## Environment & Security Policy
-
-* Secrets and API tokens must be defined in `.env` (copied from `.env.example`).
-* Never commit hardcoded tokens, passwords, or credentials.
-* Refer to [skills/security-checklist.md](file:///c:/defensive_rag/project/skills/security-checklist.md) prior to merging code changes.
+The suite is hermetic (`tests/conftest.py`): temporary stores, no Ollama, no network. It includes
+tenant-isolation, auth, SSRF/offline, upload-limit, prompt-injection and "no fabricated evidence"
+regression tests. CI (`.github/workflows/ci.yml`) runs the backend suite, the frontend build and the
+container build.

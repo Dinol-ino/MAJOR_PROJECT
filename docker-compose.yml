@@ -2,15 +2,19 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: dfrag_memory
+      # Defaults match the credentials existing pg-data volumes were initialised with, so upgrading
+      # does not lock you out of your data. Set DFRAG_PG_* in .env for new deployments; changing them
+      # on an existing volume also requires ALTER USER inside PostgreSQL.
+      POSTGRES_USER: ${DFRAG_PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${DFRAG_PG_PASSWORD:-postgrespassword}
+      POSTGRES_DB: ${DFRAG_PG_DB:-dfrag_memory}
     ports:
-      - "5432:5432"
+      # Loopback only: the database is never exposed to the LAN.
+      - "127.0.0.1:${DFRAG_PG_HOST_PORT:-5432}:5432"
     volumes:
       - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -18,25 +22,28 @@ services:
     restart: unless-stopped
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.11.3
     container_name: dfrag-ollama
     ports:
-      - "11434:11434"
+      # Loopback only: the model runtime API has no authentication of its own.
+      - "127.0.0.1:${DFRAG_OLLAMA_HOST_PORT:-11434}:11434"
     volumes:
       - ollama-models:/root/.ollama
-    restart: always
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      # ollama/ollama image has no curl; use the bundled CLI for health.
+      # start_period extended: first multi-GB pull can keep the daemon busy.
+      test: ["CMD-SHELL", "ollama ps || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 120s
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
-    restart: always
+      - "127.0.0.1:${DFRAG_REDIS_HOST_PORT:-6379}:6379"
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -48,20 +55,29 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${DFRAG_BACKEND_HOST_PORT:-8000}:8000"
     env_file:
       - .env
     volumes:
       - chroma-data:/workspace/chroma_db
       - sqlite-data:/workspace/db
+      - bm25-data:/workspace/bm25_index
+      # Statutory corpus (text + manifest.yaml) is read-only inside the container.
+      - ./data/acts_raw:/workspace/data/acts_raw:ro
     environment:
-      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/dfrag_memory
+      # Container-internal wiring only; model choice, secrets and policy come from .env.
+      - DATABASE_URL=postgresql://${DFRAG_PG_USER:-postgres}:${DFRAG_PG_PASSWORD:-postgrespassword}@postgres:5432/${DFRAG_PG_DB:-dfrag_memory}
+      - DB_ALLOW_SQLITE_FALLBACK=false
       - OLLAMA_URL=http://ollama:11434
-      - DEFAULT_MODEL=qwen2.5:3b
-      - AUTO_PULL_ON_STARTUP=true
+      - REDIS_URL=redis://redis:6379/0
       - ANONYMIZED_TELEMETRY=False
       - CHROMA_PERSIST_DIR=/workspace/chroma_db
+      - BM25_INDEX_DIR=/workspace/bm25_index
       - SQLITE_DB_PATH=/workspace/db/audit_log.db
+      - ACTS_RAW_DIR=/workspace/data/acts_raw
+      # Persisted via the sqlite-data named volume (survives `down`, lost only on `down -v`).
+      - PROVISIONING_DB_PATH=/workspace/db/provisioning.db
+      - ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -72,11 +88,12 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5)"]
+      test: ["CMD", "python", "-c", "import httpx,sys; r=httpx.get('http://localhost:8000/health/db', timeout=5); sys.exit(0 if r.status_code == 200 and r.json().get('status') != 'offline' else 1)"]
       interval: 20s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      # Cold imports (torch/transformers/spacy) take minutes on slow/full disks.
+      start_period: 180s
     restart: unless-stopped
 
   frontend:
@@ -84,7 +101,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "127.0.0.1:${DFRAG_FRONTEND_HOST_PORT:-3000}:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -105,4 +122,5 @@ volumes:
   pg-data:
   chroma-data:
   sqlite-data:
+  bm25-data:
   ollama-models:
