@@ -1,5 +1,12 @@
 services:
   postgres:
+    # Opt-in only. DFrag points at the PostgreSQL named by DFRAG_PG_HOST (see the backend
+    # service), which is a shared instance on another machine. This service stays defined
+    # so a self-contained local stack is one flag away and the pg-data volume is never
+    # orphaned:
+    #     docker compose --profile local-db up -d
+    # then set DFRAG_PG_HOST=postgres in .env so the backend uses it.
+    profiles: ["local-db"]
     image: postgres:15-alpine
     environment:
       # Defaults match the credentials existing pg-data volumes were initialised with, so upgrading
@@ -22,6 +29,14 @@ services:
     restart: unless-stopped
 
   ollama:
+    # Opt-in only. Ollama runs natively on this host and already owns 11434, so this
+    # container cannot bind that port, and running it would mean downloading every
+    # model a second time into ollama-models. The backend talks to the host daemon via
+    # DFRAG_OLLAMA_URL instead. To run a containerised Ollama on a machine without a
+    # native one:
+    #     docker compose --profile local-ollama up -d
+    # and set DFRAG_OLLAMA_URL=http://ollama:11434 in .env.
+    profiles: ["local-ollama"]
     image: ollama/ollama:0.11.3
     container_name: dfrag-ollama
     ports:
@@ -66,9 +81,14 @@ services:
       - ./data/acts_raw:/workspace/data/acts_raw:ro
     environment:
       # Container-internal wiring only; model choice, secrets and policy come from .env.
-      - DATABASE_URL=postgresql://${DFRAG_PG_USER:-postgres}:${DFRAG_PG_PASSWORD:-postgrespassword}@postgres:5432/${DFRAG_PG_DB:-dfrag_memory}
+      # DFRAG_PG_HOST selects the database: a LAN address for the shared instance, or
+      # `postgres` for the local-db profile above. Host and port are configuration, never
+      # hardcoded here, so the same compose file serves both deployments.
+      - DATABASE_URL=postgresql://${DFRAG_PG_USER:-postgres}:${DFRAG_PG_PASSWORD:-postgrespassword}@${DFRAG_PG_HOST:-postgres}:${DFRAG_PG_PORT:-5432}/${DFRAG_PG_DB:-dfrag_memory}
       - DB_ALLOW_SQLITE_FALLBACK=false
-      - OLLAMA_URL=http://ollama:11434
+      # Defaults to the native Ollama on the host, reached through extra_hosts below.
+      # Set DFRAG_OLLAMA_URL=http://ollama:11434 to use the local-ollama profile instead.
+      - OLLAMA_URL=${DFRAG_OLLAMA_URL:-http://host.docker.internal:11434}
       - REDIS_URL=redis://redis:6379/0
       - ANONYMIZED_TELEMETRY=False
       - CHROMA_PERSIST_DIR=/workspace/chroma_db
@@ -81,10 +101,15 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      postgres:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
+      # Only redis is managed by this project. PostgreSQL and Ollama both run natively
+      # on the host, outside compose's lifecycle, and depending on a profiled service
+      # that is not active is an error.
+      #
+      # Losing those two gates is safe: the backend tolerates an unreachable database
+      # with bounded retries and then 503, never a silent SQLite fallback
+      # (DB_ALLOW_SQLITE_FALLBACK stays false), and the healthcheck below gates the
+      # frontend on /health/db — so a missing dependency surfaces as an unhealthy
+      # backend rather than as a running app serving nothing.
       redis:
         condition: service_healthy
     healthcheck:
