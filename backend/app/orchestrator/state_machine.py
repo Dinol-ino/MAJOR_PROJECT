@@ -1153,6 +1153,18 @@ class ResearchStateMachine:
                 )
 
             ctx["clean_answer"] = self.response_formatter.format(parsed.content or clean_ans)
+            try:
+                from app.services.response_parser import unsupported_section_mentions
+                stray = unsupported_section_mentions(parsed.content or clean_ans, evidence)
+                ctx["unsupported_sections"] = stray
+                if stray:
+                    ctx["clean_answer"] += (
+                        "\n\n> **Check before relying on this:** the answer names Section "
+                        + ", ".join(stray)
+                        + " but that section is not among the sources retrieved for this question."
+                    )
+            except Exception as exc:
+                logger.debug("section mention check skipped: %s", type(exc).__name__)
 
             if violated:
                 ctx["failure_kind"] = ctx.get("failure_kind") or "ungrounded_output"

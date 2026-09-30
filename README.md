@@ -50,6 +50,16 @@ With `DATABASE_URL` empty the backend uses local SQLite. If you set a PostgreSQL
 strictly: when unreachable the API returns 503 (set `DB_ALLOW_SQLITE_FALLBACK=true` only for local
 experiments — `/health` will then report the fallback).
 
+## Documents, statutes and external sources
+
+- A lawyer's uploaded PDFs are stored permanently (`VAULT_FILES_DIR`, a Docker volume); indexes are
+  derived and can be rebuilt. See `AUDIT.md` for the store/cache classification.
+- Import Acts with `backend/scripts/import_laws_of_india.py`; everything imports as *unverified*.
+- Optional online source: eCourtsIndia (`ECOURTSINDIA_API_KEY`, ONLINE mode only).
+- Optional bounded LangGraph retrieval planner: `AGENTIC_RETRIEVAL_ENABLED=true`.
+- Apply schema changes with `cd backend && alembic upgrade head`.
+- Full engineering notes: `AUDIT.md` (what was fixed, measured, and still open) and `OPERATIONS.md`.
+
 ## Configuration
 
 Everything environment-specific is in `.env` (see `.env.example`): secrets, model runtime URL and
@@ -58,7 +68,7 @@ timeouts, storage paths, reasoning budgets (`REASONING_<LEVEL>_<FIELD>`), networ
 ## Tests
 
 ```bash
-cd backend && python -m pytest -q          # 305 tests, hermetic
+cd backend && python -m pytest -q          # ~395 tests, hermetic
 ```
 
 The backend suite is hermetic (`tests/conftest.py`): temporary stores, no Ollama, no network. It
@@ -69,7 +79,7 @@ End-to-end tests drive the real UI against a running backend:
 
 ```bash
 cd frontend && npx playwright install chromium
-npx playwright test                        # 15 specs
+npx playwright test                        # 16 specs
 ```
 
 `e2e/global-setup.ts` registers one throwaway practitioner and hands its session token to every spec

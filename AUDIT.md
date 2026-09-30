@@ -41,3 +41,30 @@ prod frontend image + compose override (untested).
 | Developer wording ("Sync MCP", "In-Process DB") shown to lawyers | Renamed |
 | Duplicate style key in CitationGraphView (build warning) | Removed |
 Run locally: `cd frontend && npx playwright test` (backend on :8000, OFFLINE, temp stores; see .github/workflows/ci.yml).
+
+## Measured performance (backend/scripts/measure_performance.py)
+Sandbox CPU, lexical BM25 only (embedding model could not be downloaded there, so dense search was OFF). Re-run on your hardware; do not quote these as your numbers.
+
+| Measure | Result |
+|---|---|
+| Index 12 Acts / 1,676 sections | 1.9 s |
+| Statute query, cold (p50 / p95) | 9.2 ms / 12.7 ms |
+| Statute query, cached | 0.02 ms |
+| Ingest a 60-page PDF into a vault | 0.15 s |
+| Vault query (p50 / p95) | 2.9 ms / 25 ms |
+
+Generation latency is the real bottleneck and is unmeasured (needs Ollama). Nothing in retrieval is worth optimising before that is measured.
+
+## Cache and store classification
+| Store | Class | May be evicted / rebuilt? |
+|---|---|---|
+| Original PDFs (`VAULT_FILES_DIR`) | AUTHORITATIVE | Never automatically; only explicit delete |
+| DB rows (vaults, documents, pages, chats, users) | AUTHORITATIVE | Never |
+| Audit ledger | AUTHORITATIVE, tamper-evident | Never |
+| Chroma vectors, BM25 index | DERIVED | Yes; rebuilt from originals (`/reindex`, restart recovery) |
+| L1 process cache, L2 retrieval cache, L3 embedding cache | DISPOSABLE | Yes; TTL/clear at any time, keyed by corpus version |
+| Loaded model / `keep_alive` | RUNTIME | Yes; reloads on next request |
+Consequence: cache eviction, index rebuild, container restart, model switch, chat reset and app restart never delete a lawyer's originals.
+
+## Section-name check
+An answer that names "Section N" in prose which is not among the retrieved sources now gets a visible caution (`unsupported_section_mentions`). Advisory, not blocking; token citations are still verified against evidence.

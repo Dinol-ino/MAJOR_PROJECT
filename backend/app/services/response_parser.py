@@ -301,4 +301,33 @@ class ResponseParser:
         )
 
 
+
+_PROSE_SECTION = re.compile(r"(?i)\b(?:sections?|secs?\.?|s\.)\s*(\d+[A-Za-z]{0,3})\b")
+
+
+def unsupported_section_mentions(answer: str, evidence_chunks) -> list:
+    """Section numbers the answer names in prose that appear nowhere in the retrieved evidence.
+
+    Citation tokens are verified separately; this catches a fluent "Section 999 provides..." that
+    carries no token. A number counts as supported when it is the section label of an evidence
+    chunk or is itself referenced ("section N") inside evidence text. Advisory: it feeds a visible
+    caution, it does not block.
+    """
+    if not evidence_chunks:
+        return []
+    known = set()
+    for c in evidence_chunks:
+        label = str(c.get("section", "") or c.get("section_no", ""))
+        m = re.search(r"(\d+[A-Za-z]{0,3})", label)
+        if m and re.match(r"(?i)^\s*(?:section|sec|s|§)?\.?\s*\d", label):
+            known.add(m.group(1).upper())
+        for n in _PROSE_SECTION.findall(c.get("text", "") or ""):
+            known.add(n.upper())
+    seen, out = set(), []
+    for n in _PROSE_SECTION.findall(answer or ""):
+        n = n.upper()
+        if n not in known and n not in seen:
+            seen.add(n); out.append(n)
+    return out
+
 response_parser = ResponseParser()
