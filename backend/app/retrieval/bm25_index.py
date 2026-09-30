@@ -109,6 +109,21 @@ class PersistentBM25Index:
                 logger.error(f"Failed to save BM25 index '{self.index_name}': {exc}")
                 return False
 
+    def term_stats(self, stemmer) -> tuple:
+        """(document frequency by stemmed term, number of documents); cached until the corpus changes."""
+        key = (len(self.doc_ids), self.doc_ids[-1] if self.doc_ids else None, id(self.tokenized_corpus))
+        cached = getattr(self, "_df_cache", None)
+        if cached and cached[0] == key:
+            return cached[1], cached[2]
+        with self._lock:
+            df: Dict[str, int] = {}
+            for toks in self.tokenized_corpus:
+                for s in {stemmer(t) for t in toks if len(t) >= 3}:
+                    df[s] = df.get(s, 0) + 1
+            n = len(self.tokenized_corpus)
+        self._df_cache = (key, df, n)
+        return df, n
+
     def count(self) -> int:
         with self._lock:
             return len(self.documents)

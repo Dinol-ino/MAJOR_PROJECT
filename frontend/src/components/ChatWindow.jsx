@@ -246,7 +246,7 @@ export default function ChatWindow({
 
                 {/* Citation Sources Panel */}
                 {!msg.blocked_by && msg.sources && msg.sources.length > 0 && (
-                  <SourcesPanel sources={msg.sources} />
+                  <SourcesPanel sources={msg.sources} citations={msg.citations_parsed} />
                 )}
               </div>
             ))}

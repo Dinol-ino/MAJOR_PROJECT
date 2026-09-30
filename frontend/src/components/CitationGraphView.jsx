@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   GraphIcon,
   SearchIcon,
@@ -111,19 +111,94 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
   const centerX = width / 2;
   const centerY = height / 2;
 
-  // Calculate coordinates with scaling
-  const positionedNodes = nodes.map((node, i) => {
-    if (nodes.length === 1) {
-      return { ...node, x: centerX, y: centerY };
+  // Force-directed layout.
+  //
+  // This previously placed every node on a fixed circle using its ARRAY INDEX:
+  //   angle = (i / nodes.length) * 2 * Math.PI
+  // Position therefore encoded nothing about the graph. The picture looked identical
+  // whatever the data was, two densely-linked nodes could land on opposite sides, and
+  // the result read as hard-coded because visually it was.
+  //
+  // Now position is derived from structure: linked nodes attract, all nodes repel, so
+  // clusters and hubs are visible in the shape. Bounded on purpose - fixed iteration
+  // count and a node cap - because this runs on the user's CPU with no GPU.
+  const MAX_GRAPH_NODES = 120;
+  const FORCE_ITERATIONS = 220;
+
+  const positionedNodes = useMemo(() => {
+    if (nodes.length === 0) return [];
+    if (nodes.length === 1) return [{ ...nodes[0], x: centerX, y: centerY, degree: 0 }];
+
+    // Seeded PRNG: the same graph must render the same way every time. An unseeded
+    // start would make the layout jump on every re-render.
+    let seed = 1337;
+    const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+    const capped = nodes.slice(0, MAX_GRAPH_NODES);
+    const N = capped.length;
+    const pts = capped.map((n) => ({
+      ...n,
+      x: centerX + (rand() - 0.5) * width * 0.55,
+      y: centerY + (rand() - 0.5) * height * 0.55,
+    }));
+
+    const idx = new Map(pts.map((p, i) => [p.id, i]));
+    const edges = links
+      .filter((l) => idx.has(l.source) && idx.has(l.target))
+      .map((l) => [idx.get(l.source), idx.get(l.target)]);
+
+    const degree = new Array(N).fill(0);
+    edges.forEach(([a, b]) => { degree[a] += 1; degree[b] += 1; });
+
+    const REPULSION = 9000;
+    const SPRING = 0.015;
+    const REST_LENGTH = 120;
+    const MAX_STEP = 18;
+
+    for (let it = 0; it < FORCE_ITERATIONS; it += 1) {
+      const cooling = 1 - it / FORCE_ITERATIONS;
+      const fx = new Array(N).fill(0);
+      const fy = new Array(N).fill(0);
+
+      for (let i = 0; i < N; i += 1) {
+        for (let j = i + 1; j < N; j += 1) {
+          const dx = pts[i].x - pts[j].x;
+          const dy = pts[i].y - pts[j].y;
+          const d2 = dx * dx + dy * dy || 0.01;
+          const d = Math.sqrt(d2);
+          const f = REPULSION / d2;
+          fx[i] += (dx / d) * f; fy[i] += (dy / d) * f;
+          fx[j] -= (dx / d) * f; fy[j] -= (dy / d) * f;
+        }
+      }
+
+      for (let e = 0; e < edges.length; e += 1) {
+        const [a, b] = edges[e];
+        const dx = pts[b].x - pts[a].x;
+        const dy = pts[b].y - pts[a].y;
+        const d = Math.hypot(dx, dy) || 0.01;
+        const f = SPRING * (d - REST_LENGTH);
+        fx[a] += (dx / d) * f; fy[a] += (dy / d) * f;
+        fx[b] -= (dx / d) * f; fy[b] -= (dy / d) * f;
+      }
+
+      for (let i = 0; i < N; i += 1) {
+        // Weak pull to centre so unconnected nodes stay on canvas.
+        fx[i] += (centerX - pts[i].x) * 0.006;
+        fy[i] += (centerY - pts[i].y) * 0.006;
+        pts[i].x += Math.max(-MAX_STEP, Math.min(MAX_STEP, fx[i])) * cooling;
+        pts[i].y += Math.max(-MAX_STEP, Math.min(MAX_STEP, fy[i])) * cooling;
+      }
     }
-    const angle = (i / nodes.length) * 2 * Math.PI;
-    const radius = node.type === 'statute' ? 130 : (node.type === 'precedent' ? 220 : 180);
-    return {
-      ...node,
-      x: centerX + radius * Math.cos(angle),
-      y: centerY + radius * Math.sin(angle)
-    };
-  });
+
+    const MARGIN = 52;
+    pts.forEach((p, i) => {
+      p.x = Math.max(MARGIN, Math.min(width - MARGIN, p.x));
+      p.y = Math.max(MARGIN, Math.min(height - MARGIN, p.y));
+      p.degree = degree[i];
+    });
+    return pts;
+  }, [nodes, links, centerX, centerY, width, height]);
 
   const nodePosMap = new Map(positionedNodes.map(n => [n.id, n]));
 
@@ -202,9 +277,9 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
                   borderRadius: '12px',
                   fontWeight: 600
                 }}
-                title={backendInfo.backend === 'memgraph' ? 'Memgraph Community Edition Cypher Engine' : 'In-Process DB Fallback Engine'}
+                title={backendInfo.backend === 'memgraph' ? 'Memgraph Community Edition Cypher Engine' : 'Built-in graph engine (no external graph database configured)'}
               >
-                {backendInfo.backend === 'memgraph' ? '⚡ Memgraph (Cypher)' : 'In-Process DB'}
+                {backendInfo.backend === 'memgraph' ? 'Graph engine: Memgraph' : 'Built-in graph'}
               </span>
             </div>
 
@@ -598,7 +673,7 @@ export default function CitationGraphView({ onAskCopilot, sessionId, activeVault
                 type="button"
                 onClick={() => onAskCopilot(`Provide a rigorous legal analysis of ${selectedNode.label} including applicable statutory standards and recent case law interpretations.`)}
                 style={{
-                  background: 'transparent', border: '1px solid var(--accent)',
+                  background: 'transparent',
                   border: 'none',
                   borderRadius: '8px',
                   padding: '10px 14px',

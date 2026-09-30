@@ -1,0 +1,19 @@
+# Production overlay: serve the built frontend with nginx instead of the Vite dev server.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# NOTE: written without access to a Docker daemon - build it once and check /health before relying on it.
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    # Replace (not extend) the dev bind mounts: the production image is self-contained.
+    volumes: !reset []
+    environment: !reset []
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

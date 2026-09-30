@@ -116,6 +116,7 @@ class OllamaClient:
             "model": target_model,
             "prompt": prompt,
             "stream": True,
+            "keep_alive": settings.model.keep_alive,
             "options": self._build_options(overrides=options),
         }
         try:
@@ -154,6 +155,7 @@ class OllamaClient:
             "model": model,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": settings.model.keep_alive,
             "options": built_options,
         }
         url = f"{self.base_url}/api/generate"

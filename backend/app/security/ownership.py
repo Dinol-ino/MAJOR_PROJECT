@@ -64,3 +64,22 @@ def conversation_accessible(session, conversation_id: str, user: Dict[str, Any])
 
     conv = session.query(Conversation).filter(Conversation.conversation_id == conversation_id).first()
     return conv is None or owns(conv.user_id, user)
+
+
+def claim_session(session, conversation_id: str, user: Dict[str, Any]):
+    """Bind a session id to the caller on first use, or 404 if another user already owns it.
+
+    Session-scoped uploads can precede the first chat message, so without an owner claim a
+    second user could attach to (or read) a session id they merely guessed or observed.
+    """
+    from app.db.models import Conversation
+
+    conv = session.query(Conversation).filter(Conversation.conversation_id == conversation_id).first()
+    if conv is None:
+        conv = Conversation(conversation_id=conversation_id, user_id=current_user_id(user), title="New conversation")
+        session.add(conv)
+        session.commit()
+        return conv
+    if not owns(conv.user_id, user, write=True):
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    return conv

@@ -1,26 +1,72 @@
 import React, { useState } from 'react';
-import { ChevronDownIcon, CheckShieldIcon, BookIcon, ScaleIcon } from './Icons';
+import { ChevronDownIcon } from './Icons';
 
+/**
+ * Provenance for a single retrieved source.
+ *
+ * Shows ONLY fields the backend actually returned. Every value here previously had a
+ * plausible-looking fallback, which meant the panel asserted things the system did not
+ * know:
+ *   - document_version fell back to a literal "v2024.1"
+ *   - status was rendered "Active Settled Law" for anything not explicitly superseded,
+ *     while the corpus itself reports legal_status "unverified"
+ *   - content_hash, when absent, was manufactured by hex-encoding the first 32
+ *     characters of the chunk text and prefixing "sha256:" - a fabricated fingerprint
+ *     presented as a cryptographic one
+ *
+ * A field with no value is now omitted. If nothing is known, the panel says so.
+ */
 export default function ProvenancePanel({ source }) {
   const [expanded, setExpanded] = useState(false);
 
-  // Derive provenance fields with realistic legal defaults from Phase 10 schema
-  const jurisdiction = source.jurisdiction || 'IN (Central / Union Statutes)';
-  const docVersion = source.document_version || 'v2024.1';
-  const pubDate = source.publication_date || source.effective_date || 'Enacted / Official Gazette';
+  const rows = [];
+  const push = (label, value, opts = {}) => {
+    if (value === null || value === undefined || value === '') return;
+    rows.push({ label, value, ...opts });
+  };
+
+  push('Jurisdiction', source.jurisdiction);
+  push('Publication date', source.publication_date || source.effective_date);
+  push('Version', source.document_version || source.source_version);
+  push('Retrieval', source.retrieval_method, { mono: true });
+
+  // Verification status comes from the backend, never from an assumption.
+  const legalStatus = source.legal_status;
   const isSuperseded = source.is_superseded === true || source.superseded === true;
-  const statusLabel = isSuperseded ? 'Superseded / Amended' : 'Active Settled Law';
-  const retrievalMethod = source.retrieval_method || 'Hybrid (BM25 + Chroma Dense RRF)';
-  
-  // Calculate or format SHA-256 fingerprint
-  const contentHash = source.content_hash || 
-    (source.text 
-      ? 'sha256:' + Array.from(source.text.slice(0, 32)).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('').slice(0, 24) + '...'
-      : 'sha256:verified_immutable_node');
+  let statusLabel = null;
+  let statusTone = 'neutral';
+  if (isSuperseded) {
+    statusLabel = 'Superseded / amended';
+    statusTone = 'bad';
+  } else if (legalStatus === 'verified') {
+    statusLabel = 'Verified against source';
+    statusTone = 'good';
+  } else if (legalStatus) {
+    // e.g. "unverified" - shown honestly rather than dressed up as settled law
+    statusLabel = String(legalStatus).replace(/_/g, ' ');
+    statusTone = 'warn';
+  }
+
+  // Only a hash the backend computed. Never derived from the text here.
+  const contentHash = source.content_hash || null;
+  const sourceUrl = source.source_url || null;
+  const hasAnything = rows.length > 0 || statusLabel || contentHash || sourceUrl;
+
+  const toneColor = {
+    good: 'var(--defense-pass)',
+    bad: 'var(--defense-block)',
+    warn: 'var(--accent-amber, #f59e0b)',
+    neutral: 'var(--text-secondary)',
+  }[statusTone];
+  const toneBg = {
+    good: 'rgba(16, 185, 129, 0.1)',
+    bad: 'rgba(239, 68, 68, 0.1)',
+    warn: 'rgba(245, 158, 11, 0.12)',
+    neutral: 'rgba(255, 255, 255, 0.05)',
+  }[statusTone];
 
   return (
     <div style={{ marginTop: '8px' }}>
-      {/* Progressive Disclosure Toggle Button */}
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
@@ -41,10 +87,9 @@ export default function ProvenancePanel({ source }) {
         <span style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease', display: 'inline-flex' }}>
           <ChevronDownIcon size={12} />
         </span>
-        <span>{expanded ? 'Hide Provenance Details' : 'Show Provenance Details'}</span>
+        <span>{expanded ? 'Hide provenance' : 'Show provenance'}</span>
       </button>
 
-      {/* Expandable Accordion Body */}
       {expanded && (
         <div
           style={{
@@ -60,47 +105,53 @@ export default function ProvenancePanel({ source }) {
             color: 'var(--text-secondary)',
           }}
         >
-          <div>
-            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Jurisdiction: </span>
-            <strong style={{ color: 'var(--text-primary)' }}>{jurisdiction}</strong>
-          </div>
+          {!hasAnything && (
+            <div style={{ gridColumn: 'span 2', color: 'var(--text-muted)' }}>
+              No provenance metadata recorded for this source.
+            </div>
+          )}
 
-          <div>
-            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Status: </span>
-            <span
-              style={{
-                color: isSuperseded ? 'var(--defense-block)' : 'var(--defense-pass)',
-                fontWeight: 700,
-                background: isSuperseded ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)',
-                padding: '1px 6px',
-                borderRadius: '4px',
-              }}
-            >
-              {statusLabel}
-            </span>
-          </div>
+          {statusLabel && (
+            <div>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Status: </span>
+              <span style={{ color: toneColor, fontWeight: 700, background: toneBg, padding: '1px 6px', borderRadius: '4px', textTransform: 'capitalize' }}>
+                {statusLabel}
+              </span>
+            </div>
+          )}
 
-          <div>
-            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Publication Date: </span>
-            <span style={{ color: 'var(--text-primary)' }}>{pubDate}</span>
-          </div>
+          {rows.map((r) => (
+            <div key={r.label}>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{r.label}: </span>
+              <span
+                style={{
+                  color: r.mono ? 'var(--accent-blue)' : 'var(--text-primary)',
+                  fontFamily: r.mono ? 'monospace' : 'inherit',
+                  fontSize: r.mono ? '0.7rem' : 'inherit',
+                }}
+              >
+                {r.value}
+              </span>
+            </div>
+          ))}
 
-          <div>
-            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Version: </span>
-            <span style={{ color: 'var(--text-primary)' }}>{docVersion}</span>
-          </div>
+          {contentHash && (
+            <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Content hash: </span>
+              <span style={{ fontFamily: 'monospace', color: 'var(--accent-cyan)', fontSize: '0.68rem', background: 'rgba(56, 189, 248, 0.08)', padding: '1px 6px', borderRadius: '4px' }}>
+                {contentHash}
+              </span>
+            </div>
+          )}
 
-          <div style={{ gridColumn: 'span 2' }}>
-            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Retrieval Pipeline: </span>
-            <span style={{ color: 'var(--accent-blue)', fontFamily: 'monospace', fontSize: '0.7rem' }}>{retrievalMethod}</span>
-          </div>
-
-          <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Content Hash: </span>
-            <span style={{ fontFamily: 'monospace', color: 'var(--accent-cyan)', fontSize: '0.68rem', background: 'rgba(56, 189, 248, 0.08)', padding: '1px 6px', borderRadius: '4px' }}>
-              {contentHash}
-            </span>
-          </div>
+          {sourceUrl && (
+            <div style={{ gridColumn: 'span 2' }}>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Source: </span>
+              <a href={sourceUrl} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--accent-blue)', fontSize: '0.7rem', wordBreak: 'break-all' }}>
+                {sourceUrl}
+              </a>
+            </div>
+          )}
         </div>
       )}
     </div>

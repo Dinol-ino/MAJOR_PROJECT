@@ -1,6 +1,6 @@
 import hashlib
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List
 from app.config import settings
 
@@ -34,17 +34,29 @@ class MemoryPolicy:
             "created_by": user_id,
             "source": source,
             "session_id": session_id,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "epoch_ts": time.time(),
         }
+
+    @staticmethod
+    def as_utc(value: datetime) -> datetime:
+        """Normalises a timestamp to aware UTC.
+
+        Rows written before the timezone fix are naive; rows written after are aware.
+        Comparing the two raises TypeError, so both are coerced here. A naive value is
+        assumed to be UTC, which is what the old code intended when it called utcnow().
+        """
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     @staticmethod
     def is_expired(created_at: datetime, retention_days: int) -> bool:
         """Checks if a memory record has exceeded its retention TTL."""
         if not created_at or retention_days <= 0:
             return False
-        cutoff = datetime.utcnow() - timedelta(days=retention_days)
-        return created_at < cutoff
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        return MemoryPolicy.as_utc(created_at) < cutoff
 
     @staticmethod
     def validate_user_access(resource_user_id: str, authenticated_user_id: str) -> bool:

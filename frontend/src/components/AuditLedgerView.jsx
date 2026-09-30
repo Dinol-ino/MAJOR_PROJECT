@@ -11,6 +11,7 @@ export default function AuditLedgerView({ user }) {
   const [verify, setVerify] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showLog, setShowLog] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -34,7 +35,7 @@ export default function AuditLedgerView({ user }) {
     <div style={st.page}>
       <section style={st.section}>
         <h2 style={st.h2}>Request protection</h2>
-        <p style={st.p}>Every request passes, in order: authentication, an input guard (prompt-injection and jailbreak patterns), legal-scope classification, retrieval restricted to your own documents and vaults, context sanitisation that treats retrieved text as data, and an output guard that checks the answer against the retrieved evidence. These run on the server and cannot be switched off from the browser.</p>
+        <p style={st.p}>Every request is authenticated, screened for prompt injection and jailbreak attempts, restricted to Indian legal scope, answered only from your own documents and vaults, and checked against the retrieved evidence before the answer is returned. These checks run on the server and cannot be switched off from the browser.</p>
       </section>
 
       <section style={st.section}>
@@ -63,8 +64,14 @@ export default function AuditLedgerView({ user }) {
 
       {isAdmin && summary?.rows?.length > 0 && (
         <section style={st.section}>
-          <h2 style={st.h2}>Recent events</h2>
-          <p style={st.p}>Visible to the workspace administrator. Identifiers are fingerprinted; document names and prompts are not recorded.</p>
+          <div style={st.head}>
+            <h2 style={st.h2}>Event log</h2>
+            <button type="button" style={st.btn} onClick={() => setShowLog(!showLog)}>
+              {showLog ? 'Hide log' : `Show ${Math.min(summary.rows.length, 100)} events`}
+            </button>
+          </div>
+          <p style={st.p}>Administrator only. Identifiers are fingerprinted; document names and prompts are not recorded. The summary above is the normal view - per-request detail is rarely needed and is kept collapsed.</p>
+          {showLog && (
           <table style={st.table}>
             <thead><tr><th style={st.th}>Time</th><th style={st.th}>Event</th><th style={st.th}>Layer</th><th style={st.th}>Result</th></tr></thead>
             <tbody>
@@ -78,6 +85,7 @@ export default function AuditLedgerView({ user }) {
               ))}
             </tbody>
           </table>
+          )}
         </section>
       )}
     </div>

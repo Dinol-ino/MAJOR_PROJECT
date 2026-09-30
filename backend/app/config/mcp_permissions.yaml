@@ -45,6 +45,7 @@ categories:
       - "law_commission_report_query"
       - "live_statute_checker"
       - "kanoon_case_search"
+      - "ecourts_case_search"
 
 # External MCP Server Permissions (Legal sources and local microservices only)
 servers:

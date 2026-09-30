@@ -5,9 +5,11 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.db.engine import get_sync_session
+from app.db.engine import get_sync_session
+from app.db.models import utcnow
 from app.db.models import ProjectVault, Conversation, DocumentMemory, DocumentPage
 from app.services.ingest import ingest_service, compute_file_hash, get_vault_collection_name
+from app.services.document_store import document_store, DocumentStoreError
 from app.defense.audit_log import AuditLogger
 from app.routes.auth import get_current_user
 from app.security.ownership import current_user_id, owns
@@ -18,8 +20,8 @@ audit_logger = AuditLogger()
 
 
 def _verify_vault_access(vault: ProjectVault, current_user: Dict[str, Any], write: bool = False) -> None:
-    # 404 (not 403) so another user's vault ids are not disclosed.
-    # write=True on mutating paths: admins may read across users, never edit or delete.
+    # 404 (not 403) so another user's vault ids are not disclosed. Admins may read across
+    # users but never modify or delete a practitioner's privileged matter files (write=True).
     if not owns(vault.user_id, current_user, write=write):
         raise HTTPException(status_code=404, detail="Project vault not found.")
 
@@ -130,7 +132,7 @@ def update_vault(vault_id: str, req: UpdateVaultRequest, current_user: Dict = De
         vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id, ProjectVault.deleted_at.is_(None)).first()
         if not vault:
             raise HTTPException(status_code=404, detail="Project vault not found.")
-        _verify_vault_access(vault, current_user)
+        _verify_vault_access(vault, current_user, write=True)
 
         if req.vault_name is not None:
             vault.vault_name = req.vault_name.strip()
@@ -146,23 +148,53 @@ def update_vault(vault_id: str, req: UpdateVaultRequest, current_user: Dict = De
 
 @router.delete("/{vault_id}")
 def delete_vault(vault_id: str, soft_delete: bool = True, current_user: Dict = Depends(get_current_user)):
-    """Soft deletes vault (with 30-day grace retention) or purges cascade."""
-    from datetime import datetime
+    """Soft delete keeps every original and derived record (retention window, recoverable);
+    only ``soft_delete=false`` - an explicit permanent delete - removes the stored files."""
     with get_sync_session() as session:
         vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id).first()
         if not vault:
             raise HTTPException(status_code=404, detail="Project vault not found.")
-        _verify_vault_access(vault, current_user)
+        _verify_vault_access(vault, current_user, write=True)
 
         if soft_delete:
-            vault.deleted_at = datetime.utcnow()
+            vault.deleted_at = utcnow()
         else:
             session.delete(vault)
 
-    # Purge Chroma collection for this vault
-    ingest_service.delete_vault_collection(vault_id)
+    if not soft_delete:
+        ingest_service.delete_vault_collection(vault_id)
+        document_store.delete_vault(vault_id)
     audit_logger.log(action=f"vault_deleted:{vault_id}", layer="persistence")
     return {"status": "deleted", "vault_id": vault_id, "soft_deleted": soft_delete}
+
+
+async def _read_upload_bounded(file: UploadFile) -> bytes:
+    """Reads an upload in 1 MiB steps and refuses it as soon as it exceeds MAX_FILE_SIZE_MB."""
+    from app.config import settings
+    limit = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    buf = bytearray()
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > limit:
+            raise HTTPException(status_code=413, detail=f"File exceeds the {settings.MAX_FILE_SIZE_MB} MB limit.")
+    return bytes(buf)
+
+
+def _run_ingestion(doc_id: str, vault_id: str, filename: str) -> None:
+    """Background worker. Reads the original from the canonical store, so it also works
+    after a restart, and always records a terminal state."""
+    try:
+        ingest_service.ingest_document(doc_id=doc_id, vault_id=vault_id, filename=filename)
+    except Exception as exc:
+        logger.error("Background ingestion unhandled failure for doc %s: %s", doc_id, exc, exc_info=True)
+        try:
+            ingest_service.update_doc_state(doc_id=doc_id, status="failed", progress=0,
+                                            error=f"Ingestion failed: {exc}")
+        except Exception as db_err:
+            logger.error("Failed to record ingest failure in DB for doc %s: %s", doc_id, db_err)
 
 
 @router.post("/{vault_id}/documents", status_code=202)
@@ -173,102 +205,94 @@ async def upload_vault_document(
     current_user: Dict = Depends(get_current_user),
 ):
     """
-    Uploads a case PDF to a specific Project Vault.
-    Enforces per-vault file quota (RetrievalConfig.vault_max_files).
-    Returns document_id immediately with pending state; background worker processes ingestion.
+    Uploads a case PDF to a Project Vault.
+
+    The original is written to durable storage before anything else; ingestion (parse,
+    chunk, embed, index) then runs in the background and can be repeated at will from
+    that file. Returns the document id immediately in the "pending" state.
     """
     from app.config import settings
 
-    if not file.filename.lower().endswith(".pdf"):
+    if not (file.filename or "").lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF legal documents are supported.")
 
-    content = await file.read()
+    content = await _read_upload_bounded(file)
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="The file is not a valid PDF.")
 
     f_hash = compute_file_hash(content)
+    requeue: Optional[Dict[str, Any]] = None
+    stored_rel: Optional[str] = None
 
     with get_sync_session() as session:
         vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id, ProjectVault.deleted_at.is_(None)).first()
         if not vault:
             raise HTTPException(status_code=404, detail="Project vault not found.")
-        _verify_vault_access(vault, current_user)
+        _verify_vault_access(vault, current_user, write=True)
 
-        # Enforce per-vault file cap (Task 2.3.2)
+        # Enforce per-vault file cap
         if len(vault.documents) >= settings.retrieval.vault_max_files:
             raise HTTPException(
                 status_code=400,
                 detail=f"Vault file quota reached: maximum {settings.retrieval.vault_max_files} files allowed per project vault."
             )
 
-        # Check deduplication within vault
         existing = (
             session.query(DocumentMemory)
-            .filter(
-                DocumentMemory.project_vault_id == vault_id,
-                DocumentMemory.file_hash == f_hash
-            )
+            .filter(DocumentMemory.project_vault_id == vault_id, DocumentMemory.file_hash == f_hash)
             .first()
         )
         if existing:
-            return {
-                "document_id": existing.doc_id,
-                "status": existing.ingest_status,
-                "duplicate": True,
-                "filename": existing.filename,
-                "message": "File already ingested into this vault.",
-            }
+            if existing.ingest_status == "failed":
+                # Same file again after a failure: keep the record, restore the original if it
+                # is missing, and retry indexing rather than reporting a dead duplicate.
+                if not document_store.exists(existing.storage_path):
+                    existing.storage_path = document_store.save(vault_id, existing.doc_id, content)
+                existing.ingest_status, existing.ingest_progress, existing.ingest_error = "pending", 0, None
+                requeue = {"doc_id": existing.doc_id, "filename": existing.filename}
+            else:
+                return {
+                    "document_id": existing.doc_id,
+                    "status": existing.ingest_status,
+                    "duplicate": True,
+                    "filename": existing.filename,
+                    "message": "File already in this vault.",
+                }
 
-        doc_id = f"doc_{vault_id[:8]}_{uuid.uuid4().hex[:8]}"
-        doc_mem = DocumentMemory(
-            doc_id=doc_id,
-            session_id=vault_id,
-            project_vault_id=vault_id,
-            filename=file.filename,
-            file_hash=f_hash,
-            file_size_bytes=len(content),
-            vector_ns=get_vault_collection_name(vault_id),
-            ingest_status="pending",
-            ingest_progress=0,
-            metadata_json={"source": "vault_upload", "original_filename": file.filename},
-        )
-        session.add(doc_mem)
-        session.flush()
-
-    # Dispatch ingestion in background task worker with safe failure handling
-    def _safe_background_ingest(d_id: str, v_id: str, f_name: str, file_bytes: bytes):
-        try:
-            ingest_service.ingest_document(
-                doc_id=d_id,
-                vault_id=v_id,
-                filename=f_name,
-                content=file_bytes,
-            )
-        except Exception as exc:
-            logger.error(f"Background ingestion unhandled failure for doc {d_id}: {exc}", exc_info=True)
+        if requeue is None:
+            doc_id = f"doc_{vault_id[:8]}_{uuid.uuid4().hex[:8]}"
+            # The original hits the disk BEFORE its row is committed.
+            stored_rel = document_store.save(vault_id, doc_id, content)
             try:
-                ingest_service.update_doc_state(
-                    doc_id=d_id,
-                    status="failed",
-                    progress=0,
-                    error=f"Ingestion failed: {str(exc)}"
-                )
-            except Exception as db_err:
-                logger.error(f"Failed to record ingest failure in DB for doc {d_id}: {db_err}")
+                session.add(DocumentMemory(
+                    doc_id=doc_id,
+                    session_id=vault_id,
+                    project_vault_id=vault_id,
+                    filename=file.filename,
+                    file_hash=f_hash,
+                    file_size_bytes=len(content),
+                    vector_ns=get_vault_collection_name(vault_id),
+                    ingest_status="pending",
+                    ingest_progress=0,
+                    storage_path=stored_rel,
+                    doc_type="pdf",
+                    metadata_json={"source": "vault_upload", "original_filename": file.filename,
+                                   "uploaded_by": current_user_id(current_user)},
+                ))
+                session.flush()
+            except Exception:
+                document_store.delete_document(stored_rel)
+                raise
+            requeue = {"doc_id": doc_id, "filename": file.filename}
 
-    background_tasks.add_task(
-        _safe_background_ingest,
-        d_id=doc_id,
-        v_id=vault_id,
-        f_name=file.filename,
-        file_bytes=content,
-    )
-
-    audit_logger.log(action=f"vault_doc_queued:{doc_id}", layer="ingest")
+    background_tasks.add_task(_run_ingestion, requeue["doc_id"], vault_id, requeue["filename"])
+    audit_logger.log(action=f"vault_doc_queued:{requeue['doc_id']}", layer="ingest")
     return {
-        "document_id": doc_id,
+        "document_id": requeue["doc_id"],
         "vault_id": vault_id,
-        "filename": file.filename,
+        "filename": requeue["filename"],
         "status": "pending",
         "progress": 0,
         "duplicate": False,
@@ -325,7 +349,7 @@ def delete_vault_document(vault_id: str, doc_id: str, current_user: Dict = Depen
         vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id).first()
         if not vault:
             raise HTTPException(status_code=404, detail="Project vault not found.")
-        _verify_vault_access(vault, current_user)
+        _verify_vault_access(vault, current_user, write=True)
 
         doc = (
             session.query(DocumentMemory)
@@ -338,8 +362,53 @@ def delete_vault_document(vault_id: str, doc_id: str, current_user: Dict = Depen
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found.")
 
+        stored_path = doc.storage_path
         session.delete(doc)
 
     ingest_service.delete_document_vectors(vault_id=vault_id, doc_id=doc_id)
+    # Explicit user deletion is the only path that removes the original file.
+    document_store.delete_document(stored_path)
     audit_logger.log(action=f"vault_doc_deleted:{doc_id}", layer="ingest")
     return {"status": "deleted", "doc_id": doc_id, "vault_id": vault_id}
+
+
+def _owned_document(session, vault_id: str, doc_id: str, current_user: Dict[str, Any], write: bool) -> DocumentMemory:
+    vault = session.query(ProjectVault).filter(ProjectVault.id == vault_id, ProjectVault.deleted_at.is_(None)).first()
+    if not vault:
+        raise HTTPException(status_code=404, detail="Project vault not found.")
+    _verify_vault_access(vault, current_user, write=write)
+    doc = (
+        session.query(DocumentMemory)
+        .filter(DocumentMemory.doc_id == doc_id, DocumentMemory.project_vault_id == vault_id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    return doc
+
+
+@router.get("/{vault_id}/documents/{doc_id}/file")
+def download_vault_document(vault_id: str, doc_id: str, current_user: Dict = Depends(get_current_user)):
+    """Returns the original uploaded PDF, byte for byte."""
+    from fastapi.responses import FileResponse
+    with get_sync_session() as session:
+        doc = _owned_document(session, vault_id, doc_id, current_user, write=False)
+        stored_path, filename = doc.storage_path, doc.filename
+    if not document_store.exists(stored_path):
+        raise HTTPException(status_code=404, detail="The original file is not available for this document.")
+    return FileResponse(document_store.path(stored_path), media_type="application/pdf", filename=filename)
+
+
+@router.post("/{vault_id}/documents/{doc_id}/reindex", status_code=202)
+def reindex_vault_document(vault_id: str, doc_id: str, background_tasks: BackgroundTasks,
+                           current_user: Dict = Depends(get_current_user)):
+    """Rebuilds pages, chunks and indexes from the stored original. The original is untouched."""
+    with get_sync_session() as session:
+        doc = _owned_document(session, vault_id, doc_id, current_user, write=True)
+        if not document_store.exists(doc.storage_path):
+            raise HTTPException(status_code=409, detail="The original file is not available; upload the document again.")
+        filename = doc.filename
+        doc.ingest_status, doc.ingest_progress, doc.ingest_error = "pending", 0, None
+    background_tasks.add_task(_run_ingestion, doc_id, vault_id, filename)
+    audit_logger.log(action=f"vault_doc_reindex:{doc_id}", layer="ingest")
+    return {"document_id": doc_id, "status": "pending"}

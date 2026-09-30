@@ -98,7 +98,9 @@ def test_circuit_breaker_lifecycle():
 
 
 @pytest.mark.anyio
-async def test_cloud_runtime_generate():
+async def test_cloud_runtime_generate(monkeypatch):
+    # Cloud generation requires explicit operator opt-in (egress policy).
+    monkeypatch.setattr(settings.cloud_fallback, "enabled", True)
     api_vault.set_from_ui("grok", "xai-test-key-mock")
 
     runtime = CloudRuntime(provider="grok")
@@ -125,7 +127,8 @@ async def test_cloud_runtime_generate():
 
 
 @pytest.mark.anyio
-async def test_cloud_runtime_streaming():
+async def test_cloud_runtime_streaming(monkeypatch):
+    monkeypatch.setattr(settings.cloud_fallback, "enabled", True)
     api_vault.set_from_ui("zai", "zai-test-key-mock")
 
     runtime = CloudRuntime(provider="zai")

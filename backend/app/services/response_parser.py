@@ -67,6 +67,7 @@ class ResponseParser:
 
     DEEP_THINKING_REGEX = re.compile(r"<deep_thinking>(.*?)(?:</deep_thinking>|$)", re.DOTALL | re.IGNORECASE)
     CITATION_TOKEN_REGEX = re.compile(r"\[\^S:([^\|\]]+)\|([^\|\]]+)(?:\|([^\]]+))?\]")
+    _INTERNAL_SECTION_LABEL = re.compile(r"^\s*(?:chunk|page|part|para(?:graph)?|segment|clause\s+of)\b", re.IGNORECASE)
 
     def extract_deep_thinking(self, text: str) -> Tuple[str, Optional[str]]:
         """
@@ -86,6 +87,33 @@ class ResponseParser:
 
     def _normalize_str(self, s: str) -> str:
         return re.sub(r"[^a-zA-Z0-9]", "", s).lower()
+
+    def _normalize_section(self, s: str) -> str:
+        """Normalises a section reference for comparison.
+
+        Evidence chunks store "Section 43A" while the model emits "43A" or "s43A", so the
+        plain normaliser compared "section43a" against "43a" and never matched - every
+        citation resolved to nothing. Strips a leading section marker from BOTH sides.
+        """
+        raw = (s or "").strip()
+        raw = re.sub(r"^\s*(?:section|sec|§|s)\.?\s*(?=\d)", "", raw, flags=re.IGNORECASE)
+        return self._normalize_str(raw)
+
+    def _has_real_section(self, s: str) -> bool:
+        """True when a chunk label is a genuine statutory section reference.
+
+        Vault and free-text chunks are labelled with internal positions ("Chunk 3",
+        "Page 12") which carry no statutory meaning, so a citation whose section does
+        not match them is not evidence of a hallucination. A real section label
+        ("166", "43A", "Section 66") is comparable, so a mismatch against it IS a
+        hallucination and must stay unresolved.
+        """
+        raw = (s or "").strip()
+        if not raw:
+            return False
+        if self._INTERNAL_SECTION_LABEL.match(raw):
+            return False
+        return bool(re.search(r"\d", raw))
 
     def parse_citations(
         self,
@@ -138,21 +166,17 @@ class ResponseParser:
                 act_display = act_slug.replace("_", " ")
 
                 norm_act = self._normalize_str(act_slug)
-                norm_sec = self._normalize_str(sec_clean)
+                norm_sec = self._normalize_section(sec_clean)
 
+                # Two passes. A matching section is the strong signal. When the model's
+                # section label differs from the chunk's - a vault chunk is labelled
+                # "Chunk 1" while the document text says "Clause 1" - a slug or act match
+                # still proves the claim came from that evidence chunk. Previously the
+                # elif only ran when the model gave NO section, so a section mismatch left
+                # the citation reported as pointing at nothing.
                 for chunk in evidence:
-                    chunk_act = self._normalize_str(chunk.get("act", "") or chunk.get("act_name", ""))
-                    chunk_sec = self._normalize_str(chunk.get("section", "") or chunk.get("section_no", ""))
-                    if norm_sec and chunk_sec:
-                        if norm_sec == chunk_sec:
-                            resolved = True
-                            matched_chunk_id = chunk.get("id") or chunk.get("chunk_id")
-                            matched_doc_id = chunk.get("doc_id") or chunk.get("document_id")
-                            matched_quote = chunk.get("text") or chunk.get("content")
-                            if chunk.get("act"):
-                                act_display = chunk.get("act")
-                            break
-                    elif not norm_sec and norm_act and (norm_act in chunk_act or chunk_act in norm_act):
+                    chunk_sec = self._normalize_section(chunk.get("section", "") or chunk.get("section_no", ""))
+                    if norm_sec and chunk_sec and norm_sec == chunk_sec:
                         resolved = True
                         matched_chunk_id = chunk.get("id") or chunk.get("chunk_id")
                         matched_doc_id = chunk.get("doc_id") or chunk.get("document_id")
@@ -160,6 +184,30 @@ class ResponseParser:
                         if chunk.get("act"):
                             act_display = chunk.get("act")
                         break
+
+                if not resolved and norm_act:
+                    for chunk in evidence:
+                        # If the model gave a section AND this chunk carries a genuine
+                        # statutory section label, the first pass already compared them
+                        # and they differed. Falling back to an act match here would
+                        # validate a citation to a provision the evidence does not
+                        # contain - exactly the hallucination this parser must catch.
+                        if norm_sec and self._has_real_section(
+                            chunk.get("section", "") or chunk.get("section_no", "")
+                        ):
+                            continue
+                        chunk_act = self._normalize_str(chunk.get("act", "") or chunk.get("act_name", ""))
+                        chunk_slug = self._normalize_str(chunk.get("act_slug", "") or "")
+                        slug_hit = bool(chunk_slug) and norm_act == chunk_slug
+                        act_hit = bool(chunk_act) and (norm_act in chunk_act or chunk_act in norm_act)
+                        if slug_hit or act_hit:
+                            resolved = True
+                            matched_chunk_id = chunk.get("id") or chunk.get("chunk_id")
+                            matched_doc_id = chunk.get("doc_id") or chunk.get("document_id")
+                            matched_quote = chunk.get("text") or chunk.get("content")
+                            if chunk.get("act"):
+                                act_display = chunk.get("act")
+                            break
 
                 citations.append(
                     ParsedCitation(

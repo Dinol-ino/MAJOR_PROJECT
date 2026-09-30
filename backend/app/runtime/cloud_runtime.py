@@ -14,6 +14,21 @@ class CloudRuntimeError(Exception):
     pass
 
 
+class CloudEgressBlocked(CloudRuntimeError):
+    """Raised when policy forbids sending this request to a cloud provider."""
+    pass
+
+
+def _enforce_egress_policy() -> None:
+    from app.runtime import egress_guard
+    if not settings.cloud_fallback.enabled:
+        raise CloudEgressBlocked("Cloud generation is disabled; the request stays on this machine.")
+    if egress_guard.is_private_context():
+        raise CloudEgressBlocked(
+            f"Blocked: private case material ({egress_guard.private_reason()}) is never sent to a cloud provider."
+        )
+
+
 class CloudRuntime:
     """
     Spec 02 — Cloud API Fallback Runtime.
@@ -53,6 +68,7 @@ class CloudRuntime:
         """
         Generate complete text response from Grok or Z.ai.
         """
+        _enforce_egress_policy()
         endpoint, api_key, resolved_model = self._resolve_config(model)
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -93,6 +109,7 @@ class CloudRuntime:
         """
         Stream generated tokens incrementally from Grok or Z.ai via OpenAI-compatible SSE.
         """
+        _enforce_egress_policy()
         endpoint, api_key, resolved_model = self._resolve_config(model)
         headers = {
             "Authorization": f"Bearer {api_key}",

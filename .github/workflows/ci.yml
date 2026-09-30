@@ -86,6 +86,7 @@ jobs:
           SQLITE_DB_PATH: /tmp/e2e/db.sqlite
           CHROMA_PERSIST_DIR: /tmp/e2e/chroma
           BM25_INDEX_DIR: /tmp/e2e/bm25
+          VAULT_FILES_DIR: /tmp/e2e/vault_files
           PROVISIONING_DB_PATH: /tmp/e2e/provisioning.db
           OLLAMA_URL: "http://127.0.0.1:9"
           NETWORK_MODE: OFFLINE

@@ -31,6 +31,7 @@ export default function Sidebar({
   setActiveView,
   shieldOn,
   activeVaultId,
+  docsVersion = 0,
   onSelectVault
 }) {
   const [sessions, setSessions] = useState([]);
@@ -41,6 +42,9 @@ export default function Sidebar({
   const [vaultError, setVaultError] = useState('');
   const [editingChatId, setEditingChatId] = useState(null);
   const [editingChatTitle, setEditingChatTitle] = useState('');
+  // Documents of the currently expanded vault. A vault used to render as a bare folder
+  // with nothing under it, so neither its chats nor its uploads were discoverable.
+  const [vaultDocs, setVaultDocs] = useState([]);
 
   const fetchVaults = async () => {
     try {
@@ -66,7 +70,29 @@ export default function Sidebar({
   useEffect(() => {
     fetchSessions();
     fetchVaults();
-  }, [activeSessionId]);
+  }, [activeSessionId, docsVersion]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeVaultId) {
+      setVaultDocs([]);
+      return undefined;
+    }
+    (async () => {
+      try {
+        const data = await apiClient.getVaultDocuments(activeVaultId);
+        if (!cancelled) setVaultDocs(data.documents || []);
+      } catch (e) {
+        if (!cancelled) setVaultDocs([]);
+        console.warn('Failed to load vault documents:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeVaultId, activeSessionId, docsVersion]);
+
+  // Chats carry project_vault_id, so grouping is a client-side split - no extra request.
+  const vaultChats = (vid) => sessions.filter((s) => s.project_vault_id === vid);
+  const unfiledSessions = sessions.filter((s) => !s.project_vault_id);
 
   const handleDelete = async (e, sid) => {
     e.stopPropagation();
@@ -97,7 +123,7 @@ export default function Sidebar({
 
   const handleDeleteVault = async (e, vid) => {
     e.stopPropagation();
-    if (!window.confirm("Delete this Project Vault and its indexed document vectors?")) return;
+    if (!window.confirm("Remove this Project Vault from your list? Your original documents stay stored until you delete them permanently.")) return;
     try {
       await apiClient.deleteVault(vid);
       fetchVaults();
@@ -436,9 +462,10 @@ export default function Sidebar({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '140px', overflowY: 'auto' }}>
           {vaults.map((v) => {
             const isSelected = activeVaultId === v.id;
+            const chatsInVault = vaultChats(v.id);
             return (
+              <div key={v.id}>
               <div
-                key={v.id}
                 onClick={() => {
                   if (onSelectVault) {
                     onSelectVault(isSelected ? null : v.id);
@@ -478,6 +505,70 @@ export default function Sidebar({
                   </button>
                 </div>
               </div>
+
+              {/* Expanded vault: its own chats and documents, so the folder is not empty. */}
+              {isSelected && (
+                <div style={{ marginLeft: '14px', paddingLeft: '8px', borderLeft: '1px solid var(--border-subtle, rgba(255,255,255,0.08))', marginTop: '4px', marginBottom: '6px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onNewTask(); setActiveView('chat'); }}
+                    style={{ textAlign: 'left', background: 'none', border: '1px dashed rgba(255,255,255,0.14)', borderRadius: '5px', color: 'var(--accent-blue)', fontSize: '0.74rem', padding: '4px 7px', cursor: 'pointer' }}
+                    title="Start a chat scoped to this vault's documents"
+                  >
+                    + New chat in this vault
+                  </button>
+
+                  {chatsInVault.length === 0 ? (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', padding: '2px 4px' }}>
+                      No chats in this vault yet
+                    </div>
+                  ) : (
+                    chatsInVault.map((s) => (
+                      <div
+                        key={s.session_id}
+                        onClick={(e) => { e.stopPropagation(); onSelectSession(s.session_id); setActiveView('chat'); }}
+                        style={{
+                          fontSize: '0.74rem',
+                          padding: '3px 7px',
+                          borderRadius: '5px',
+                          cursor: 'pointer',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          color: s.session_id === activeSessionId ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          background: s.session_id === activeSessionId ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+                        }}
+                        title={s.title}
+                      >
+                        {s.title}
+                      </div>
+                    ))
+                  )}
+
+                  <div style={{ fontSize: '0.64rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '4px' }}>
+                    Documents
+                  </div>
+                  {vaultDocs.length === 0 ? (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', padding: '2px 4px' }}>
+                      No PDFs yet — use Upload to Vault in the chat box
+                    </div>
+                  ) : (
+                    vaultDocs.map((d) => (
+                      <div
+                        key={d.document_id || d.doc_id}
+                        style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', padding: '2px 7px', display: 'flex', justifyContent: 'space-between', gap: '6px' }}
+                        title={`${d.filename} — ${d.status || d.ingest_status}`}
+                      >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.filename}</span>
+                        <span style={{ fontSize: '0.62rem', color: (d.status || d.ingest_status) === 'ready' ? 'var(--defense-pass)' : 'var(--text-dim)' }}>
+                          {d.status || d.ingest_status}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+              </div>
             );
           })}
         </div>
@@ -489,13 +580,15 @@ export default function Sidebar({
           Conversations
         </div>
 
-        {sessions.length === 0 ? (
+        {unfiledSessions.length === 0 ? (
           <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', padding: '8px 10px' }}>
-            No conversations yet — start by asking a question
+            {sessions.length === 0
+              ? 'No conversations yet — start by asking a question'
+              : 'All conversations are filed under a project vault'}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            {sessions.map((s) => {
+            {unfiledSessions.map((s) => {
               const isActive = s.session_id === activeSessionId && activeView === 'chat';
               const isEditing = editingChatId === s.session_id;
 

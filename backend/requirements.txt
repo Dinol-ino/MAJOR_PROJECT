@@ -39,3 +39,5 @@ neo4j>=5.0.0
 
 
 
+alembic>=1.13
+langgraph>=0.2

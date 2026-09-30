@@ -2,6 +2,21 @@ from typing import List, Dict, Any
 from app.config import settings
 from app.schemas import CitationSource
 
+def classify_source_kind(doc_type) -> str:
+    if doc_type in ("vault_document", "user_document"):
+        return "user_document"
+    if doc_type == "mcp_tool_result":
+        return "external_source"
+    return "statute"
+
+
+def _as_int(value):
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 class CitationBuilder:
     """
     Builds ground-truth citation sources directly from retrieved chunks.
@@ -18,7 +33,11 @@ class CitationBuilder:
             meta = chunk.get("metadata") or {}
             act = chunk.get("act") or meta.get("act") or meta.get("filename") or "Unknown source"
             section = str(chunk.get("section") or meta.get("section") or "")
-            key = (act.lower(), section.lower())
+            page_start = _as_int(meta.get("page_start"))
+            page_end = _as_int(meta.get("page_end"))
+            # Two different passages of one document are distinct citations: key on the
+            # document and page as well, so the second passage is not silently dropped.
+            key = (act.lower(), section.lower(), meta.get("doc_id"), page_start)
 
             if key in seen:
                 continue
@@ -46,6 +65,10 @@ class CitationBuilder:
                     filename=meta.get("filename") or None,
                     retrieval_score=chunk.get("score"),
                     via=meta.get("via"),
+                    source_kind=classify_source_kind(chunk.get("doc_type") or meta.get("doc_type")),
+                    doc_id=meta.get("doc_id") or None,
+                    page_start=page_start,
+                    page_end=page_end if page_end is not None else page_start,
                 )
             )
 

@@ -71,6 +71,7 @@ test.describe('Citation Rendering & Grounding Sources', () => {
               document_version: 'v2024.2',
               publication_date: '2013-08-29',
               is_superseded: false,
+              legal_status: 'unverified',
               content_hash: 'sha256:447a19b88234fedcba00123',
             },
           ],
@@ -86,7 +87,7 @@ test.describe('Citation Rendering & Grounding Sources', () => {
     await page.keyboard.press('Enter');
 
     // Click to expand provenance accordion
-    const toggleBtn = page.getByRole('button', { name: /Show Provenance Details/i });
+    const toggleBtn = page.getByRole('button', { name: /Show provenance/i });
     await expect(toggleBtn).toBeVisible();
     await toggleBtn.click();
 
@@ -94,11 +95,13 @@ test.describe('Citation Rendering & Grounding Sources', () => {
     await expect(page.getByText(/Jurisdiction:/i)).toBeVisible();
     await expect(page.getByText(/India \(Union \/ Ministry of Corporate Affairs\)/i)).toBeVisible();
     await expect(page.getByText(/Status:/i)).toBeVisible();
-    await expect(page.getByText(/Active Settled Law/i)).toBeVisible();
+    // Honest status: the backend said 'unverified', so that (not 'settled law') is what the lawyer sees.
+    await expect(page.getByText(/unverified/i).first()).toBeVisible();
+    await expect(page.getByText(/Active Settled Law/i)).toHaveCount(0);
     await expect(page.getByText(/2013-08-29/i)).toBeVisible();
     await expect(page.getByText(/sha256:447a19b88234fedcba00123/i)).toBeVisible();
 
     // Check Hide toggle state
-    await expect(page.getByRole('button', { name: /Hide Provenance Details/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Hide provenance/i })).toBeVisible();
   });
 });

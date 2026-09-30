@@ -55,6 +55,19 @@ async def lifespan(app: FastAPI):
             logger.warning("Statutory corpus indexing deferred: %s", type(exc).__name__)
 
     app.state.corpus_task = asyncio.create_task(_background_corpus_index())
+
+    # Documents whose ingestion a restart interrupted are resumed from their stored
+    # originals instead of sitting in "pending" forever.
+    async def _background_resume_ingestion():
+        try:
+            from app.services.ingest import ingest_service
+            resumed = await asyncio.to_thread(ingest_service.resume_incomplete)
+            if resumed:
+                logger.info("Resumed ingestion for %d interrupted document(s).", len(resumed))
+        except Exception as exc:
+            logger.warning("Ingestion recovery deferred: %s", type(exc).__name__)
+
+    app.state.resume_task = asyncio.create_task(_background_resume_ingestion())
     logger.info("DFrag API started (network mode=%s, runtime=%s).", os.getenv("NETWORK_MODE", settings.network.default_mode), settings.MODEL_RUNTIME)
     yield
     app.state.warmup_task.cancel()

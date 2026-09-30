@@ -69,6 +69,17 @@ class KanoonCaseSearchOutput(BaseModel):
     source: str = "Indian Kanoon Allowlisted Mirror"
 
 
+class ECourtsCaseSearchInput(BaseModel):
+    keywords: str = Field(..., min_length=3, max_length=300)
+    max_cases: Optional[int] = Field(default=3, ge=1, le=5)
+    state_code: Optional[str] = Field(default=None, max_length=8)
+
+class ECourtsCaseSearchOutput(BaseModel):
+    cases: List[Dict[str, Any]] = Field(default_factory=list)
+    source: str = ""
+    total_hits: Optional[int] = None
+
+
 class IndiaCodeFetcherInput(BaseModel):
     act_id: str = Field(..., min_length=2, max_length=50)
 
@@ -205,6 +216,15 @@ class ToolRegistry:
             handler=self._mock_kanoon_search
         ))
 
+        self.register_tool(ToolDefinition(
+            name="ecourts_case_search",
+            category="CASE_LAW_SEARCH",
+            description="Searches eCourtsIndia case records (metadata only; external source). Requires ONLINE mode and an API key.",
+            input_schema=ECourtsCaseSearchInput,
+            output_schema=ECourtsCaseSearchOutput,
+            handler=self._ecourts_case_search
+        ))
+
         # GOVERNMENT_SOURCE (Requires ONLINE)
         self.register_tool(ToolDefinition(
             name="indiacode_fetcher",
@@ -259,6 +279,10 @@ class ToolRegistry:
 
     def _mock_kanoon_search(self, keywords: str, citation: Optional[str] = None, max_cases: int = 3) -> Dict[str, Any]:
         return self._unavailable("case-law search")
+
+    def _ecourts_case_search(self, keywords: str, max_cases: int = 3, state_code: Optional[str] = None) -> Dict[str, Any]:
+        from app.mcp.connectors import ecourts
+        return ecourts.search_cases(keywords, max_cases=max_cases or 3, state_code=state_code)
 
     def _mock_indiacode_fetcher(self, act_id: str) -> Dict[str, Any]:
         return self._unavailable("India Code gazette lookup")

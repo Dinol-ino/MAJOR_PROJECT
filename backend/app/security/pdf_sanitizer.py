@@ -72,12 +72,18 @@ class PDFSanitizer:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             total_pages = len(doc)
 
-            if total_pages > self.max_pages:
+            # An over-long PDF used to be refused outright, which rejected ordinary
+            # judgments and long contracts. Default behaviour now ingests the first
+            # max_pages pages and records the truncation, so the page budget - and
+            # therefore extraction cost and memory - stays exactly as bounded as before.
+            truncated = total_pages > self.max_pages
+            if truncated and settings.retrieval.pdf_page_overflow_mode == "reject":
                 doc.close()
                 raise ValueError(f"PDF page count ({total_pages}) exceeds maximum allowed limit of {self.max_pages} pages.")
 
+            pages_to_read = min(total_pages, self.max_pages)
             extracted_text = []
-            for page_num in range(total_pages):
+            for page_num in range(pages_to_read):
                 page = doc.load_page(page_num)
                 text = page.get_text("text")
                 extracted_text.append(text)
@@ -86,9 +92,18 @@ class PDFSanitizer:
             full_text = "\n\n".join(extracted_text)
             metadata = {
                 "total_pages": total_pages,
+                "pages_ingested": pages_to_read,
+                # Surfaced so the document card can say the tail was not read, rather
+                # than the answer quietly being grounded in a partial document.
+                "truncated": truncated,
                 "size_bytes": len(pdf_bytes),
                 "is_sanitized": True
             }
+            if truncated:
+                logger.warning(
+                    "PDF truncated at ingestion: %d of %d pages read (MAX_FILE_PAGES=%d).",
+                    pages_to_read, total_pages, self.max_pages,
+                )
             return full_text, metadata
 
         except Exception as exc:

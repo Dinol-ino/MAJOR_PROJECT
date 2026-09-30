@@ -1,6 +1,7 @@
 import re
 import html
 import logging
+import unicodedata
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -11,7 +12,7 @@ EMBEDDED_INSTRUCTION_PATTERNS = [
     re.compile(r"(?i)\bignore\s+(?:all\s+)?(?:previous|the|prior|earlier|past)?\s*instructions?\b"),
     re.compile(r"(?i)\bSYSTEM\s*:\s*ignore\b"),
     re.compile(r"(?i)\byou\s+are\s+now\s+(?:dan|jailbroken|unrestricted|developer\s+mode)\b"),
-    re.compile(r"(?i)\b(?:reveal|output|print|show|dump)\s+(?:system\s+prompt|secret\s+key|initial\s+prompt)\b"),
+    re.compile(r"(?i)\b(?:reveal|output|print|show|dump|leak|disclose|display|repeat|expose)\s+(?:me\s+)?(?:the\s+|your\s+|all\s+|any\s+)?(?:system\s+prompt|secret\s+keys?|initial\s+prompt|hidden\s+prompt|api\s+keys?)\b"),
     re.compile(r"(?i)\bforget\s+(?:everything|all\s+rules|your\s+instructions)\b"),
     re.compile(r"(?i)\brespond\s+only\s+with\s+(?:the\s+following|'yes'|'no'|pwned)\b"),
     re.compile(r"(?i)<\s*/?\s*(?:system|instruction|prompt|secret)\s*>"),
@@ -63,6 +64,28 @@ EMBEDDED_INSTRUCTION_PATTERNS = [
 ]
 
 
+# Characters that render as nothing (or reorder text) and are used to split a keyword so a
+# pattern no longer matches while a model still reads it ("ig\u200bnore previous ...").
+# ZWNJ/ZWJ (U+200C/D) are meaningful in Indic scripts, so they are only dropped from the
+# copy used for matching, never from text that turns out to be clean.
+_INVISIBLE_ALWAYS = dict.fromkeys(map(ord, "\u200b\u200e\u200f\u2060\u2061\u2062\u2063\u2064\ufeff\u00ad\u180e"), None)
+_INVISIBLE_ALWAYS.update(dict.fromkeys(range(0x202A, 0x202F), None))   # bidi embeddings/overrides
+_INVISIBLE_ALWAYS.update(dict.fromkeys(range(0x2066, 0x206A), None))   # bidi isolates
+_INVISIBLE_MATCH_ONLY = dict.fromkeys(map(ord, "\u200c\u200d"), None)
+# Cyrillic / Greek letters that are visually identical to Latin ones.
+_CONFUSABLES = str.maketrans({
+    "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0443": "y",
+    "\u0445": "x", "\u0456": "i", "\u0458": "j", "\u0455": "s", "\u04bb": "h", "\u0501": "d",
+    "\u03bf": "o", "\u03b1": "a", "\u03b5": "e", "\u03bd": "v", "\u03b9": "i", "\u03c1": "p",
+})
+
+
+def _matching_form(text: str) -> str:
+    """Canonical form used only to DETECT instructions: NFKC, no invisibles, confusables folded."""
+    t = unicodedata.normalize("NFKC", text.translate(_INVISIBLE_ALWAYS))
+    return t.translate(_INVISIBLE_MATCH_ONLY).translate(_CONFUSABLES)
+
+
 class ContextSanitizer:
     """
     Layer 2 Unified Context Sanitizer (Phase 07).
@@ -82,6 +105,17 @@ class ContextSanitizer:
         """
         if not text:
             return ""
+
+        # 0. Evasion-resistant detection. If the canonical form of the text contains an
+        #    embedded instruction (split with zero-width characters, written in fullwidth
+        #    forms or with look-alike letters) the canonical form is what we sanitise and
+        #    return, so the obfuscated original cannot reach the model. Clean text keeps its
+        #    original characters (minus always-invisible ones).
+        text = text.translate(_INVISIBLE_ALWAYS)
+        canonical = _matching_form(text)
+        if canonical != text and any(p.search(canonical) and not p.search(text) for p in EMBEDDED_INSTRUCTION_PATTERNS):
+            logger.warning("Context Sanitizer detected an obfuscated embedded instruction in %s", source_type)
+            text = canonical
 
         # 1. Strip script tags specifically
         clean_text = re.sub(
@@ -140,11 +174,20 @@ class ContextSanitizer:
         for chunk in chunks:
             raw_text = chunk.get("text", "")
             text_content = self.sanitize_text(raw_text, source_type="corpus") if sanitize_first else raw_text
+            # Untrusted text must not be able to close or open our containers. Angle brackets are
+            # neutralised (not stripped) so a "</data>" or "</retrieved_evidence>" inside a
+            # document is shown to the model as inert text, never as structure.
+            text_content = text_content.replace("<", "\u2039").replace(">", "\u203a")
             act = chunk.get("act", "Legal Provision")
             section = chunk.get("section", "General")
             
+            # slug is what <citation_protocol> tells the model to copy into [^S:...].
+            # It was never rendered, so the model invented one and the citation resolved
+            # against nothing. Falls back to the act name when absent.
+            slug = chunk.get("act_slug") or chunk.get("vault_doc_id") or act
             block = (
-                f'<data act="{html.escape(str(act))}" section="{html.escape(str(section))}">\n'
+                f'<data slug="{html.escape(str(slug))}" act="{html.escape(str(act))}" '
+                f'section="{html.escape(str(section))}">\n'
                 f"{text_content}\n"
                 f"</data>"
             )

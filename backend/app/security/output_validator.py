@@ -81,10 +81,12 @@ class OutputValidator:
         return True, None
 
     def verify_citations_exist(self, answer: str, retrieved_chunks: List[Dict[str, Any]]) -> Tuple[bool, Optional[str]]:
-        """Verifies that citations mentioned in answer exist in retrieved corpus metadata."""
-        if not retrieved_chunks:
-            return True, None
+        """Verifies that citations mentioned in answer exist in retrieved corpus metadata.
 
+        With no retrieved evidence the valid set is empty, so ANY named Act in the answer is an
+        unverifiable citation and fails (previously this returned True, letting a model cite
+        statutes it was never shown).
+        """
         valid_acts = {c.get("act", "").lower().strip() for c in retrieved_chunks if c.get("act")}
         expanded_valid = set(valid_acts)
         for act in valid_acts:

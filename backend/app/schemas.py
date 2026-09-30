@@ -29,6 +29,14 @@ class CitationSource(BaseModel):
     filename: Optional[str] = None
     retrieval_score: Optional[float] = None
     via: Optional[str] = None  # e.g. "cross_reference" when added by citation-graph expansion
+    # Where the evidence came from, so the UI never blends the three trust classes:
+    #   user_document  - a document the user uploaded to their vault (private evidence)
+    #   statute        - the local statutory corpus
+    #   external_source - output of an MCP/external tool (not authoritative by itself)
+    source_kind: Optional[str] = None
+    doc_id: Optional[str] = None
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
 
 class ChatResponse(BaseModel):
     answer: str

@@ -23,6 +23,8 @@ import yaml
 
 from app.config import settings
 
+from app.db.models import utcnow
+
 logger = logging.getLogger(__name__)
 
 DERIVATION_TEXT_CROSS_REFERENCE = "text_extraction"
@@ -39,14 +41,26 @@ def acts_dir() -> str:
     if configured:
         return configured
     here = os.path.dirname(os.path.abspath(__file__))
+    searched: List[str] = []
     for candidate in (
         os.path.join(here, "..", "..", "..", "data", "acts_raw"),  # repo layout
         os.path.join(here, "..", "..", "data", "acts_raw"),        # backend-only layout (Docker image)
     ):
         candidate = os.path.normpath(candidate)
+        searched.append(candidate)
         if os.path.isdir(candidate):
             return candidate
-    return os.path.normpath(os.path.join(here, "..", "..", "..", "data", "acts_raw"))
+    fallback = os.path.normpath(os.path.join(here, "..", "..", "..", "data", "acts_raw"))
+    # A miss here means the whole statutory library stays empty, and every legal answer
+    # falls back to "insufficient evidence". Silence made that look like a retrieval bug,
+    # so name the resolved paths once - they are deployment paths, not user data.
+    logger.warning(
+        "Statutory corpus directory not found. ACTS_RAW_DIR=%r, searched=%s. "
+        "The statute library will stay empty until this path resolves.",
+        configured or "(unset)",
+        searched,
+    )
+    return fallback
 
 
 def load_manifest(directory: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
@@ -170,7 +184,7 @@ def index_statutory_corpus(directory: Optional[str] = None, rebuild_retrieval: b
         "cross_references": 0,
         "dense_indexed": False,
         "unverified_acts": [],
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": utcnow().isoformat(),
     }
     files = sorted(f for f in os.listdir(directory) if f.endswith(".txt")) if stats["acts_dir_exists"] else []
     manifest = load_manifest(directory)
@@ -215,7 +229,7 @@ def index_statutory_corpus(directory: Optional[str] = None, rebuild_retrieval: b
             statute.verified_at = act["verified_at"]
             statute.content_hash = act["content_hash"]
             statute.section_count = len(sections)
-            statute.updated_at = datetime.utcnow()
+            statute.updated_at = utcnow()
 
             existing = {s.number: s for s in session.query(StatuteSection).filter_by(statute_id=statute.id).all()}
             for number, sec_text in sections.items():
@@ -243,7 +257,7 @@ def index_statutory_corpus(directory: Optional[str] = None, rebuild_retrieval: b
                         dst_type="section", dst_key=f"section:{act['slug']}:{ref}",
                         relation="references", origin=CORPUS_ORIGIN,
                         derivation_method=DERIVATION_TEXT_CROSS_REFERENCE,
-                        confidence=1.0, created_at=datetime.utcnow(),
+                        confidence=1.0, created_at=utcnow(),
                     ))
                     stats["cross_references"] += 1
 

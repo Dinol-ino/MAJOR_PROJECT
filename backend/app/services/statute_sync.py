@@ -49,6 +49,14 @@ class StatuteSyncService:
                 logger.info("Statute library empty; indexing local statutory corpus from %s", directory)
                 self.sync_all_statutes()
                 return True
+            if not has_corpus and not has_files:
+                # Previously this returned False without a word, so an unmounted corpus
+                # was indistinguishable from a healthy one that simply needed no work.
+                logger.warning(
+                    "Statute library is empty and no corpus text files were found in %s. "
+                    "Legal answers will report insufficient evidence until the corpus is available.",
+                    directory,
+                )
         except Exception as exc:
             self._auto_checked = False
             logger.warning("Statute auto-index deferred: %s", type(exc).__name__)

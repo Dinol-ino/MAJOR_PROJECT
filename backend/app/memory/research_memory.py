@@ -2,7 +2,8 @@ import uuid
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
-from app.db.engine import get_sync_session
+from app.db.engine import get_sync_session
+from app.db.models import utcnow
 from app.db.models import ResearchSession, ResearchSource
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ class ResearchMemoryManager:
                     findings="",
                     sources=[],
                     citations=[],
-                    created_at=datetime.utcnow()
+                    created_at=utcnow()
                 )
                 session.add(rs)
             session.flush()
@@ -56,7 +57,7 @@ class ResearchMemoryManager:
             source_url=source_url,
             title=title,
             snippet=snippet,
-            retrieved_at=datetime.utcnow()
+            retrieved_at=utcnow()
         )
         with get_sync_session() as session:
             session.add(source)
@@ -80,7 +81,7 @@ class ResearchMemoryManager:
                     status=status,
                     findings=findings,
                     citations=citations or [],
-                    created_at=datetime.utcnow()
+                    created_at=utcnow()
                 )
                 session.add(rs)
             else:
@@ -96,7 +97,7 @@ class ResearchMemoryManager:
         TTL cleanup job for ResearchSession.status == 'active' older than max_age_seconds (default 1 hour).
         Marks abandoned/crashed Deep Thinking sessions as 'failed' to prevent orphan active sessions.
         """
-        cutoff = datetime.utcnow() - timedelta(seconds=max_age_seconds)
+        cutoff = utcnow() - timedelta(seconds=max_age_seconds)
         try:
             with get_sync_session() as session:
                 stale = session.query(ResearchSession).filter(

@@ -164,8 +164,36 @@ def get_corpus_completeness_status():
     verified_acts = sum(1 for a in acts_list if a["provenance_verified"])
     total_chunks = max(len(ids), bm25_count)
     from app.retrieval.client import dense_retrieval_status
+    from app.ingestion.statutory_corpus import acts_dir
+
+    # An unseeded library has two very different causes - the corpus text is absent, or it
+    # is present but was never indexed. The dashboard reported neither, so operators could
+    # not tell a deployment problem from a pending sync.
+    try:
+        corpus_dir = acts_dir()
+        corpus_present = os.path.isdir(corpus_dir)
+        corpus_files = (
+            len([f for f in os.listdir(corpus_dir) if f.endswith(".txt")]) if corpus_present else 0
+        )
+    except OSError as exc:
+        logger.warning("Corpus directory unreadable: %s", type(exc).__name__)
+        corpus_dir, corpus_present, corpus_files = "", False, 0
+
     return {
         "status": "healthy" if total_chunks > 0 else "unseeded",
+        "corpus_source": {
+            "directory_resolved": bool(corpus_dir),
+            "directory_present": corpus_present,
+            "text_files_available": corpus_files,
+            # Distinguishes "nothing to index" from "indexed nothing".
+            "reason": (
+                None
+                if total_chunks > 0
+                else "corpus_files_missing"
+                if corpus_files == 0
+                else "corpus_present_but_not_indexed"
+            ),
+        },
         "total_chunks": total_chunks,
         "total_distinct_acts": len(acts_summary),
         "total_distinct_sections": distinct_sections_count,

@@ -70,6 +70,10 @@ def list_sessions(current_user: Dict = Depends(get_current_user)):
             "title": conv.get("title", f"Task {conv['conversation_id'][:8]}"),
             "created_at": conv.get("created_at"),
             "user_id": conv.get("user_id"),
+            # The sidebar could not group chats under their vault without this, so a
+            # vault always looked like an empty folder. Additive field; existing
+            # consumers are unaffected.
+            "project_vault_id": conv.get("project_vault_id"),
         })
     return {"sessions": sessions}
 
@@ -206,6 +210,8 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
                 failure_kind=orch_res.failure_kind,
                 correlation_id=orch_res.correlation_id or orch_res.request_id,
                 confidence_score=conf_score,
+                grounding_score=orch_res.grounding_score,
+                citations_parsed=orch_res.citations_parsed,
                 hallucination_flags=halluc_flags,
                 reasoning_trace=orch_res.reasoning_trace,
                 model_used=orch_res.model_used,
@@ -275,6 +281,10 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
             chunks=context_pkg.chunks_included
         )
 
+        from app.runtime import egress_guard
+        if active_vault_id:
+            egress_guard.mark_private_context("request is scoped to a vault")
+        egress_guard.mark_private_from_chunks(fitted_chunks)
         sources = citation_builder.build(fitted_chunks)
         sources_dict = [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in sources]
 
@@ -449,7 +459,7 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
             block_reason=None,
             failure_kind=None,
             correlation_id=request.session_id,
-            confidence_score=None,
+            confidence_score=confidence,
             grounding_score=grounding_score,
             hallucination_flags=hallucination_report.signals,
             reasoning_trace=reasoning_trace,
@@ -495,7 +505,7 @@ async def chat_endpoint(request: ChatRequest, current_user: Dict = Depends(get_c
             sources=sources,
             blocked_by=None,
             block_reason=None,
-            confidence_score=None,
+            confidence_score=confidence,
             hallucination_flags=hallucination_report.signals,
             correlation_id=request.session_id,
             model_used=request.model or settings.DEFAULT_MODEL,

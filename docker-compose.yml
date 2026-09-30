@@ -77,6 +77,9 @@ services:
       - chroma-data:/workspace/chroma_db
       - sqlite-data:/workspace/db
       - bm25-data:/workspace/bm25_index
+      # ORIGINAL uploaded documents: the canonical copy. Chroma/BM25 above are derived
+      # and rebuildable from this; do not lose it (survives `down`, lost only on `down -v`).
+      - vault-files:/workspace/vault_files
       # Statutory corpus (text + manifest.yaml) is read-only inside the container.
       - ./data/acts_raw:/workspace/data/acts_raw:ro
     environment:
@@ -93,6 +96,7 @@ services:
       - ANONYMIZED_TELEMETRY=False
       - CHROMA_PERSIST_DIR=/workspace/chroma_db
       - BM25_INDEX_DIR=/workspace/bm25_index
+      - VAULT_FILES_DIR=/workspace/vault_files
       - SQLITE_DB_PATH=/workspace/db/audit_log.db
       - ACTS_RAW_DIR=/workspace/data/acts_raw
       # Persisted via the sqlite-data named volume (survives `down`, lost only on `down -v`).
@@ -148,4 +152,5 @@ volumes:
   chroma-data:
   sqlite-data:
   bm25-data:
+  vault-files:
   ollama-models:

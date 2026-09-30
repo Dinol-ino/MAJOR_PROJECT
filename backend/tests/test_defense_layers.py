@@ -27,7 +27,9 @@ class TestDefenseLayers(unittest.TestCase):
     def test_layer2_prompt_wrapping(self):
         chunks = [{"act": "IT Act", "section": "66", "text": "Section 66 governs computer related crimes."}]
         prompt = self.guard2.build_prompt("Show section 66", chunks)
-        self.assertIn("<data act=\"IT Act\" section=\"66\">", prompt)
+        self.assertIn('act="IT Act"', prompt)
+        self.assertIn('section="66"', prompt)
+        self.assertIn('slug="', prompt)
         self.assertIn("Section 66 governs computer related crimes.", prompt)
         self.assertIn("</data>", prompt)
 

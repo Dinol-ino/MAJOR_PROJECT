@@ -1,5 +1,17 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def utcnow() -> datetime:
+    """Timezone-aware UTC now, for every persisted timestamp.
+
+    These columns are TIMESTAMP WITH TIME ZONE. A naive datetime.utcnow() written
+    into one is labelled by PostgreSQL with the SESSION timezone, not UTC, so the
+    stored instant is wrong by the server offset (observed: 5h30m on an IST host).
+    That silently corrupted the audit ledger and every retention calculation.
+    Returning an aware value makes the offset explicit on the wire.
+    """
+    return datetime.now(timezone.utc)
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
     Column,
@@ -27,7 +39,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(128), default="Legal Practitioner")
     role = Column(String(32), default="attorney")
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -47,8 +59,8 @@ class ProjectVault(Base):
     user_id = Column(String(64), nullable=False, index=True, default="default_user")
     vault_name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     conversations = relationship("Conversation", back_populates="vault", cascade="all, delete-orphan")
@@ -76,8 +88,8 @@ class Conversation(Base):
     project_vault_id = Column(String(64), ForeignKey("project_vaults.id", ondelete="SET NULL"), nullable=True, index=True)
     user_id = Column(String(64), nullable=False, index=True, default="default_user")
     title = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
     vault = relationship("ProjectVault", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at")
@@ -110,7 +122,7 @@ class Message(Base):
     blocked_by = Column(String(64), nullable=True)
     latency_ms = Column(Float, nullable=True)
     grounding_score = Column(Float, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     conversation = relationship("Conversation", back_populates="messages")
 
@@ -146,8 +158,8 @@ class SemanticMemory(Base):
     category = Column(String(64), nullable=False, index=True)  # 'preference', 'fact', 'entity'
     key = Column(String(128), nullable=False)
     value = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
     __table_args__ = (
         Index("ix_semantic_user_cat_key", "user_id", "category", "key"),
@@ -181,7 +193,13 @@ class DocumentMemory(Base):
     ingest_error = Column(Text, nullable=True)
     ingest_progress = Column(Integer, nullable=False, default=100)
     metadata_json = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    # Canonical-document identity. storage_path is relative to VAULT_FILES_DIR; the file it
+    # names is the source of truth and outlives every derived index.
+    storage_path = Column(String(512), nullable=True)
+    doc_type = Column(String(32), nullable=True)
+    parser_version = Column(String(64), nullable=True)
+    indexed_at = Column(DateTime(timezone=True), nullable=True)
 
     vault = relationship("ProjectVault", back_populates="documents")
     pages = relationship("DocumentPage", back_populates="document", cascade="all, delete-orphan")
@@ -203,6 +221,10 @@ class DocumentMemory(Base):
             "ingest_progress": self.ingest_progress,
             "metadata_json": self.metadata_json,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "doc_type": self.doc_type,
+            "parser_version": self.parser_version,
+            "has_original": bool(self.storage_path),
+            "indexed_at": self.indexed_at.isoformat() if self.indexed_at else None,
         }
 
 
@@ -213,7 +235,7 @@ class DocumentPage(Base):
     doc_id = Column(String(64), ForeignKey("document_memory.doc_id", ondelete="CASCADE"), nullable=False, index=True)
     page_no = Column(Integer, nullable=False)
     raw_text = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     document = relationship("DocumentMemory", back_populates="pages")
 
@@ -236,7 +258,7 @@ class ResearchSession(Base):
     findings = Column(Text, nullable=True)
     sources = Column(JSON, nullable=True)
     citations = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -258,7 +280,7 @@ class ResearchSource(Base):
     source_url = Column(Text, nullable=False)
     title = Column(Text, nullable=True)
     snippet = Column(Text, nullable=True)
-    retrieved_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    retrieved_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -317,7 +339,7 @@ class MCPToolCall(Base):
     is_allowed = Column(Integer, default=1, nullable=False)
     policy_reason = Column(String(256), nullable=True)
     latency_ms = Column(Float, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -351,7 +373,7 @@ class RequestMetricsRecord(Base):
     model_tier = Column(String(32), nullable=True)
     security_blocked = Column(Integer, default=0, nullable=False)
     metrics_json = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -389,7 +411,7 @@ class EvalRunRecord(Base):
     total_count = Column(Integer, nullable=False, default=0)
     status = Column(String(16), nullable=False, default="PASS")  # PASS | FAIL | SKIP
     details_json = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     __table_args__ = (
         Index("ix_eval_runs_run_id_category", "run_id", "category"),
@@ -419,7 +441,7 @@ class SystemSetting(Base):
 
     key = Column(String(64), primary_key=True, index=True)
     encrypted_value = Column(Text, nullable=True)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -443,7 +465,7 @@ class Statute(Base):
     source = Column(String(64), nullable=False)  # mcp:ansvar, mcp:themis, mcp:nyaya, mcp:taxbykk, vault_doc, seed_india_code
     section_count = Column(Integer, nullable=False, default=0)
     currency_checked_at = Column(DateTime(timezone=True), nullable=True)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
     # Provenance (from the corpus manifest; never invented). Null means "not recorded".
     source_url = Column(String(512), nullable=True)
     source_version = Column(String(256), nullable=True)
@@ -549,7 +571,7 @@ class CitationEdge(Base):
     conversation_id = Column(String(64), nullable=True, index=True)
     message_id = Column(String(64), nullable=True, index=True)
     confidence = Column(Float, nullable=True, default=1.0)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {

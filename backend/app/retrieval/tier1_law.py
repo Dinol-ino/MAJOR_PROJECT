@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 from typing import List, Dict, Any, Optional
 # pyrefly: ignore [missing-import]
 import chromadb
@@ -98,6 +99,14 @@ class Tier1LawRetrieval:
         if count == 0 and self.bm25_index.count() == 0:
             return []
 
+        # 1b. Explicit "Section N of <Act>" references resolve deterministically, ahead of ranking.
+        exact: List[Dict[str, Any]] = []
+        try:
+            from app.retrieval import structured_lookup
+            exact = structured_lookup.lookup(text, self.bm25_index)
+        except Exception as e:
+            logger.debug("structured lookup skipped: %s", type(e).__name__)
+
         # 2. Dense query (ChromaDB) — skipped when no embedding model is loaded
         dense_docs = []
         try:
@@ -140,6 +149,15 @@ class Tier1LawRetrieval:
             corpus_documents=corpus_sample,
             top_k=k
         )
+
+        if exact:
+            def _num(v):
+                return re.sub(r"(?i)^section\s*", "", str(v)).strip().upper()
+            # An explicit reference is authoritative: drop ranked hits that are the SAME section
+            # number in a different Act (or a duplicate spelling of the same one).
+            wanted = {_num(c["section"]) for c in exact}
+            final_results = exact + [r for r in final_results if _num(r.get("section")) not in wanted]
+            final_results = final_results[:max(k, len(exact))]
 
         # 6. Store in L2 Retrieval Cache
         try:

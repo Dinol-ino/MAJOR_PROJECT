@@ -25,6 +25,8 @@ export default function App() {
   const [authState, setAuthState] = useState('checking'); // checking | authenticated | anonymous
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeVaultId, setActiveVaultId] = useState(null);
+  // Bumped after an upload finishes so the sidebar re-reads the vault's documents and counts.
+  const [docsVersion, setDocsVersion] = useState(0);
   const [graphInitialQuery, setGraphInitialQuery] = useState(null);
   const [models, setModels] = useState({ installed: [], active: null, runtimeOnline: false, loading: true });
 
@@ -189,6 +191,7 @@ export default function App() {
         setActiveView={setActiveView}
         shieldOn
         activeVaultId={activeVaultId}
+        docsVersion={docsVersion}
         onSelectVault={(vid) => setActiveVaultId(vid)}
       />
 
@@ -207,7 +210,7 @@ export default function App() {
               messages={messages}
               onSendMessage={handleSendMessage}
               sessionId={sessionId}
-              onUploadSuccess={() => {}}
+              onUploadSuccess={() => setDocsVersion((v) => v + 1)}
               isGenerating={isGenerating}
               onClearThread={handleClearThread}
               activeVaultId={activeVaultId}

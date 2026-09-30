@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import AsyncMock, patch
+from app.config import settings
 from app.runtime.manager import runtime_manager
 from app.memory.audit_memory import audit_memory
 
@@ -16,7 +17,9 @@ class TestOOMFallback(unittest.TestCase):
             "Section 420 deals with cheating and dishonestly inducing delivery of property."
         ]
 
-        with patch.object(runtime_manager._runtime, "generate", mock_generate):
+        # The secondary local model is configuration (OLLAMA_FALLBACK_MODEL), not a hardcoded default.
+        with patch.object(runtime_manager._runtime, "generate", mock_generate), \
+                patch.object(settings.model, "fallback_model", "qwen2.5:3b"):
             result = await runtime_manager.generate_with_oom_recovery(
                 prompt=prompt,
                 task_type="legal_reasoning",

@@ -119,7 +119,12 @@ class HardwareDetector:
 
         # 4. Storage Free Probe
         try:
-            usage = shutil.disk_usage(os.getenv("MODELS_DISK_PATH", os.getcwd()))
+            # Path resolution is shared with telemetry and provisioning: an empty
+            # MODELS_DISK_PATH used to make disk_usage raise, which pinned free space
+            # at 0 GB and made every model fail its storage fit check.
+            from app.services.telemetry import models_disk_path
+
+            usage = shutil.disk_usage(models_disk_path())
             storage_free_gb = round(getattr(usage, "free", usage[2]) / (1024 ** 3), 2)
         except Exception:
             storage_free_gb = 0.0  # unmeasurable => treated as no room, never as a guessed amount

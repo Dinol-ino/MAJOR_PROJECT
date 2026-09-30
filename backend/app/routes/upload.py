@@ -5,7 +5,7 @@ import hashlib
 from typing import Dict
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from app.routes.auth import get_current_user
-from app.security.ownership import conversation_accessible
+from app.security.ownership import conversation_accessible, claim_session, require_conversation
 from app.db.engine import get_sync_session
 from app.schemas import UploadResponse
 from app.config import settings
@@ -45,8 +45,7 @@ async def _read_bounded(file: UploadFile) -> bytes:
 
 def _require_session_access(session_id: str, current_user: Dict) -> None:
     with get_sync_session() as db:
-        if not conversation_accessible(db, session_id, current_user):
-            raise HTTPException(status_code=404, detail="Conversation not found.")
+        claim_session(db, session_id, current_user)
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -179,9 +178,11 @@ async def upload_batch_endpoint(files: List[UploadFile] = File(...), session_id:
 
 
 @router.get("/memory/documents/{session_id}")
-async def get_session_documents(session_id: str):
+async def get_session_documents(session_id: str, current_user: Dict = Depends(get_current_user)):
     """
     Returns stored document metadata memory for a specific research/task session.
     """
+    with get_sync_session() as db:
+        require_conversation(db, session_id, current_user)
     documents = durable_memory.get_session_documents(session_id=session_id)
     return {"session_id": session_id, "documents": documents}

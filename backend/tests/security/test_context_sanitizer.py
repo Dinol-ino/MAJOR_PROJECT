@@ -27,7 +27,12 @@ class TestContextSanitizer(unittest.TestCase):
             {"act": "Indian Penal Code", "section": "Section 302", "text": "Punishment for murder shall be death or life imprisonment."}
         ]
         wrapped = context_sanitizer.wrap_in_defensive_containers(chunks)
-        self.assertTrue(wrapped.startswith('<data act="Indian Penal Code" section="Section 302">'))
+        # The container carries a slug attribute so the model can copy a stable
+        # identifier into its citation tokens; act/section remain for display.
+        self.assertTrue(wrapped.startswith('<data '))
+        self.assertIn('act="Indian Penal Code"', wrapped)
+        self.assertIn('section="Section 302"', wrapped)
+        self.assertIn('slug="', wrapped)
         self.assertTrue(wrapped.endswith('</data>'))
 
 

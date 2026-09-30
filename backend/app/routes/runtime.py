@@ -1,8 +1,11 @@
 import time
 import logging
 from typing import Optional
-from fastapi import APIRouter
+from typing import Dict
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from app.routes.auth import get_current_user
+from app.security.ownership import current_user_id, conversation_accessible, require_vault
 
 from app.schemas import ChatRequest
 from app.runtime.manager import runtime_manager
@@ -43,12 +46,29 @@ def get_runtime_status():
 
 
 @router.post("/chat/stream")
-async def chat_stream_endpoint(request: ChatRequest):
+async def chat_stream_endpoint(request: ChatRequest, current_user: Dict = Depends(get_current_user)):
     """
     Real-time Server-Sent Events (SSE) token streaming endpoint.
     Routes prompt to the appropriate model tier and streams tokens with client cancellation support.
     """
     start_time = time.time()
+    uid = current_user_id(current_user)
+
+    # Same isolation as /chat: the session and vault ids are client-supplied, so bind them to
+    # the caller before any retrieval runs. Other users' resources are reported as 404.
+    from app.db.engine import get_sync_session
+    from app.db.models import Conversation
+    bound_vault_id = None
+    with get_sync_session() as db:
+        if not conversation_accessible(db, request.session_id, current_user):
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        if request.vault_id:
+            require_vault(db, request.vault_id, current_user)
+        else:
+            conv = db.query(Conversation).filter_by(conversation_id=request.session_id).first()
+            if conv and conv.project_vault_id:
+                # Owned: conversation_accessible() above already proved this user may read it.
+                bound_vault_id = conv.project_vault_id
     
     # 1. Layer 1 Security Guard
     is_safe, block_reason, score, q_hash = input_guard.validate_with_score(request.message)
@@ -59,20 +79,10 @@ async def chat_stream_endpoint(request: ChatRequest):
 
     # 2. Retrieval & Context Assembly (including Vault evidence)
     t1_results = tier1_retriever.query(request.message)
-    t2_results = tier2_retriever.query(request.session_id, request.message)
+    t2_results = tier2_retriever.query(request.session_id, request.message, user_id=uid)
 
     # Vault-scoped document evidence (Spec 01 §5)
-    active_vault_id = request.vault_id
-    if not active_vault_id:
-        try:
-            from app.db.engine import get_sync_session
-            from app.db.models import Conversation
-            with get_sync_session() as session:
-                conv = session.query(Conversation).filter_by(conversation_id=request.session_id).first()
-                if conv and conv.project_vault_id:
-                    active_vault_id = conv.project_vault_id
-        except Exception:
-            pass
+    active_vault_id = request.vault_id or bound_vault_id
     if active_vault_id:
         from app.services.ingest import ingest_service
         vault_evidence = ingest_service.query_vault(active_vault_id, request.message, top_k=3)
@@ -80,6 +90,12 @@ async def chat_stream_endpoint(request: ChatRequest):
 
     retrieved_chunks = fuse_bm25_dense(t1_results, t2_results, top_k=settings.retrieval.top_k)
     fitted_chunks, _ = token_budget_manager.fit_chunks(0, retrieved_chunks)
+
+    # Private case material must never reach a cloud provider (enforced in CloudRuntime).
+    from app.runtime import egress_guard
+    if active_vault_id:
+        egress_guard.mark_private_context("request is scoped to a vault")
+    egress_guard.mark_private_from_chunks(fitted_chunks)
 
     # 3. Context Construction (System Prompt v4 with reasoning_effort)
     if request.shield_on:

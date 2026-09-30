@@ -1,3 +1,4 @@
+import re
 import time
 import uuid
 import logging
@@ -98,6 +99,11 @@ class OrchestrationResult(BaseModel):
     model_used: Optional[str] = None
     runtime_used: Optional[str] = None
     metrics: Dict[str, Any] = Field(default_factory=dict)
+    # Citation-contract outcome. grounding_score is None only when no answer was produced
+    # (blocked / model unavailable); it is never None merely because parsing found nothing.
+    grounding_score: Optional[float] = None
+    citations_parsed: Optional[List[Dict[str, Any]]] = None
+    citation_contract_violated: bool = False
 
 
 class ResearchStateMachine:
@@ -212,7 +218,26 @@ class ResearchStateMachine:
                 synth_trace = await self._run_synthesis(ctx, budget)
                 traces.append(synth_trace)
 
-                current_state = self._transition(current_state, AgentState.COMPLETED, req_id)
+                # Layer 3 runs on the fast path too.
+                #
+                # This previously went straight to COMPLETED, which skipped the output
+                # guard, citation parsing, grounding and hallucination detection - and the
+                # response still reported blocked_by=null and failure_kind=null, so a
+                # fast answer was indistinguishable from a verified one. Selecting the
+                # "low" reasoning level therefore disabled the Layer 3 boundary silently.
+                #
+                # The fast path legitimately skips planning, tool calls and the retry
+                # loop. It must not skip the output guard: every answer leaving this
+                # system is checked against the evidence it claims to rest on.
+                current_state = self._transition(current_state, AgentState.LEGAL_VERIFICATION, req_id)
+                verify_trace = await self._run_legal_verification(ctx, budget)
+                traces.append(verify_trace)
+
+                current_state = self._transition(
+                    current_state,
+                    AgentState.COMPLETED if ctx.get("verification_passed", False) else AgentState.FAILED,
+                    req_id,
+                )
                 return self._build_result(ctx, current_state, traces, budget, start_time)
 
             # 1. State: INITIALIZED -> CLASSIFY
@@ -330,6 +355,22 @@ class ResearchStateMachine:
         logger.debug(f"StateMachine [{request_id[:8]}]: {current.value} -> {target.value}")
         return target
 
+    def _session_has_uploads(self, session_id: Optional[str]) -> bool:
+        """Returns True if the session has user-uploaded documents in the tier2 index."""
+        if not session_id:
+            return False
+        try:
+            count = self.tier2_retriever.collection.count()
+            if count == 0:
+                return False
+            results = self.tier2_retriever.collection.get(
+                where={"session_id": session_id},
+                limit=1,
+            )
+            return bool(results and results.get("ids"))
+        except Exception:
+            return False
+
     def _is_simple_statutory_lookup(self, query: str) -> bool:
         """
         Fast-path heuristic for simple statutory lookups (Fault 01 §10-State FSM).
@@ -414,7 +455,46 @@ class ResearchStateMachine:
                 details={"intent": "conversational"}
             )
 
-        if is_explicit_non_legal or (not has_legal_terms and len(q.split()) > 5):
+        # A question asked inside a project vault is answered against the user's own
+        # uploaded documents, which ARE the corpus for that scope. Requiring a statutory
+        # keyword there refused legitimate questions about the user's own material
+        # ("what is the notice period in this agreement?") as out-of-scope. The explicit
+        # non-legal patterns above still refuse regardless of scope, and Layer 1 has
+        # already validated the input, so the security boundary is unchanged.
+        vault_scoped = bool(ctx.get("vault_id"))
+        # Recorded so retrieval can refuse to pull STATUTORY text for a vault question that has no
+        # legal subject ("capital of France" lexically matches an old Act that mentions France).
+        ctx["has_legal_terms"] = bool(has_legal_terms)
+        has_session_documents = self._session_has_uploads(ctx.get("session_id"))
+        user_docs_present = vault_scoped or has_session_documents
+
+        # Check for inquiries about uploaded documents when no documents are present
+        doc_inquiry_patterns = [
+            r"(?i)\b(?:have\s+i|did\s+i|is\s+there\s+(?:a|any)|what|show\s+(?:me\s+)?(?:the|my)|list)\s+(?:uploaded\s+|my\s+)?(?:pdf|document|file|doc)s?\b",
+            r"(?i)\b(?:pdf|document|file)s?\s+(?:uploaded|attached|present|in\s+this\s+(?:session|chat|vault))\b",
+            r"(?i)\b(?:do\s+you\s+see|can\s+you\s+see|where\s+is)\s+(?:my\s+|the\s+)?(?:pdf|document|file)\b",
+            r"(?i)\b(?:upload|uploaded)\s+(?:the\s+)?(?:pdf|document|file)\b",
+        ]
+        is_doc_inquiry = any(re.search(pat, q.strip()) for pat in doc_inquiry_patterns)
+        if is_doc_inquiry and not user_docs_present:
+            ctx["is_out_of_scope"] = True
+            ctx["intent"] = "out_of_scope"
+            ctx["failure_kind"] = "out_of_scope"
+            ctx["clean_answer"] = (
+                "No documents or PDFs have been uploaded to this session yet.\n\n"
+                "To ask questions about a specific document or contract, please upload it first "
+                "using the upload button in the chat or within a Project Vault. "
+                "Once uploaded, I can analyze its clauses, summarize contents, and cross-reference provisions with Indian statutory law."
+            )
+            return StateStepTrace(
+                step_number=budget.steps_taken,
+                state=AgentState.CLASSIFY.value,
+                duration_ms=(time.time() - t0) * 1000,
+                outcome="out_of_scope",
+                details={"intent": "doc_inquiry_no_uploads", "reason": "User inquired about uploaded documents but none exist in session"}
+            )
+
+        if is_explicit_non_legal or (not has_legal_terms and not user_docs_present and len(q.split()) > 5):
             ctx["is_out_of_scope"] = True
             ctx["intent"] = "out_of_scope"
             ctx["failure_kind"] = "out_of_scope"
@@ -501,7 +581,7 @@ class ResearchStateMachine:
             ctx["planned_tool"] = "live_statute_checker"
         elif any(term in q for term in ["case law", "precedent", "judgment", "court ruling", "kanoon", " landmark "]):
             ctx["requires_tool_call"] = True
-            ctx["planned_tool"] = "kanoon_case_search"
+            ctx["planned_tool"] = "ecourts_case_search"
         elif any(term in q for term in ["gazette", "official publication", "indiacode", "enactment date", "registry"]):
             ctx["requires_tool_call"] = True
             ctx["planned_tool"] = "indiacode_fetcher"
@@ -538,17 +618,27 @@ class ResearchStateMachine:
         profile = ctx.get("profile") or settings.reasoning.for_effort("medium")
         top_k = int(profile["retrieval_top_k"])
         t_lex = time.perf_counter()
-        t1_results = self.tier1_retriever.query(ctx["query"], top_k=top_k)
-        t2_results = self.tier2_retriever.query(ctx["session_id"], ctx["query"], top_k=top_k, user_id=ctx.get("user_id"))
-
-        # Vault-scoped evidence retrieval (ownership already enforced by the API layer)
-        vault_id = ctx.get("vault_id")
-        if vault_id:
-            try:
-                from app.services.ingest import ingest_service
-                t2_results.extend(ingest_service.query_vault(vault_id, ctx["query"], top_k=top_k))
-            except Exception as e:
-                logger.debug("Vault retrieval notice: %s", type(e).__name__)
+        t1_results, t2_results = self._retrieve_for_query(ctx["query"], ctx, top_k)
+        if ctx.get("vault_id") and ctx.get("has_legal_terms") is False:
+            t1_results = []
+        agent_steps = None
+        if settings.retrieval.agentic_retrieval_enabled and not ctx.get("is_conversational"):
+            from app.agents import retrieval_agent
+            from app.retrieval import relevance
+            from app.retrieval.bm25_index import tier1_bm25_index
+            if len(retrieval_agent.plan_subqueries(ctx["query"])) > 1:
+                stats = tier1_bm25_index.term_stats(relevance.stem)
+                def _fetch(sq):
+                    a, b = self._retrieve_for_query(sq, ctx, top_k)
+                    return [{**c, "_tier": 1} for c in a] + [{**c, "_tier": 2} for c in b]
+                out = retrieval_agent.run(
+                    ctx["query"], _fetch,
+                    lambda sq, ch: any(relevance.supports_query(sq, c.get("text", ""), stats=stats) for c in ch),
+                    max_chunks=int(profile["max_evidence_chunks"]) * 2)
+                agent_steps = out["steps"]
+                merged = out["chunks"]
+                t1_results = [{k: v for k, v in c.items() if k != "_tier"} for c in merged if c.get("_tier") == 1]
+                t2_results = [{k: v for k, v in c.items() if k != "_tier"} for c in merged if c.get("_tier") == 2]
         retrieval_ms = (time.perf_counter() - t_lex) * 1000
 
         # Citation-graph context expansion: statutory sections that retrieved sections cite in their own text.
@@ -588,8 +678,38 @@ class ResearchStateMachine:
             state=AgentState.RETRIEVE.value,
             duration_ms=(time.time() - t0) * 1000,
             outcome="success",
-            details={"chunks_found": len(combined), "graph_neighbors_added": graph_added, "top_k": top_k}
+            details={"chunks_found": len(combined), "graph_neighbors_added": graph_added, "top_k": top_k,
+                     **({"agent_steps": agent_steps} if agent_steps else {})}
         )
+
+    def _retrieve_for_query(self, query: str, ctx: Dict[str, Any], top_k: int):
+        """Statutory (relevance-gated) + session + vault retrieval for ONE query string."""
+        t1_results = self.tier1_retriever.query(query, top_k=top_k)
+        # Relevance gate for statutory hits: ranking returns the "closest" sections even for an
+        # unrelated question ("capital of France" -> Companies Act "share capital"). A section
+        # is evidence only if it carries the query's distinctive terms (idf-weighted).
+        # Explicit section lookups ("Section 66 IT Act") are exact and are not filtered here.
+        if not re.search(r"(?i)\b(?:section|sec\.?|s\.|article)\s*\d+", query):
+            try:
+                from app.retrieval import relevance
+                from app.retrieval.bm25_index import tier1_bm25_index
+                t1_results = relevance.filter_supported(
+                    query, t1_results, settings.retrieval.evidence_min_term_coverage,
+                    tier1_bm25_index.term_stats(relevance.stem),
+                )
+            except Exception as e:
+                logger.debug("Statutory relevance gate skipped: %s", type(e).__name__)
+        t2_results = self.tier2_retriever.query(ctx["session_id"], query, top_k=top_k, user_id=ctx.get("user_id"))
+
+        # Vault-scoped evidence retrieval (ownership already enforced by the API layer)
+        vault_id = ctx.get("vault_id")
+        if vault_id:
+            try:
+                from app.services.ingest import ingest_service
+                t2_results.extend(ingest_service.query_vault(vault_id, query, top_k=top_k))
+            except Exception as e:
+                logger.debug("Vault retrieval notice: %s", type(e).__name__)
+        return t1_results, t2_results
 
     def _extract_tool_arguments(self, tool_name: str, query: str, session_id: str) -> Dict[str, Any]:
         """Dynamically extracts schema-compliant arguments from user query for any planned tool."""
@@ -614,7 +734,7 @@ class ResearchStateMachine:
             return {"query": q, "domain": "statutory_law"}
         elif tool_name == "live_statute_checker":
             return {"act_name": act_name, "section": section}
-        elif tool_name == "kanoon_case_search":
+        elif tool_name in ("kanoon_case_search", "ecourts_case_search"):
             return {"keywords": q, "max_cases": 3}
         elif tool_name == "indiacode_fetcher":
             return {"act_id": act_name}
@@ -795,6 +915,16 @@ class ResearchStateMachine:
                 details={"reason": "No relevant statutory chunks found in corpus matching the queried legal enactment"}
             )
 
+        # A vault-scoped request names the user's own documents as the context. Ranked
+        # purely by RRF they sit below the statutory corpus and are cut by the evidence
+        # cap below before the token budget even runs: a question about an uploaded PDF
+        # returned five statutes and dropped the one chunk that could answer it.
+        # Stable sort, so relative order inside each group is preserved.
+        if ctx.get("vault_id") or any(c.get("doc_type") in ("vault_document", "user_document") for c in valid_chunks):
+            valid_chunks.sort(
+                key=lambda c: 0 if c.get("doc_type") in ("vault_document", "user_document") else 1
+            )
+
         profile = ctx.get("profile") or settings.reasoning.for_effort("medium")
         context_window = self._model_context_window(ctx.get("model"))
         budget_mgr = TokenBudgetManager(
@@ -808,6 +938,11 @@ class ResearchStateMachine:
             chunks=ranked,
         )
         ctx["validated_evidence"] = fitted_chunks
+        # Private case material must never reach a cloud provider (enforced in CloudRuntime).
+        from app.runtime import egress_guard
+        if ctx.get("vault_id"):
+            egress_guard.mark_private_context("request is scoped to a vault")
+        egress_guard.mark_private_from_chunks(fitted_chunks)
         ctx["sources"] = self.citation_builder.build(fitted_chunks)
         evidence_tokens = sum(len(c.get("text", "")) // 4 for c in fitted_chunks)
         ctx["metrics"].update({
@@ -971,7 +1106,60 @@ class ResearchStateMachine:
             ctx["clean_answer"] = f"Response quarantined: {error_reason}"
         else:
             clean_ans = self.output_guard.last_clean_answer
-            ctx["clean_answer"] = self.response_formatter.format(clean_ans)
+
+            # Spec 03: verify the citation contract instead of assuming it. Reuses the
+            # existing response_parser rather than adding a parallel implementation.
+            # Before this, the orchestrator never parsed [^S:...] tokens at all, so an
+            # answer with zero citations was indistinguishable from a fully cited one.
+            from app.services.response_parser import response_parser
+            t_c = time.perf_counter()
+            parsed = response_parser.parse(clean_ans, evidence_chunks=evidence)
+            ctx["metrics"]["citation_parse_ms"] = round((time.perf_counter() - t_c) * 1000, 2)
+            ctx["grounding_score"] = parsed.grounding_score
+            ctx["citations_parsed"] = [c.to_dict() for c in parsed.citations]
+            ctx["metrics"]["citations_total"] = parsed.total_citations_count
+            ctx["metrics"]["citations_resolved"] = parsed.citations_resolved_count
+
+            # A substantive answer drawn from real evidence that cites nothing has broken
+            # the contract. compute_grounding_score() already exempts refusals and
+            # insufficient-evidence replies, so those never reach this branch.
+            # Grounding score alone decides: 0 when a citation resolves to nothing,
+            # 40 when a substantive answer cites nothing, 100 for refusals and
+            # insufficient-evidence replies, which therefore never trip this.
+            # Keying on 'zero citations' missed the worse case: a confident citation
+            # pointing at no evidence at all.
+            violated = bool(
+                evidence
+                and parsed.grounding_score < settings.security.min_grounding_score
+            )
+            ctx["citation_contract_violated"] = violated
+
+            if violated and settings.security.citation_contract_mode == "block":
+                ctx["blocked_by"] = "layer3"
+                ctx["block_reason"] = (
+                    "Answer withheld: no verifiable citation was produced for evidence-backed claims."
+                )
+                ctx["failure_kind"] = "ungrounded_output"
+                ctx["clean_answer"] = (
+                    "Response withheld. The model produced an answer from retrieved evidence but "
+                    "emitted no verifiable citation, so its claims could not be traced to a source."
+                )
+                return StateStepTrace(
+                    step_number=budget.steps_taken,
+                    state=AgentState.LEGAL_VERIFICATION.value,
+                    duration_ms=(time.time() - t0) * 1000,
+                    outcome="blocked",
+                    details={"is_valid": False, "citation_contract": "violated"}
+                )
+
+            ctx["clean_answer"] = self.response_formatter.format(parsed.content or clean_ans)
+
+            if violated:
+                ctx["failure_kind"] = ctx.get("failure_kind") or "ungrounded_output"
+                ctx["clean_answer"] += (
+                    "\n\n> **Unverified:** this answer cites no source that can be checked against "
+                    "the retrieved evidence. Treat it as unconfirmed."
+                )
             if ctx.get("output_truncated"):
                 ctx["clean_answer"] += (
                     "\n\n_Note: the answer reached the output limit for this reasoning level and may be incomplete. "
@@ -1201,7 +1389,7 @@ class ResearchStateMachine:
                 model_used=model_used or "none",
                 runtime_used=settings.MODEL_RUNTIME,
                 reasoning_trace=reasoning_trace,
-                grounding_score=None,
+                grounding_score=ctx.get("grounding_score"),
                 injection_score=ctx.get("injection_score", 0.0),
                 retrieval_hits=len(ctx.get("retrieved_chunks", [])),
                 latency_ms=latency_ms,
@@ -1232,6 +1420,9 @@ class ResearchStateMachine:
             model_used=model_used,
             runtime_used=settings.MODEL_RUNTIME,
             metrics=metrics,
+            grounding_score=ctx.get("grounding_score"),
+            citations_parsed=ctx.get("citations_parsed"),
+            citation_contract_violated=bool(ctx.get("citation_contract_violated")),
         )
 
 

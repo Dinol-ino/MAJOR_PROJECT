@@ -55,6 +55,8 @@ pnpm-debug.log*
 # Databases / Vector Stores / Local Persistence
 # ------------------------------------------------------------
 chroma_db/
+# Original uploaded case documents (privileged client data - never commit)
+vault_files/
 chroma-data/
 *.db
 *.db-journal
@@ -237,3 +239,4 @@ frontend/*.png
 
 # E2E session state (contains a live auth token)
 frontend/e2e/.auth/
+_to_delete/

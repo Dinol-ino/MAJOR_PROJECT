@@ -424,7 +424,9 @@ class ModelProvisioningService:
         # directly, so the host-disk free space visible here is used as proxy
         # (same Docker host disk backs both containers).
         try:
-            usage = shutil.disk_usage(os.getenv("MODELS_DISK_PATH", os.getcwd()))
+            from app.services.telemetry import models_disk_path
+
+            usage = shutil.disk_usage(models_disk_path())
             free_bytes = getattr(usage, "free", None)
             if free_bytes is None:
                 free_bytes = usage[2]
@@ -650,4 +652,4 @@ def get_provisioning_service() -> ModelProvisioningService:
     global _provisioning_service
     if _provisioning_service is None:
         _provisioning_service = ModelProvisioningService()
-    return _provisioning_service
+    return _provisioning_service

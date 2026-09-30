@@ -36,6 +36,12 @@ allowed_domains:
     rate_limit_per_minute: 10
     requires_approval: false
 
+  - domain: "webapi.ecourtsindia.com"
+    category: "Case Records (partner API)"
+    description: "eCourtsIndia partner API: case metadata and order text. Requires ECOURTSINDIA_API_KEY."
+    rate_limit_per_minute: 20
+    requires_approval: false
+
 denied_patterns:
   - "*.blogspot.com"
   - "*.wordpress.com"

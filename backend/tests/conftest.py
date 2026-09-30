@@ -16,6 +16,7 @@ if os.environ.get("DFRAG_TEST_USE_ENV") != "1":
     os.environ["SQLITE_DB_PATH"] = os.path.join(_TMP, "dfrag_test.db")
     os.environ["CHROMA_PERSIST_DIR"] = os.path.join(_TMP, "chroma")
     os.environ["BM25_INDEX_DIR"] = os.path.join(_TMP, "bm25")
+    os.environ["VAULT_FILES_DIR"] = os.path.join(_TMP, "vault_files")
     os.environ["PROVISIONING_DB_PATH"] = os.path.join(_TMP, "provisioning.db")
     # Nothing listens on the discard port: runtime calls fail fast instead of hitting a real Ollama.
     os.environ["OLLAMA_URL"] = "http://127.0.0.1:9"
@@ -25,7 +26,17 @@ if os.environ.get("DFRAG_TEST_USE_ENV") != "1":
     os.environ["AUTO_PULL_ON_STARTUP"] = "false"
     os.environ["MODEL_WARMUP_ON_STARTUP"] = "false"
     os.environ["CLOUD_FALLBACK_ENABLED"] = "false"
-    os.environ["ACTS_RAW_DIR"] = os.path.join(_REPO_ROOT, "data", "acts_raw")
+    _acts_dir = os.environ.get("ACTS_RAW_DIR", "")
+    if not _acts_dir or not os.path.isdir(_acts_dir):
+        for _candidate in (
+            os.path.join(_REPO_ROOT, "data", "acts_raw"),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "acts_raw")),
+            "/workspace/data/acts_raw",
+        ):
+            if os.path.isdir(_candidate):
+                _acts_dir = _candidate
+                break
+    os.environ["ACTS_RAW_DIR"] = _acts_dir or os.path.join(_REPO_ROOT, "data", "acts_raw")
     os.environ.setdefault("JWT_SECRET_KEY", "test-only-signing-key-not-used-outside-pytest-0123456789")
     os.environ.setdefault("SECRET_KEY", "test-only-vault-key-not-used-outside-pytest-0123456789")
     # The suite registers many distinct users to prove tenant isolation; production

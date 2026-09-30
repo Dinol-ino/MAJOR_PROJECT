@@ -75,9 +75,19 @@ class Layer2TrustedContext:
         elif effort == "high":
             effort_instruction = "\nYou MUST emit <deep_thinking> reasoning before answering.\n"
 
+        # The citation rule lives in the system prompt, thousands of tokens before the
+        # model starts generating. Small models weight what they read last, and were
+        # dropping the rule entirely by the time they answered. Repeating it in one line
+        # immediately before "Answer:" puts it at the strongest position available.
+        citation_reminder = (
+            "Reminder: end every factual sentence with a citation token copied from a "
+            "<data> block above, in the form [^S:slug|section]. No sources list."
+        )
         prompt = (
             f"{v4_prompt}\n{effort_instruction}\n\n"
             f"<retrieved_evidence>\n{context_data}\n</retrieved_evidence>\n\n"
-            f"User Question: {safe_question}\nAnswer:"
+            f"User Question: {safe_question}\n"
+            f"{citation_reminder}\n"
+            f"Answer:"
         )
         return prompt

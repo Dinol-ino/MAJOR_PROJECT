@@ -153,14 +153,14 @@ export default function StatuteLibraryView({ onAskCopilot, onViewInGraph }) {
               title="Sync enactments across connected MCP servers"
             >
               <RefreshIcon size={12} className={syncing ? "spin-icon" : ""} />
-              <span>{syncing ? 'Syncing...' : 'Sync MCP'}</span>
+              <span>{syncing ? 'Refreshing...' : 'Refresh library'}</span>
             </button>
           </div>
 
           {/* Sync warning if fewer than 10 acts */}
           {syncWarning && (
             <div style={{ padding: '8px 10px', background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '6px', fontSize: '0.72rem', color: '#f59e0b', marginBottom: '10px' }}>
-              ⚠️ Coverage warning: Fewer than 10 acts loaded. Click "Sync MCP" to populate all Indian statutes.
+              ⚠️ Coverage warning: Fewer than 10 acts loaded. Click "Refresh library" to re-index the statutes stored on this machine.
             </div>
           )}
 
@@ -347,9 +347,22 @@ export default function StatuteLibraryView({ onAskCopilot, onViewInGraph }) {
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-subtle)', padding: '2px 8px', borderRadius: '12px' }}>
                   {selectedStatute.coverage_display || `${selectedStatute.sections ? selectedStatute.sections.length : 0} of ${selectedStatute.section_count || 0} indexed`}
                 </span>
-                <div style={{ fontSize: '0.72rem', color: 'var(--defense-pass, #10b981)', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>
-                  ✓ Verified current ({selectedStatute.currency_checked_at ? new Date(selectedStatute.currency_checked_at).toLocaleDateString() : '2026'})
-                </div>
+                {(() => {
+                  // Only claim verification the corpus manifest actually records. An unchecked
+                  // Act must read as unchecked - a legal tool cannot imply currency it has not verified.
+                  const checkedAt = selectedStatute.verified_at || selectedStatute.currency_checked_at;
+                  const status = selectedStatute.legal_status;
+                  const verified = Boolean(checkedAt) && status && status !== 'unverified';
+                  return verified ? (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--defense-pass, #10b981)', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>
+                      ✓ Checked against official text ({new Date(checkedAt).toLocaleDateString()})
+                    </div>
+                  ) : (
+                    <div title="This excerpt has not been compared with the official India Code text. Verify before relying on it." style={{ fontSize: '0.72rem', color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>
+                      Not yet verified against official text
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 

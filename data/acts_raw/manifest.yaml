@@ -12,106 +12,149 @@
 # source URL, version or dates.
 
 acts:
-  BNS_2023.txt:
-    slug: bns_2023
-    title: "Bharatiya Nyaya Sanhita, 2023"
-    year: 2023
-    domain: criminal
-    jurisdiction: "India / Union"
-    source_url: "https://www.indiacode.nic.in/handle/123456789/20062"
-    source_version: "Act No. 45 of 2023"
-    publication_date: ""
-    legal_status: unverified
-    verified_at: ""
-    notes: "Local excerpt. Not yet diffed against source_url; set legal_status/verified_at only after checking."
-
   BNSS_2023.txt:
-    slug: bnss_2023
-    title: "Bharatiya Nagarik Suraksha Sanhita, 2023"
-    year: 2023
     domain: criminal_procedure
-    jurisdiction: "India / Union"
-    source_url: "https://www.indiacode.nic.in/handle/123456789/20099"
-    source_version: "Act No. 46 of 2023"
-    publication_date: ""
+    jurisdiction: India / Union
     legal_status: unverified
-    verified_at: ""
-    notes: "Local excerpt. Not yet diffed against source_url; set legal_status/verified_at only after checking."
-
+    notes: Local excerpt. Not yet diffed against source_url; set legal_status/verified_at
+      only after checking.
+    publication_date: ''
+    slug: bnss_2023
+    source_url: https://www.indiacode.nic.in/handle/123456789/20099
+    source_version: Act No. 46 of 2023
+    title: Bharatiya Nagarik Suraksha Sanhita, 2023
+    verified_at: ''
+    year: 2023
+  BNS_2023.txt:
+    domain: criminal
+    jurisdiction: India / Union
+    legal_status: unverified
+    notes: Local excerpt. Not yet diffed against source_url; set legal_status/verified_at
+      only after checking.
+    publication_date: ''
+    slug: bns_2023
+    source_url: https://www.indiacode.nic.in/handle/123456789/20062
+    source_version: Act No. 45 of 2023
+    title: Bharatiya Nyaya Sanhita, 2023
+    verified_at: ''
+    year: 2023
   BSA_2023.txt:
-    slug: bsa_2023
-    title: "Bharatiya Sakshya Adhiniyam, 2023"
-    year: 2023
     domain: evidence
-    jurisdiction: "India / Union"
-    source_url: "https://www.indiacode.nic.in/handle/123456789/20063"
-    source_version: "Act No. 47 of 2023"
-    publication_date: ""
+    jurisdiction: India / Union
     legal_status: unverified
-    verified_at: ""
-    notes: "Local excerpt. Not yet diffed against source_url; set legal_status/verified_at only after checking."
-
-  Companies_Act_2013.txt:
-    slug: companies_act_2013
-    title: "Companies Act, 2013"
-    year: 2013
-    domain: corporate
-    jurisdiction: "India / Union"
-    source_url: "https://www.indiacode.nic.in/handle/123456789/2114"
-    source_version: "Act No. 18 of 2013"
-    publication_date: ""
-    legal_status: unverified
-    verified_at: ""
-    notes: "Local excerpt. Heavily amended since enactment - confirm the amendment state before relying on it."
-
-  Consumer_Protection_Act_2019.txt:
-    slug: consumer_protection_act_2019
-    title: "Consumer Protection Act, 2019"
-    year: 2019
-    domain: consumer
-    jurisdiction: "India / Union"
-    source_url: "https://www.indiacode.nic.in/handle/123456789/18964"
-    source_version: "Act No. 35 of 2019"
-    publication_date: ""
-    legal_status: unverified
-    verified_at: ""
-    notes: "Local excerpt. Not yet diffed against source_url; set legal_status/verified_at only after checking."
-
-  Contract_Act_1872.txt:
-    slug: indian_contract_act_1872
-    title: "Indian Contract Act, 1872"
-    year: 1872
-    domain: contract
-    jurisdiction: "India / Union"
-    source_url: "https://www.indiacode.nic.in/handle/123456789/12845"
-    source_version: "Act No. 9 of 1872"
-    publication_date: ""
-    legal_status: unverified
-    verified_at: ""
-    notes: "Local excerpt. Not yet diffed against source_url; set legal_status/verified_at only after checking."
-
-  DPDPA_2023.txt:
-    slug: dpdpa_2023
-    title: "Digital Personal Data Protection Act, 2023"
+    notes: Local excerpt. Not yet diffed against source_url; set legal_status/verified_at
+      only after checking.
+    publication_date: ''
+    slug: bsa_2023
+    source_url: https://www.indiacode.nic.in/handle/123456789/20063
+    source_version: Act No. 47 of 2023
+    title: Bharatiya Sakshya Adhiniyam, 2023
+    verified_at: ''
     year: 2023
+  Companies_Act_2013.txt:
+    domain: corporate
+    jurisdiction: India / Union
+    legal_status: unverified
+    notes: Local excerpt. Heavily amended since enactment - confirm the amendment
+      state before relying on it.
+    publication_date: ''
+    slug: companies_act_2013
+    source_url: https://www.indiacode.nic.in/handle/123456789/2114
+    source_version: Act No. 18 of 2013
+    title: Companies Act, 2013
+    verified_at: ''
+    year: 2013
+  Consumer_Protection_Act_2019.txt:
+    domain: consumer
+    jurisdiction: India / Union
+    legal_status: unverified
+    notes: Local excerpt. Not yet diffed against source_url; set legal_status/verified_at
+      only after checking.
+    publication_date: ''
+    slug: consumer_protection_act_2019
+    source_url: https://www.indiacode.nic.in/handle/123456789/18964
+    source_version: Act No. 35 of 2019
+    title: Consumer Protection Act, 2019
+    verified_at: ''
+    year: 2019
+  Contract_Act_1872.txt:
+    domain: contract
+    jurisdiction: India / Union
+    legal_status: unverified
+    notes: Local excerpt. Not yet diffed against source_url; set legal_status/verified_at
+      only after checking.
+    publication_date: ''
+    slug: indian_contract_act_1872
+    source_url: https://www.indiacode.nic.in/handle/123456789/12845
+    source_version: Act No. 9 of 1872
+    title: Indian Contract Act, 1872
+    verified_at: ''
+    year: 1872
+  DPDPA_2023.txt:
     domain: data_protection
-    jurisdiction: "India / Union"
-    source_url: "https://www.indiacode.nic.in/handle/123456789/22037"
-    source_version: "Act No. 22 of 2023"
-    publication_date: ""
+    jurisdiction: India / Union
     legal_status: unverified
-    verified_at: ""
-    notes: "Local excerpt. Provisions are commenced in phases - confirm which are in force before relying on it."
-
+    notes: Local excerpt. Provisions are commenced in phases - confirm which are in
+      force before relying on it.
+    publication_date: ''
+    slug: dpdpa_2023
+    source_url: https://www.indiacode.nic.in/handle/123456789/22037
+    source_version: Act No. 22 of 2023
+    title: Digital Personal Data Protection Act, 2023
+    verified_at: ''
+    year: 2023
   IT_Act.txt:
-    slug: it_act_2000
-    title: "Information Technology Act, 2000"
-    year: 2000
     domain: cyber
-    jurisdiction: "India / Union"
-    source_url: "https://www.indiacode.nic.in/handle/123456789/1999"
-    source_version: "Act No. 21 of 2000"
-    publication_date: "2000-06-09"
+    jurisdiction: India / Union
     legal_status: unverified
-    verified_at: ""
-    notes: "Local text copy; excerpted. Verify against the official India Code text before relying on it."
+    notes: Local text copy; excerpted. Verify against the official India Code text
+      before relying on it.
+    publication_date: '2000-06-09'
+    slug: it_act_2000
+    source_url: https://www.indiacode.nic.in/handle/123456789/1999
+    source_version: Act No. 21 of 2000
+    title: Information Technology Act, 2000
+    verified_at: ''
+    year: 2000
+  the_code_of_criminal_procedure_1973.txt:
+    legal_status: unverified
+    source_url: https://github.com/nyaayaIN/laws-of-india/blob/8a84a7fa62695c73211936464e4494f6fcdea4ef/consolidated/The
+      Code of Criminal Procedure, 1973.xml
+    source_version: laws-of-india@8a84a7fa6269; license CC BY-NC-SA 4.0 (non-commercial)
+    title: The Code Of Criminal Procedure, 1973
+    year: 1973
+    notes: Community-converted text (laws-of-india). Repealed prospectively by BNSS
+      2023 w.e.f. 1 July 2024; relevant to conduct before that date. Not diffed against
+      India Code.
+    domain: criminal
+    jurisdiction: India / Union
+  the_indian_evidence_act_1872.txt:
+    legal_status: unverified
+    source_url: https://github.com/nyaayaIN/laws-of-india/blob/8a84a7fa62695c73211936464e4494f6fcdea4ef/consolidated/The
+      Indian Evidence Act, 1872.xml
+    source_version: laws-of-india@8a84a7fa6269; license CC BY-NC-SA 4.0 (non-commercial)
+    title: The Indian Evidence Act, 1872
+    year: 1872
+    notes: Community-converted text (laws-of-india). Repealed prospectively by BSA
+      2023 w.e.f. 1 July 2024; relevant to conduct before that date. Not diffed against
+      India Code.
+    domain: criminal
+    jurisdiction: India / Union
+  the_indian_penal_code.txt:
+    legal_status: unverified
+    source_url: https://github.com/nyaayaIN/laws-of-india/blob/8a84a7fa62695c73211936464e4494f6fcdea4ef/consolidated/The
+      Indian Penal Code, 1860.xml
+    source_version: laws-of-india@8a84a7fa6269; license CC BY-NC-SA 4.0 (non-commercial)
+    title: The Indian Penal Code
+    notes: Community-converted text (laws-of-india). Repealed prospectively by BNS
+      2023 w.e.f. 1 July 2024; relevant to conduct before that date. Not diffed against
+      India Code.
+    domain: criminal
+    jurisdiction: India / Union
+  the_negotiable_instruments_act_1881.txt:
+    legal_status: unverified
+    source_url: https://github.com/nyaayaIN/laws-of-india/blob/8a84a7fa62695c73211936464e4494f6fcdea4ef/consolidated/The
+      Negotiable Instruments Act, 1881.xml
+    source_version: laws-of-india@8a84a7fa6269; license CC BY-NC-SA 4.0 (non-commercial)
+    title: The Negotiable Instruments Act, 1881
+    year: 1881

@@ -15,7 +15,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from app.config import settings
+from app.config import settings
+from app.db.models import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class ModelStateService:
             now = time.monotonic()
             if not force and self._tags_cache and now - self._tags_cache_at < settings.model.tags_cache_seconds:
                 return self._tags_cache
-            result: Dict[str, Any] = {"online": False, "models": [], "checked_at": datetime.utcnow().isoformat() + "Z"}
+            result: Dict[str, Any] = {"online": False, "models": [], "checked_at": utcnow().isoformat()}
             try:
                 async with httpx.AsyncClient(timeout=settings.model.probe_timeout_seconds) as client:
                     resp = await client.get(f"{settings.OLLAMA_URL.rstrip('/')}/api/tags")
@@ -115,7 +116,7 @@ class ModelStateService:
             rec = session.query(SystemSetting).filter_by(key=_ACTIVE_MODEL_KEY).first()
             if rec:
                 rec.encrypted_value = model  # model tags are not secret; column name is historical
-                rec.updated_at = datetime.utcnow()
+                rec.updated_at = utcnow()
             else:
                 session.add(SystemSetting(key=_ACTIVE_MODEL_KEY, encrypted_value=model))
 
@@ -156,11 +157,6 @@ class ModelStateService:
             return requested
         active = await self.get_active()
         if active["model"]:
-            # Deliberately returned even when get_active() reports available=False.
-            # The pipeline must still run: retrieval happens, the evidence is shown, and
-            # the model failure is reported downstream as failure_kind="model_unavailable"
-            # with its sources intact. Raising here instead would turn an honest degraded
-            # answer into a bare 409 and throw the retrieved evidence away.
             return active["model"]
         raise ModelNotAvailable(
             "No local model is active. Open Hardware & Models to download or activate one.",
@@ -198,7 +194,7 @@ class ModelStateService:
             self._active_loaded = True
             self._last_activation = {
                 "model": match["name"],
-                "activated_at": datetime.utcnow().isoformat() + "Z",
+                "activated_at": utcnow().isoformat(),
                 "load_ms": warm.get("load_ms"),
                 "activation_ms": round((time.perf_counter() - t0) * 1000, 1),
             }

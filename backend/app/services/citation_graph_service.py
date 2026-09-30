@@ -5,7 +5,8 @@ import logging
 from typing import Dict, Any, List, Optional, Set, Tuple
 from datetime import datetime
 
-from app.db.engine import get_sync_session, get_sync_engine
+from app.db.engine import get_sync_session, get_sync_engine
+from app.db.models import utcnow
 from app.db.models import CitationEdge, Statute, StatuteSection
 from app.config import settings
 from app.system.hardware_detector import HardwareDetector
@@ -227,14 +228,14 @@ class CitationGraphService:
                     conversation_id=conversation_id,
                     message_id=message_id,
                     confidence=1.0,
-                    created_at=datetime.utcnow()
+                    created_at=utcnow()
                 ))
                 edges_added += 1
 
                 # Edge 2: Message/Doc -> Section (Cites / referenced_in_matter)
                 session.add(CitationEdge(
                     id=str(uuid.uuid4()),
-                    src_type=f"doc:{conversation_id}" if is_user_document else f"msg:{message_id}",
+                    src_type="document" if is_user_document else "message",
                     src_key=f"doc:{conversation_id}" if is_user_document else f"msg:{message_id}",
                     dst_type="section",
                     dst_key=sec_key,
@@ -244,7 +245,7 @@ class CitationGraphService:
                     conversation_id=conversation_id,
                     message_id=message_id,
                     confidence=1.0,
-                    created_at=datetime.utcnow()
+                    created_at=utcnow()
                 ))
                 edges_added += 1
 
@@ -265,7 +266,7 @@ class CitationGraphService:
                             conversation_id=conversation_id,
                             message_id=message_id,
                             confidence=1.0,
-                            created_at=datetime.utcnow()
+                            created_at=utcnow()
                         ))
                         edges_added += 1
 
@@ -285,7 +286,7 @@ class CitationGraphService:
                             conversation_id=conversation_id,
                             message_id=message_id,
                             confidence=0.85,
-                            created_at=datetime.utcnow()
+                            created_at=utcnow()
                         ))
                         edges_added += 1
 
@@ -338,7 +339,7 @@ class CitationGraphService:
                         sec_label=sec_label,
                         derivation_method=DERIVATION_CORPUS_STRUCTURE,
                         origin="llm_citation",
-                        ts=datetime.utcnow().isoformat()
+                        ts=utcnow().isoformat()
                     )
         except Exception as exc:
             logger.debug(f"Memgraph write-through notice: {exc}")
@@ -389,7 +390,18 @@ class CitationGraphService:
                         "hardware_tier": tier
                     }
                 query = query.filter_by(conversation_id=conversation_id)
-            elif scope == "vault" and vault_id:
+            elif scope == "vault" and not vault_id:
+                # No vault selected is an empty state. It used to fall through with an
+                # unfiltered query and returned every edge in the database (all users').
+                return {
+                    "nodes": [],
+                    "links": [],
+                    "empty_state": True,
+                    "scope": scope,
+                    "backend_used": backend_name,
+                    "hardware_tier": tier
+                }
+            elif scope == "vault":
                 from app.db.models import Conversation
                 conv_ids = [c.conversation_id for c in session.query(Conversation).filter_by(project_vault_id=vault_id).all()]
                 if allowed_conversation_ids is not None:
@@ -411,6 +423,16 @@ class CitationGraphService:
                         CitationEdge.conversation_id.is_(None)
                         | CitationEdge.conversation_id.in_(allowed_conversation_ids or ["__none__"])
                     )
+            else:
+                # Unknown scope: never fall through to an unfiltered query.
+                return {
+                    "nodes": [],
+                    "links": [],
+                    "empty_state": True,
+                    "scope": scope,
+                    "backend_used": backend_name,
+                    "hardware_tier": tier
+                }
 
             edges = query.order_by(CitationEdge.created_at.desc()).limit(200).all()
 

@@ -28,8 +28,8 @@ if os.path.exists(_root_env):
 
 class ModelConfig(BaseModel):
     ollama_url: str = Field(default_factory=lambda: os.getenv("OLLAMA_URL", "http://127.0.0.1:11434"))
-    default_model: str = Field(default_factory=lambda: os.getenv("DEFAULT_MODEL", "gemma2:2b"))
-    fallback_model: str = Field(default_factory=lambda: os.getenv("OLLAMA_FALLBACK_MODEL", "qwen2.5:3b"))
+    default_model: str = Field(default_factory=lambda: os.getenv("DEFAULT_MODEL", "qwen2.5:3b"))
+    fallback_model: str = Field(default_factory=lambda: os.getenv("OLLAMA_FALLBACK_MODEL", ""))
     hf_token: str = Field(default_factory=lambda: os.getenv("HF_TOKEN", ""))
     connect_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_CONNECT_TIMEOUT_SECONDS", "2.0")))
     generation_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_GENERATION_TIMEOUT_SECONDS", "30.0")))
@@ -40,6 +40,9 @@ class ModelConfig(BaseModel):
     context_tokens: int = Field(default_factory=lambda: int(os.getenv("GENERATOR_CONTEXT_TOKENS", "8192")))
     max_output_tokens: int = Field(default_factory=lambda: int(os.getenv("GENERATOR_MAX_OUTPUT_TOKENS", "2048")))
     models_dir: str = Field(default_factory=lambda: os.getenv("MODELS_DIR", "./models"))
+    # How long Ollama keeps the model in memory after a request. Its own default is 5 minutes, so
+    # a lawyer who pauses to read an answer paid the full model-load time on the next question.
+    keep_alive: str = Field(default_factory=lambda: os.getenv("OLLAMA_KEEP_ALIVE", "30m"))
     routing_enabled: bool = Field(default_factory=lambda: os.getenv("MODEL_ROUTING_ENABLED", "true").lower() == "true")
     model_warmup_on_startup: bool = Field(default_factory=lambda: os.getenv("MODEL_WARMUP_ON_STARTUP", "true").lower() == "true")
     # Downloads are an explicit user action by default. Opting in via env is itself an explicit operator decision.
@@ -79,6 +82,14 @@ class SecurityConfig(BaseModel):
     # The unshielded baseline bypasses Layers 1-3 and exists only for offline security evaluation.
     allow_unshielded_baseline: bool = Field(default_factory=lambda: os.getenv("ALLOW_UNSHIELDED_BASELINE", "false").lower() == "true")
     allow_credentials: bool = Field(default_factory=lambda: os.getenv("ALLOW_CREDENTIALS", "true").lower() == "true")
+    # How a broken citation contract is handled when the model returns a substantive
+    # answer over real evidence but emits no parseable [^S:...] token.
+    #   "warn"  - answer is returned, flagged, and its grounding score surfaced (default)
+    #   "block" - answer is quarantined like any other Layer 3 failure
+    # Never silently ignored: silence is what made this undetectable before.
+    citation_contract_mode: str = Field(default_factory=lambda: os.getenv("CITATION_CONTRACT_MODE", "warn").lower())
+    # Minimum grounding score (0-100) an answer must reach before it is flagged as weakly grounded.
+    min_grounding_score: float = Field(default_factory=lambda: float(os.getenv("MIN_GROUNDING_SCORE", "50")))
 
 
 
@@ -90,6 +101,12 @@ class RetrievalConfig(BaseModel):
     bm25_index_dir: str = Field(default_factory=lambda: os.getenv("BM25_INDEX_DIR", os.path.join(_BASE_DIR, "bm25_index")))
     max_file_size_mb: int = Field(default_factory=lambda: int(os.getenv("MAX_FILE_SIZE_MB", "10")))
     max_file_pages: int = Field(default_factory=lambda: int(os.getenv("MAX_FILE_PAGES", "100")))
+    # "truncate" ingests the first max_file_pages pages and records the truncation;
+    # "reject" refuses the whole document, which is what the ingester used to do.
+    # Either way the page budget is bounded, so extraction cost is unchanged.
+    pdf_page_overflow_mode: str = Field(
+        default_factory=lambda: (os.getenv("PDF_PAGE_OVERFLOW_MODE") or "truncate").strip().lower()
+    )
     retrieval_embeddings: str = Field(default_factory=lambda: os.getenv("RETRIEVAL_EMBEDDINGS", "local"))  # local | model
     embedding_model_name: str = Field(default_factory=lambda: os.getenv("EMBEDDING_MODEL_NAME", "BAAI/bge-small-en"))
     citation_text_max_chars: int = Field(default_factory=lambda: int(os.getenv("CITATION_TEXT_MAX_CHARS", "500")))
@@ -99,7 +116,17 @@ class RetrievalConfig(BaseModel):
     pageindex_routing_heuristic: bool = True
     dedup_similarity_threshold: float = 0.85
     exclude_superseded: bool = True
+    # Share of a query's distinctive terms a chunk must contain to count as evidence for it.
+    agentic_retrieval_enabled: bool = Field(default_factory=lambda: os.getenv("AGENTIC_RETRIEVAL_ENABLED", "false").strip().lower() in ("1", "true", "yes"))
+    evidence_min_term_coverage: float = Field(default_factory=lambda: float(os.getenv("EVIDENCE_MIN_TERM_COVERAGE", "0.34")))
+    # Dense-only hits (no lexical support) are kept only above this similarity. Uncalibrated
+    # default: tune against your embedding model with the evaluation harness.
+    vault_dense_min_score: float = Field(default_factory=lambda: float(os.getenv("VAULT_DENSE_MIN_SCORE", "0.6")))
     vault_max_files: int = Field(default_factory=lambda: int(os.getenv("VAULT_MAX_FILES", "10")))
+    # Canonical home of the ORIGINAL uploaded documents. Chroma/BM25 are derived indexes
+    # that can be rebuilt from these files; nothing here is ever removed by cache eviction,
+    # re-indexing, a model switch or a restart - only by an explicit delete.
+    vault_files_dir: str = Field(default_factory=lambda: os.getenv("VAULT_FILES_DIR", os.path.join(_BASE_DIR, "vault_files")))
 
 
 class MemoryConfig(BaseModel):
@@ -310,6 +337,10 @@ class Settings(BaseModel):
     @property
     def TRANSCRIPT_DB_PATH(self) -> str:
         return self.memory.transcript_db_path
+
+    @property
+    def VAULT_FILES_DIR(self) -> str:
+        return self.retrieval.vault_files_dir
 
     @property
     def MAX_FILE_SIZE_MB(self) -> int:

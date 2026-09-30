@@ -109,8 +109,12 @@ def test_restart_job_recovery(tmp_path):
 
 
 def test_provisioning_api_endpoints():
-    # 1. Start provisioning
-    with patch("app.services.provisioning_service.ModelProvisioningService._run_provisioning", new_callable=AsyncMock):
+    # 1. Start provisioning. Preflight is stubbed so the test does not depend on the RAM/disk of
+    #    whichever machine runs it (a small CI runner would legitimately refuse the download);
+    #    the refusal itself is covered by test_preflight_refuses_a_model_that_does_not_fit.
+    with patch("app.services.provisioning_service.ModelProvisioningService.preflight",
+               return_value={"ok": True, "message": "ok", "fit": {}}), \
+            patch("app.services.provisioning_service.ModelProvisioningService._run_provisioning", new_callable=AsyncMock):
         resp = client.post("/api/models/provision", json={"model_id": "qwen2.5:3b", "auto": True})
         assert resp.status_code == 200
         data = resp.json()
@@ -132,3 +136,57 @@ def test_provisioning_api_endpoints():
         cancel_resp = client.post(f"/api/models/provision/{job_id}/cancel")
         assert cancel_resp.status_code == 200
         assert cancel_resp.json()["status"] == "cancelled"
+
+
+def _hw(ram_avail_gb, free_gb=200.0):
+    return HardwareProfile(cpu_cores=8, cpu_name="test-cpu", ram_total_gb=ram_avail_gb + 2,
+                           ram_available_gb=ram_avail_gb, gpu_available=False, gpu_name=None,
+                           gpu_vram_gb=None, gpu_backend=None, storage_free_gb=free_gb,
+                           platform_name="linux", supports_avx2=True)
+
+
+def test_preflight_refuses_a_model_that_does_not_fit(tmp_path):
+    svc = ModelProvisioningService(db_path=str(tmp_path / "p.db"))
+    with patch.object(svc.hw_detector, "detect", return_value=_hw(1.0)):
+        res = svc.preflight("qwen2.5:3b")
+    assert res["ok"] is False and "too large" in res["message"]
+
+
+def test_preflight_accepts_a_model_that_fits_when_storage_is_sufficient(tmp_path):
+    svc = ModelProvisioningService(db_path=str(tmp_path / "p.db"))
+    with patch.object(svc.hw_detector, "detect", return_value=_hw(32.0)), \
+            patch.object(svc, "_check_storage", return_value=(True, "ok")):
+        res = svc.preflight("qwen2.5:3b")
+    assert res["ok"] is True
+
+
+def test_preflight_refuses_when_disk_is_too_small(tmp_path):
+    svc = ModelProvisioningService(db_path=str(tmp_path / "p.db"))
+    with patch.object(svc.hw_detector, "detect", return_value=_hw(32.0)), \
+            patch("app.services.telemetry.models_disk_path", return_value=str(tmp_path)), \
+            patch("shutil.disk_usage", return_value=(100 * 1024**3, 99 * 1024**3, 1 * 1024**3)):
+        res = svc.preflight("qwen2.5:3b")
+    assert res["ok"] is False and "Insufficient storage" in res["message"]
+
+
+def test_generation_requests_keep_the_model_resident():
+    """Every generate call must carry keep_alive, or Ollama unloads the model after 5 idle minutes."""
+    import asyncio
+    import httpx
+    from app.config import settings
+    from app.model.ollama_client import OllamaClient
+
+    seen = {}
+
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): return {"response": "ok", "eval_count": 1, "eval_duration": 1_000_000}
+
+    async def fake_post(self, url, json=None, **kw):
+        seen.update(json or {})
+        return _Resp()
+
+    with patch.object(httpx.AsyncClient, "post", fake_post):
+        client_ = OllamaClient()
+        asyncio.run(client_.generate("hi", model="qwen2.5:3b"))
+    assert seen.get("keep_alive") == settings.model.keep_alive and seen["keep_alive"]

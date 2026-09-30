@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.config import settings
@@ -8,7 +8,9 @@ from app.mcp.tool_registry import tool_registry
 from app.mcp.policy_engine import policy_engine
 from app.mcp.gateway import mcp_gateway, MCPResponse
 from app.db.engine import get_sync_session
-from app.db.models import MCPToolCall
+from app.db.models import MCPToolCall, Conversation
+from app.routes.auth import get_current_user
+from app.security.ownership import claim_session, current_user_id, is_admin
 
 from app.mcp.server_manager import mcp_server_manager
 
@@ -84,14 +86,24 @@ def discover_mcp_tools():
 
 
 @router.post("/tool-call", response_model=MCPResponse)
-def execute_tool_call(request: MCPToolCallRequest):
+def execute_tool_call(request: MCPToolCallRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Executes a tool call through Policy Engine, Permission Layer, Gateway,
     Context Sanitizer, and Cryptographic Audit Ledger.
     """
+    # The session must exist and belong to the caller; the verified id (never a client-supplied
+    # argument) is what session-scoped tools receive.
+    # A shared literal default would let the first caller own it; scope it per user instead.
+    if not request.session_id or request.session_id == "default_session":
+        request.session_id = f"mcp_{current_user_id(current_user)}"[:64]
+    with get_sync_session() as db:
+        claim_session(db, request.session_id, current_user)
+    arguments = dict(request.arguments)
+    if "session_id" in arguments:
+        arguments["session_id"] = request.session_id
     response = mcp_gateway.execute_tool(
         tool_name=request.tool_name,
-        arguments=request.arguments,
+        arguments=arguments,
         session_id=request.session_id,
         network_mode=None,
     )
@@ -99,11 +111,16 @@ def execute_tool_call(request: MCPToolCallRequest):
 
 
 @router.get("/history")
-def get_mcp_history(limit: int = Query(default=50, ge=1, le=200)):
+def get_mcp_history(limit: int = Query(default=50, ge=1, le=200), current_user: Dict[str, Any] = Depends(get_current_user)):
     """Fetches recent MCP tool invocation telemetry and audit logs."""
     try:
         with get_sync_session() as session:
-            calls = session.query(MCPToolCall).order_by(MCPToolCall.id.desc()).limit(limit).all()
+            q = session.query(MCPToolCall)
+            if not is_admin(current_user):
+                owned = session.query(Conversation.conversation_id).filter(
+                    Conversation.user_id == current_user_id(current_user))
+                q = q.filter(MCPToolCall.session_id.in_(owned))
+            calls = q.order_by(MCPToolCall.id.desc()).limit(limit).all()
             return {"total": len(calls), "history": [c.to_dict() for c in calls]}
     except Exception as e:
         logger.error(f"Error fetching MCP history: {e}")
